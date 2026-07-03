@@ -1,0 +1,73 @@
+---
+import Layout from '../layouts/Layout.astro';
+
+const posts = [
+  {
+    title: 'Hello, alpha-lab',
+    date: '2026-07-03',
+    slug: 'hello-alpha-lab',
+    summary: '本站啟動。第一篇 placeholder,風格待確認。',
+  },
+];
+
+const today = new Date().toISOString().slice(0, 10);
+---
+
+<Layout title="alpha-lab — 知名投資人研究">
+  <header>
+    <h1>alpha-lab</h1>
+    <p class="tagline">研究知名投資人的觀點、論點、與市場直覺</p>
+  </header>
+
+  <section>
+    <h2>Posts</h2>
+    <ul class="post-list">
+      {posts.map(post => (
+        <li>
+          <a href={`/posts/${post.slug}/`}>{post.title}</a>
+          <span class="date">{post.date}</span>
+          <p>{post.summary}</p>
+        </li>
+      ))}
+    </ul>
+  </section>
+
+  <footer>
+    <p>
+      更新於
+      {today}
+    </p>
+  </footer>
+</Layout>
+
+<style>
+
+
+
+
+
+
+
+
+
+
+  header { margin-bottom: 3rem; }
+  h1 { font-size: 2.5rem; margin: 0 0 0.5rem; }
+  .tagline { color: #666; font-size: 1.1rem; margin: 0; }
+  .post-list { list-style: none; padding: 0; }
+  .post-list li { margin-bottom: 2rem; padding-bottom: 1.5rem; border-bottom: 1px solid #eee; }
+  .post-list a { font-size: 1.3rem; font-weight: 600; text-decoration: none; color: #111; }
+  .post-list a:hover { text-decoration: underline; }
+  .date { color: #999; font-size: 0.9rem; margin-left: 1rem; }
+  footer { margin-top: 4rem; color: #999; font-size: 0.9rem; }
+
+
+
+
+
+
+
+
+
+
+</style>

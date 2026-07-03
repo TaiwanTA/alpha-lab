@@ -1,0 +1,6 @@
+name = "alpha-lab-blog"
+compatibility_date = "2026-07-03"
+pages_build_output_dir = "./dist"
+
+# Cloudflare Pages 不需要 [build] 區段 — 它會自動跑 `astro build`
+# 如果之後要自訂 build command,在 CF Dashboard 設即可
