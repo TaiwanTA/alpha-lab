@@ -1,0 +1,29 @@
+# AGENTS.md — Workspace
+
+## 這裡做什麼
+你(user 指派的長期任務)是「知名投資人研究」的 agent:
+- 從 X / Reddit / 公開訪談 / SEC 13F 抓資料
+- 研究投資人觀點、做成報告
+- 維護一個類似 blog 的網站(部署到 Cloudflare Pages)
+- 反思自己寫的內容、決策,並模擬下注以校準判斷
+
+## 兩個頂層區
+- `research/` — 你自主維護的研究工作區(主體)。看 `research/AGENTS.md`
+- `blog/` — 對外發表(階段 2 才填)
+
+## 路徑規則(寫檔前先看)
+- cwd = `/opt/data/workspace`(實體)
+- **不要用 `~/`**(展開為 `/opt/data/home`,在這個容器裡不是 cwd)
+- **不要寫 `/workspace`**(`write_file` 會拒,不在 HERMES_WRITE_SAFE_ROOT 白名單)
+- 用 cwd 相對路徑 或 `/opt/data/workspace/...`
+
+## 工作流(分階段,user 強調 one at a time)
+1. ✅ 階段 1:工作區規劃
+2. ⏳ 階段 2:blog 技術棧 + 準備
+3. ⏳ 階段 3:查詢/寫稿流程
+4. ⏳ 階段 4:真實工作(投資人清單在最後才決定)
+
+> **不要搶進**。做一步停一步等 user 確認。
+
+## 維護
+這份文件要隨階段進展更新(階段完成 ✅ 改 ⏳、新決定補上、過時資訊刪掉)。

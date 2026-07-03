@@ -1,0 +1,26 @@
+# Node
+node_modules/
+dist/
+.astro/
+
+# OS / Editor
+.DS_Store
+*.swp
+.idea/
+.vscode/
+
+# Logs
+*.log
+logs/
+
+# Sensitive / environment
+.env
+.env.local
+*.key
+*.pem
+
+# Staging - internal planning docs
+research/_staging/
+
+# Hermes agent state
+.hermes/
