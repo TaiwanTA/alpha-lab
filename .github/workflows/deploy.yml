@@ -37,6 +37,16 @@ jobs:
         working-directory: blog
         run: npm run build
 
+      - name: Create Pages project (if not exists)
+        working-directory: blog
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_KEY }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CF_ACCOUNT_ID }}
+        run: |
+          npx wrangler pages project create alpha-lab \
+            --production-branch=main \
+            --compatibility-date=2026-07-03 || echo "Project may already exist; continuing"
+
       - name: Deploy to Cloudflare Pages
         working-directory: blog
         env:

@@ -1,2 +1,3 @@
 name = "alpha-lab"
 compatibility_date = "2026-07-03"
+pages_build_output_dir = "./dist"
