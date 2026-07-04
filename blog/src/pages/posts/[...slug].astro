@@ -41,19 +41,21 @@ const showLastmod = diffDays > 7;
 <Layout title={post.data.title} description={post.data.summary} ogType="article" publishedDate={post.data.date} modifiedDate={post.data.lastmod ?? post.data.date} tags={post.data.tags}>
   <article class="post">
     <header class="post-header">
-      <div class="post-status-row">
-        <span class={`status-badge status-${post.data.status}`}>{statusInfo?.label ?? post.data.status}</span>
-        <span class="post-date">{formatDate(post.data.date)}</span>
-        {showLastmod && lastmodLabel && <span class="post-updated">最後更新於 {lastmodLabel}</span>}
+      <div class="post-eyebrow">
+        <span class={`status-pill status-${post.data.status}`}><span class="pill-dot"></span>{statusInfo?.label ?? post.data.status}</span>
+        <time datetime={post.data.date}>{formatDate(post.data.date)}</time>
+        {showLastmod && lastmodLabel && <span class="updated">更新於 {lastmodLabel}</span>}
+        <span class="wordcount">{stats.words.toLocaleString()} 字 · {Math.max(1, Math.round(stats.minutes))} 分鐘</span>
       </div>
+
       <h1>{post.data.title}</h1>
       {post.data.summary && <p class="lede">{post.data.summary}</p>}
+
       <div class="post-meta">
-        <span>📖 ~{Math.max(1, Math.round(stats.minutes))} 分鐘</span>
-        <span>{stats.words.toLocaleString()} 字</span>
-        {post.data.investors.length > 0 && <span class="meta-investors">提及:{post.data.investors.map((inv: string) => <a href={`/investors/${encodeURIComponent(inv)}/`}>{inv}</a>)}</span>}
-        <a class="meta-tag-link" href="/tags/">Tags:</a>
-        {post.data.tags.map((t: string) => <a class="meta-tag" href={`/tags/${encodeURIComponent(t)}/`}>#{t}</a>)}
+        {post.data.investors.length > 0 && (
+          <span class="meta-row"><span class="meta-key">提及</span><span class="meta-vals">{post.data.investors.map((inv: string, i: number) => <><a href={`/investors/${encodeURIComponent(inv)}/`}>{inv}</a>{i < post.data.investors.length - 1 && ' · '}</>)}</span></span>
+        )}
+        <span class="meta-row"><span class="meta-key">標籤</span><span class="meta-vals tags-vals">{post.data.tags.map((t: string) => <a href={`/tags/${encodeURIComponent(t)}/`} class="tag-pill">#{t}</a>)}</span></span>
       </div>
     </header>
 
@@ -71,113 +73,445 @@ const showLastmod = diffDays > 7;
 
       <div class="post-body">
         {isUnverified && (
-          <div class="banner"><strong>風格示範 / 未驗證</strong> — 這篇文章的具體事實來自 LLM 內建知識,未經原始來源驗證。作為研究示範看風格就好,不應作為投資依據。</div>
+          <aside class="banner">
+            <strong>風格示範 / 未驗證</strong>
+            <p>這篇文章的具體事實來自 LLM 內建知識,未經原始來源驗證。作為研究示範看風格就好,不應作為投資依據。</p>
+          </aside>
         )}
 
         <Content />
 
         {post.data.investmentClaim && (
-          <div class="disclosure"><strong>免責聲明</strong> — 本文涉及對投資人論點/持倉的討論,<strong>不構成投資建議</strong>。所有從該投資人之公開行為推論的「如果我下注」內容,僅是研究方法的展示,非可執行的策略。讀者須自行查證原始來源、自負投資風險。</div>
+          <aside class="disclosure">
+            <strong>免責聲明</strong>
+            <p>本文涉及對投資人論點/持倉的討論,<strong>不構成投資建議</strong>。所有從該投資人之公開行為推論的「如果我下注」內容,僅是研究方法的展示,非可執行的策略。讀者須自行查證原始來源、自負投資風險。</p>
+          </aside>
         )}
 
         <nav class="prev-next" aria-label="文章導航">
-          {prev ? <a class="prev" href={`/posts/${prev.id}/`}><span class="dir">← 上一篇</span><span class="title">{prev.data.title}</span></a> : <span></span>}
-          {next ? <a class="next" href={`/posts/${next.id}/`}><span class="dir">下一篇 →</span><span class="title">{next.data.title}</span></a> : <span></span>}
+          {prev ? <a class="pn prev" href={`/posts/${prev.id}/`}><span class="pn-label">← 上一篇</span><span class="pn-title">{prev.data.title}</span></a> : <span></span>}
+          {next ? <a class="pn next" href={`/posts/${next.id}/`}><span class="pn-label">下一篇 →</span><span class="pn-title">{next.data.title}</span></a> : <span></span>}
         </nav>
 
         <div class="post-share">
-          <span>分享:</span>
-          <a href={`https://twitter.com/intent/tweet?text=${encodeURIComponent(post.data.title)}&url=${encodeURIComponent(new URL(`/posts/${post.id}/`, Astro.site).toString())}`} rel="noopener" target="_blank">X / Twitter</a>
-          <button class="copy-link-btn" data-copy-url={new URL(`/posts/${post.id}/`, Astro.site).toString()} type="button">複製連結</button>
+          <span class="share-label">分享</span>
+          <a href={`https://twitter.com/intent/tweet?text=${encodeURIComponent(post.data.title)}&url=${encodeURIComponent(new URL(`/posts/${post.id}/`, Astro.site).toString())}`} rel="noopener" target="_blank" class="share-link">X / Twitter</a>
+          <button class="share-link copy-link-btn" data-copy-url={new URL(`/posts/${post.id}/`, Astro.site).toString()} type="button">複製連結</button>
         </div>
-
-        <p class="post-history">發佈於 {formatDate(post.data.date)}{post.data.lastmod && ` · 最後更新於 ${formatDate(post.data.lastmod)}`}</p>
       </div>
     </div>
   </article>
+
+  <script>
+    const buttons = document.querySelectorAll<HTMLButtonElement>('.copy-link-btn');
+    buttons.forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const url = btn.dataset.copyUrl || window.location.href;
+        navigator.clipboard.writeText(url).then(
+          () => {
+            btn.textContent = '已複製 ✓';
+            setTimeout(
+              () => { btn.textContent = '複製連結'; },
+              1500,
+            );
+          },
+          () => { btn.textContent = '複製失敗'; },
+        );
+      });
+    });
+  </script>
 </Layout>
 
-<script>
-  const buttons = document.querySelectorAll<HTMLButtonElement>('.copy-link-btn');
-  buttons.forEach((btn) => {
-    btn.addEventListener('click', () => {
-      const url = btn.dataset.copyUrl || window.location.href;
-      navigator.clipboard.writeText(url).then(
-        () => {
-          btn.textContent = '已複製 ✓';
-          setTimeout(
-            () => { btn.textContent = '複製連結'; },
-            1500,
-          );
-        },
-        () => { btn.textContent = '複製失敗'; },
-      );
-    });
-  });
-</script>
-
 <style>
-.post-header { margin-bottom: 2rem; padding-bottom: 1rem; border-bottom: 1px solid var(--color-border); }
-.post-header h1 { font-size: 2.2rem; margin: 0.5rem 0 0.75rem; line-height: 1.25; }
-.post-header .lede { color: var(--color-muted); font-size: 1.1rem; margin: 0 0 1rem; }
-.post-status-row { display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: center; font-size: 0.85rem; color: var(--color-muted); }
-.status-badge { font-weight: 600; padding: 0.15rem 0.5rem; border-radius: 3px; }
-.status-unverified { background: #fef3c7; color: #92400e; }
-.status-verified { background: #dcfce7; color: #14532d; }
-.status-draft { background: #f3f4f6; color: #374151; }
-.status-corrected { background: #dbeafe; color: #1e40af; }
-@media (prefers-color-scheme: dark) {
-  .status-unverified { background: #422006; color: #fde68a; }
-  .status-verified { background: #052e1a; color: #86efac; }
-  .status-draft { background: #1f2937; color: #d1d5db; }
-  .status-corrected { background: #1e293b; color: #93c5fd; }
-}
-.post-updated { font-style: italic; }
-.post-meta { display: flex; flex-wrap: wrap; gap: 0.75rem 1rem; align-items: center; font-size: 0.9rem; color: var(--color-muted); }
-.post-meta a { color: var(--color-link); text-decoration: none; }
-.post-meta a:hover { text-decoration: underline; }
-.meta-tag-link { margin-left: auto; }
-.meta-tag { font-weight: 500; }
-.post-grid { display: grid; grid-template-columns: 1fr; gap: 2rem; }
-@media (min-width: 1024px) {
-  .post-grid { grid-template-columns: 220px minmax(0, 1fr); align-items: start; }
-  .toc { position: sticky; top: 1.5rem; max-height: calc(100vh - 3rem); overflow-y: auto; }
-}
-.toc { border: 1px solid var(--color-border); border-radius: 6px; background: var(--color-bg); font-size: 0.9rem; }
-.toc summary { padding: 0.6rem 0.9rem; cursor: pointer; font-weight: 600; list-style: none; }
-.toc summary::-webkit-details-marker { display: none; }
-.toc ol { margin: 0; padding: 0.25rem 0.6rem 0.6rem 1.6rem; border-top: 1px solid var(--color-border); }
-.toc li.depth-3 { padding-left: 0.8rem; }
-.toc a { display: block; padding: 0.2rem 0; color: var(--color-muted); text-decoration: none; }
-.toc a:hover { color: var(--color-fg); text-decoration: underline; }
-.banner { background: #fff4e5; border-left: 4px solid #d97706; padding: 1rem 1.25rem; margin: 0 0 2rem; font-size: 0.95rem; color: #7c2d12; border-radius: 4px; }
-@media (prefers-color-scheme: dark) { .banner { background: #422006; color: #fde68a; border-left-color: #f59e0b; } }
-.disclosure { border: 1px solid var(--color-border); background: #f9fafb; padding: 1rem 1.25rem; margin: 2rem 0 0; font-size: 0.9rem; border-radius: 4px; }
-@media (prefers-color-scheme: dark) { .disclosure { background: #1a1f2e; } }
-.post-body :global(h2) { font-size: 1.5rem; margin: 2.5rem 0 1rem; padding-top: 0.5rem; scroll-margin-top: 1rem; }
-.post-body :global(h3) { font-size: 1.2rem; margin: 1.5rem 0 0.5rem; scroll-margin-top: 1rem; }
-.post-body :global(h1) { display: none; }
-.post-body :global(p) { margin: 1rem 0; }
-.post-body :global(ul), .post-body :global(ol) { padding-left: 1.5rem; }
-.post-body :global(li) { margin: 0.25rem 0; }
-.post-body :global(blockquote) { border-left: 3px solid var(--color-quote-border); padding-left: 1rem; margin: 1rem 0; color: var(--color-muted); }
-.post-body :global(table) { border-collapse: collapse; width: 100%; margin: 1rem 0; font-size: 0.95rem; }
-.post-body :global(th), .post-body :global(td) { border: 1px solid var(--color-border); padding: 0.5rem 0.75rem; text-align: left; }
-.post-body :global(th) { background: #f9fafb; font-weight: 600; }
-@media (prefers-color-scheme: dark) { .post-body :global(th) { background: #1a1f2e; } }
-.post-body :global(code) { background: var(--color-code-bg); padding: 0.1rem 0.3rem; border-radius: 3px; font-size: 0.9em; }
-.post-body :global(hr) { border: none; border-top: 1px solid var(--color-border); margin: 2rem 0; }
-.prev-next { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 3rem 0 1rem; padding-top: 2rem; border-top: 1px solid var(--color-border); }
-.prev-next .next { text-align: right; }
-.prev-next a { display: block; padding: 0.75rem 1rem; border: 1px solid var(--color-border); border-radius: 6px; text-decoration: none; color: var(--color-fg); }
-.prev-next a:hover { border-color: var(--color-link); }
-.prev-next .dir { display: block; font-size: 0.85rem; color: var(--color-muted); margin-bottom: 0.25rem; }
-.prev-next .title { font-weight: 600; }
-.post-share { display: flex; flex-wrap: wrap; gap: 0.5rem 1rem; align-items: center; font-size: 0.9rem; padding: 1rem 0; margin: 2rem 0 0; border-top: 1px solid var(--color-border); }
-.post-share a, .post-share button { background: transparent; border: 1px solid var(--color-border); color: var(--color-fg); padding: 0.25rem 0.6rem; border-radius: 4px; font-size: 0.85rem; cursor: pointer; text-decoration: none; }
-.post-history { color: var(--color-muted); font-size: 0.85rem; margin-top: 2rem; }
-@media print {
-  nav.site-nav, footer, .toc, .post-share, .prev-next, .banner, .disclosure { display: none; }
-  article { font-size: 11pt; line-height: 1.4; max-width: none; }
-}
+  /* ─────── Article frame ─────── */
+  .post {
+    max-width: var(--max-width);
+    margin: 0 auto;
+    padding: 0;
+  }
+
+  .post-header {
+    margin-bottom: 3rem;
+    padding-bottom: 2rem;
+    border-bottom: 1px solid var(--color-border);
+  }
+  .post-header h1 {
+    font-family: var(--font-serif);
+    font-size: clamp(1.85rem, 4vw, 2.6rem);
+    font-weight: 700;
+    letter-spacing: -0.025em;
+    line-height: 1.18;
+    margin: 0 0 1rem;
+    color: var(--color-fg);
+  }
+  .post-header .lede {
+    font-family: var(--font-serif);
+    font-style: italic;
+    font-size: 1.2rem;
+    line-height: 1.5;
+    color: var(--color-fg-2);
+    margin: 0 0 1.5rem;
+    max-width: 36em;
+  }
+
+  /* Eyebrow / meta strip */
+  .post-eyebrow {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem 1rem;
+    margin-bottom: 1.25rem;
+    font-size: 0.8rem;
+    color: var(--color-fg-muted);
+  }
+  .post-eyebrow time { font-variant-numeric: tabular-nums; }
+  .post-eyebrow .updated { font-style: italic; color: var(--color-fg-subtle); }
+  .post-eyebrow .wordcount { margin-left: auto; font-family: var(--font-mono); font-size: 0.75rem; color: var(--color-fg-subtle); }
+
+  .status-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.2rem 0.55rem;
+    border-radius: 100px;
+    font-size: 0.7rem;
+    font-weight: 500;
+    text-transform: lowercase;
+    letter-spacing: 0.04em;
+  }
+  .pill-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+  .status-pill.status-unverified { background: #fef3c7; color: #92400e; }
+  .status-pill.status-verified { background: #dcfce7; color: #14532d; }
+  .status-pill.status-draft { background: #f3f4f6; color: #4b5563; }
+  .status-pill.status-corrected { background: #dbeafe; color: #1e3a8a; }
+  @media (prefers-color-scheme: dark) {
+    .status-pill.status-unverified { background: #422006; color: #fde68a; }
+    .status-pill.status-verified { background: #052e1a; color: #86efac; }
+    .status-pill.status-draft { background: #1f2937; color: #d1d5db; }
+    .status-pill.status-corrected { background: #1e293b; color: #93c5fd; }
+  }
+
+  /* Meta rows */
+  .post-meta {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    font-size: 0.85rem;
+    color: var(--color-fg-muted);
+  }
+  .meta-row {
+    display: flex;
+    align-items: baseline;
+    gap: 0.6rem;
+    flex-wrap: wrap;
+  }
+  .meta-key {
+    flex: 0 0 4rem;
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--color-fg-subtle);
+  }
+  .meta-vals {
+    color: var(--color-fg-2);
+    font-family: var(--font-serif);
+    font-size: 0.95rem;
+  }
+  .meta-vals a {
+    color: var(--color-fg);
+    text-decoration: none;
+    transition: color 120ms ease;
+  }
+  .meta-vals a:hover { color: var(--color-accent-2); }
+  .tag-pill {
+    display: inline-block;
+    margin-right: 0.4rem;
+    padding: 0.1rem 0.5rem;
+    background: var(--color-bg-2);
+    border: 1px solid var(--color-border);
+    border-radius: 100px;
+    font-family: var(--font-mono);
+    font-size: 0.78rem;
+    color: var(--color-fg-muted);
+    transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease;
+  }
+  .tag-pill:hover { background: var(--color-accent-tint); border-color: var(--color-accent-2); color: var(--color-accent-2); }
+
+  /* ─────── Grid ─────── */
+  .post-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 2rem;
+  }
+  @media (min-width: 1024px) {
+    .post-grid {
+      grid-template-columns: 200px minmax(0, 1fr);
+      align-items: start;
+      gap: 3rem;
+    }
+    .toc {
+      position: sticky;
+      top: 1.5rem;
+      max-height: calc(100vh - 3rem);
+      overflow-y: auto;
+    }
+  }
+
+  /* ─────── TOC ─────── */
+  .toc {
+    border-left: 2px solid var(--color-accent-tint);
+    padding-left: 1rem;
+    font-size: 0.85rem;
+  }
+  .toc summary {
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--color-fg-muted);
+    cursor: pointer;
+    list-style: none;
+    margin-bottom: 0.75rem;
+  }
+  .toc summary::-webkit-details-marker { display: none; }
+  .toc ol {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    counter-reset: tocitem;
+  }
+  .toc li {
+    counter-increment: tocitem;
+    margin: 0;
+    padding: 0;
+  }
+  .toc li::before {
+    content: counters(tocitem, '.');
+    counter-reset: tocitem;
+    color: var(--color-fg-subtle);
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    margin-right: 0.4rem;
+  }
+  .toc li.depth-3 { padding-left: 1rem; }
+  .toc a {
+    display: inline-block;
+    padding: 0.25rem 0;
+    color: var(--color-fg-muted);
+    text-decoration: none;
+    line-height: 1.4;
+    transition: color 120ms ease;
+  }
+  .toc a:hover { color: var(--color-accent-2); text-decoration: none; }
+
+  /* ─────── Body ─────── */
+  .post-body {
+    font-family: var(--font-serif);
+    font-size: 1.075rem;
+    line-height: 1.7;
+    color: var(--color-fg);
+  }
+  .post-body :global(p) { margin: 1.25em 0; }
+  .post-body :global(h2) {
+    font-family: var(--font-sans);
+    font-size: 1.5rem;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    margin: 3em 0 1em;
+    padding-top: 0.5em;
+    border-top: 1px solid var(--color-border);
+    scroll-margin-top: 1rem;
+  }
+  .post-body :global(h2)::before {
+    content: '# ';
+    color: var(--color-accent-2);
+    font-weight: 600;
+  }
+  .post-body :global(h3) {
+    font-family: var(--font-sans);
+    font-size: 1.2rem;
+    font-weight: 600;
+    letter-spacing: -0.015em;
+    margin: 2em 0 0.5em;
+    scroll-margin-top: 1rem;
+  }
+  .post-body :global(h1) { display: none; }
+  .post-body :global(ul), .post-body :global(ol) {
+    padding-left: 1.5em;
+    margin: 1em 0;
+  }
+  .post-body :global(li) { margin: 0.4em 0; }
+  .post-body :global(li::marker) { color: var(--color-fg-muted); }
+  .post-body :global(blockquote) {
+    border-left: 3px solid var(--color-accent-2);
+    padding: 0.5em 0 0.5em 1.25em;
+    margin: 1.5em 0;
+    font-style: italic;
+    color: var(--color-fg-2);
+    background: var(--color-bg-2);
+  }
+  .post-body :global(blockquote p) { margin: 0.5em 0; }
+  .post-body :global(table) {
+    border-collapse: collapse;
+    width: 100%;
+    margin: 1.5em 0;
+    font-size: 0.95rem;
+    font-family: var(--font-sans);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    overflow: hidden;
+  }
+  .post-body :global(th), .post-body :global(td) {
+    border-bottom: 1px solid var(--color-border);
+    border-right: 1px solid var(--color-border);
+    padding: 0.6rem 0.85rem;
+    text-align: left;
+  }
+  .post-body :global(th) {
+    background: var(--color-bg-2);
+    font-weight: 600;
+    color: var(--color-fg);
+  }
+  .post-body :global(th:last-child), .post-body :global(td:last-child) { border-right: none; }
+  .post-body :global(tr:last-child td) { border-bottom: none; }
+  .post-body :global(code) {
+    font-family: var(--font-mono);
+    background: var(--color-bg-2);
+    padding: 0.1em 0.4em;
+    border-radius: 4px;
+    font-size: 0.88em;
+  }
+  .post-body :global(pre) {
+    background: var(--color-bg-2);
+    padding: 1rem;
+    border-radius: var(--radius-md);
+    overflow-x: auto;
+    border: 1px solid var(--color-border);
+  }
+  .post-body :global(hr) {
+    border: none;
+    border-top: 1px solid var(--color-border);
+    margin: 3em auto;
+    width: 30%;
+  }
+  .post-body :global(a) {
+    color: var(--color-accent-2);
+    text-decoration: underline;
+    text-underline-offset: 0.18em;
+    text-decoration-thickness: 1px;
+    transition: color 120ms ease;
+  }
+  .post-body :global(a:hover) { color: var(--color-link-hover); }
+  .post-body :global(strong) { color: var(--color-fg); font-weight: 600; }
+
+  /* ─────── Aside boxes (banner + disclosure) ─────── */
+  .banner, .disclosure {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    padding: 1rem 1.25rem;
+    margin: 1.5rem 0;
+    border-radius: var(--radius-md);
+    font-size: 0.95rem;
+    line-height: 1.5;
+    border-left: 3px solid;
+  }
+  .banner strong, .disclosure strong {
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+  .banner p, .disclosure p { margin: 0; }
+  .banner { background: #fffaf0; color: #92400e; border-left-color: #d97706; }
+  .disclosure { background: #faf9f6; color: var(--color-fg-2); border-left-color: var(--color-accent-2); }
+  @media (prefers-color-scheme: dark) {
+    .banner { background: #2a1b07; color: #fde68a; border-left-color: #f59e0b; }
+    .disclosure { background: #16181c; color: var(--color-fg-muted); border-left-color: var(--color-accent-2); }
+  }
+
+  /* ─────── Prev/Next nav ─────── */
+  .prev-next {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1rem;
+    margin: 4rem 0 2rem;
+    padding-top: 2rem;
+    border-top: 1px solid var(--color-border);
+  }
+  .prev-next .pn {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    padding: 1.25rem;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    text-decoration: none;
+    transition: border-color 150ms ease, transform 150ms ease, background-color 150ms ease;
+  }
+  .prev-next .pn:hover {
+    border-color: var(--color-accent-2);
+    transform: translateY(-2px);
+    background: var(--color-bg-2);
+    text-decoration: none;
+  }
+  .prev-next .pn.next { text-align: right; align-items: flex-end; }
+  .prev-next .pn-label {
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--color-fg-muted);
+  }
+  .prev-next .pn-title {
+    font-family: var(--font-serif);
+    font-size: 1.05rem;
+    font-weight: 500;
+    color: var(--color-fg);
+    line-height: 1.35;
+  }
+
+  /* ─────── Share ─────── */
+  .post-share {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.75rem;
+    font-size: 0.9rem;
+    padding: 1.25rem 0;
+    margin: 2rem 0 0;
+    border-top: 1px dashed var(--color-border);
+  }
+  .share-label {
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--color-fg-muted);
+  }
+  .share-link {
+    background: transparent;
+    border: 1px solid var(--color-border);
+    color: var(--color-fg-2);
+    padding: 0.35rem 0.7rem;
+    border-radius: var(--radius-md);
+    font-size: 0.85rem;
+    cursor: pointer;
+    text-decoration: none;
+    font-family: var(--font-sans);
+    transition: all 120ms ease;
+  }
+  .share-link:hover {
+    border-color: var(--color-accent-2);
+    color: var(--color-accent-2);
+    background: var(--color-accent-tint);
+    text-decoration: none;
+  }
+
+  @media print {
+    nav.site-nav, footer.site-footer, .toc, .post-share, .prev-next, .banner, .disclosure, .post-meta { display: none; }
+    .post-body { font-size: 11pt; line-height: 1.4; max-width: none; }
+    .post { max-width: none; }
+  }
 </style>

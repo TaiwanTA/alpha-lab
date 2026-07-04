@@ -1,12 +1,15 @@
 ---
+import '../styles/tokens.css';
+
 const { title, description, ogType, publishedDate, modifiedDate, tags, noindex } = Astro.props;
 
 const SITE = 'alpha-lab';
 const FULL_TITLE = title ? `${title} — ${SITE}` : `${SITE} — 知名投資人研究`;
-const DESC = description ?? '研究知名投資人的觀點、論點、與市場直覺。每篇明示來源、可重複查證或標為未驗證';
+const DESC = description ?? '研究公開投資人的言論、論點、與市場直覺。每篇明示來源、可重複查證或標為未驗證';
 const URL_VAL = new URL(Astro.url.pathname, Astro.site).toString();
 const OG_TYPE = ogType ?? 'website';
 ---
+
 <!doctype html>
 <html lang="zh-Hant">
   <head>
@@ -22,7 +25,6 @@ const OG_TYPE = ogType ?? 'website';
     <link rel="canonical" href={URL_VAL} />
     {noindex && <meta name="robots" content="noindex,nofollow" />}
 
-    <!-- Open Graph -->
     <meta property="og:type" content={OG_TYPE} />
     <meta property="og:title" content={title ?? SITE} />
     <meta property="og:description" content={DESC} />
@@ -33,79 +35,72 @@ const OG_TYPE = ogType ?? 'website';
     {modifiedDate && <meta property="article:modified_time" content={modifiedDate} />}
     {tags?.map((t: string) => <meta property="article:tag" content={t} />)}
 
-    <!-- Twitter Card -->
     <meta name="twitter:card" content="summary" />
     <meta name="twitter:title" content={title ?? SITE} />
     <meta name="twitter:description" content={DESC} />
 
-    <!-- JSON-LD -->
     <script
       type="application/ld+json"
       set:html={JSON.stringify(
-        OG_TYPE === 'article'
-          ? {
-              '@context': 'https://schema.org',
-              '@type': 'BlogPosting',
-              'headline': title,
-              'description': DESC,
-              'datePublished': publishedDate,
-              'dateModified': modifiedDate ?? publishedDate,
-              'keywords': tags?.join(', '),
-              'author': { '@type': 'Person', 'name': 'alpha-lab agent' },
-              'publisher': { '@type': 'Organization', 'name': SITE },
-              'mainEntityOfPage': { '@type': 'WebPage', '@id': URL_VAL },
-            }
-          : {
-              '@context': 'https://schema.org',
-              '@type': 'WebSite',
-              'name': SITE,
-              'url': Astro.site?.toString(),
-              'description': DESC,
-              'potentialAction': {
-                '@type': 'SearchAction',
-                'target': '/search?q={search_term_string}',
-                'query-input': 'required name=search_term_string',
-              },
-            },
-      )}
-    >
-    </script>
+      OG_TYPE === 'article'
+? {
+        '@context': 'https://schema.org',
+        '@type': 'BlogPosting',
+        'headline': title,
+        'description': DESC,
+        'datePublished': publishedDate,
+        'dateModified': modifiedDate ?? publishedDate,
+        'keywords': tags?.join(', '),
+        'author': { '@type': 'Person', 'name': 'alpha-lab agent' },
+        'publisher': { '@type': 'Organization', 'name': SITE },
+        'mainEntityOfPage': { '@type': 'WebPage', '@id': URL_VAL },
+      }
+: {
+        '@context': 'https://schema.org',
+        '@type': 'WebSite',
+        'name': SITE,
+        'url': Astro.site?.toString(),
+        'description': DESC,
+        'potentialAction': {
+          '@type': 'SearchAction',
+          'target': '/search?q={search_term_string}',
+          'query-input': 'required name=search_term_string',
+        },
+      },
+    )}
+    ></script>
 
     <style is:global>
-      :root {
-        --max-width: 720px;
-        --color-fg: #111;
-        --color-bg: #fff;
-        --color-muted: #666;
-        --color-border: #eee;
-        --color-link: #1d4ed8;
-        --color-code-bg: #f3f4f6;
-        --color-quote-border: #d1d5db;
-        --font-base: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, 'PingFang TC', 'Microsoft JhengHei', sans-serif;
-        --font-serif: 'Source Han Serif TC', 'Noto Serif CJK TC', 'Times New Roman', serif;
+      *, *::before, *::after { box-sizing: border-box; }
+
+      html {
+        font-size: 16px;
+        scroll-behavior: smooth;
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
+        text-rendering: optimizeLegibility;
       }
-      @media (prefers-color-scheme: dark) {
-        :root {
-          --color-fg: #e5e7eb;
-          --color-bg: #0f1115;
-          --color-muted: #9ca3af;
-          --color-border: #1f2937;
-          --color-link: #93c5fd;
-          --color-code-bg: #1f2937;
-          --color-quote-border: #374151;
-        }
-      }
-      * { box-sizing: border-box; }
-      html { font-size: 16px; scroll-behavior: smooth; }
+
       body {
         margin: 0;
-        font-family: var(--font-base);
+        font-family: var(--font-sans);
         color: var(--color-fg);
         background: var(--color-bg);
         line-height: 1.6;
+        font-feature-settings: 'kern', 'liga', 'calt';
       }
-      a { color: var(--color-link); }
-      a:hover { text-decoration: underline; }
+
+      a {
+        color: var(--color-link);
+        text-decoration: none;
+        transition: color 120ms ease;
+      }
+      a:hover { color: var(--color-link-hover); text-decoration: underline; text-underline-offset: 2px; }
+
+      ::selection {
+        background: var(--color-accent-soft);
+        color: var(--color-fg);
+      }
 
       /* Skip-to-content */
       .skip-link {
@@ -117,60 +112,100 @@ const OG_TYPE = ogType ?? 'website';
         overflow: hidden;
       }
       .skip-link:focus {
-        position: static;
+        position: fixed;
+        top: 1rem;
+        left: 1rem;
         width: auto;
         height: auto;
-        background: var(--color-link);
+        background: var(--color-accent-2);
         color: white;
         padding: 0.5rem 1rem;
+        border-radius: var(--radius-md);
         text-decoration: none;
+        z-index: 9999;
       }
 
+      /* ───────── Navigation ───────── */
       nav.site-nav {
-        max-width: 1080px;
+        max-width: var(--max-width-wide);
         margin: 0 auto;
-        padding: 1rem 1.5rem;
+        padding: 1.25rem 2rem;
         display: flex;
         flex-wrap: wrap;
-        gap: 1rem;
+        gap: 1.5rem;
         align-items: center;
-        font-size: 0.95rem;
-        border-bottom: 1px solid var(--color-border);
+        font-size: 0.9rem;
+        background: var(--color-bg);
       }
       nav.site-nav a.brand {
         font-weight: 700;
+        font-size: 1.1rem;
         color: var(--color-fg);
         text-decoration: none;
-        margin-right: 0.5rem;
+        letter-spacing: -0.01em;
       }
-      nav.site-nav a { color: var(--color-muted); text-decoration: none; }
-      nav.site-nav a:hover { color: var(--color-fg); text-decoration: underline; }
+      nav.site-nav a { color: var(--color-fg-muted); text-decoration: none; transition: color 120ms ease; }
+      nav.site-nav a:hover { color: var(--color-fg); text-decoration: none; }
       .nav-spacer { flex: 1; }
-      .nav-search {
-        background: transparent;
-        border: 1px solid var(--color-border);
-        color: var(--color-fg);
-        padding: 0.25rem 0.5rem;
-        border-radius: 4px;
-        font-size: 0.9rem;
+      nav.site-nav .nav-cta {
+        color: var(--color-accent-2);
+        font-weight: 500;
       }
 
-      main, .site-main {
-        max-width: 1080px;
+      /* ───────── Main wrapper ───────── */
+      main.site-main {
+        max-width: var(--max-width-wide);
         margin: 0 auto;
-        padding: 2rem 1.5rem 4rem;
+        padding: 1rem 2rem 6rem;
       }
-      .content-wrap {
-        max-width: var(--max-width);
+
+      /* ───────── Footer ───────── */
+      footer.site-footer {
+        max-width: var(--max-width-wide);
         margin: 0 auto;
+        padding: 3rem 2rem 4rem;
+        border-top: 1px solid var(--color-border);
+        color: var(--color-fg-muted);
+        font-size: 0.9rem;
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 1rem;
+      }
+      @media (min-width: 768px) {
+        footer.site-footer { grid-template-columns: 2fr 1fr; align-items: start; }
+      }
+      footer.site-footer .tagline {
+        font-family: var(--font-serif);
+        font-style: italic;
+        font-size: 1rem;
+        color: var(--color-fg-2);
+        margin: 0;
+      }
+      footer.site-footer .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 1rem 1.5rem;
+        font-size: 0.85rem;
+      }
+      footer.site-footer .disclaimer {
+        grid-column: 1 / -1;
+        margin-top: 1rem;
+        padding-top: 1.5rem;
+        border-top: 1px dashed var(--color-border);
+        font-size: 0.8rem;
+        color: var(--color-fg-subtle);
       }
 
       @media (prefers-reduced-motion: reduce) {
         html { scroll-behavior: auto; }
-        *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+        *, *::before, *::after {
+          animation-duration: 0.01ms !important;
+          transition-duration: 0.01ms !important;
+        }
       }
     </style>
   </head>
+
   <body>
     <a class="skip-link" href="#main">略過導航,直接到內容</a>
 
@@ -183,25 +218,27 @@ const OG_TYPE = ogType ?? 'website';
       <a href="/about/">About</a>
       <span class="nav-spacer"></span>
       <a href="/search/">Search</a>
-      <a href="/feed.xml">RSS</a>
+      <a href="/feed.xml" class="nav-cta">RSS</a>
     </nav>
 
     <main id="main" class="site-main">
       <slot />
     </main>
 
-    <footer style="max-width:1080px;margin:0 auto;padding:1.5rem;border-top:1px solid var(--color-border);color:var(--color-muted);font-size:.85rem;">
-      <div class="content-wrap">
-        <p>
-          alpha-lab · 研究公開投資人言論、檢驗論點、模擬下注。
-          <a href="/about/">關於這個站</a> ·
-          <a href="/methodology/">方法論</a> ·
-          <a href="/feed.xml">RSS</a>
-        </p>
-        <p style="margin-top:.5rem;">
-          本文不構成投資建議。所有 investmentClaim 文章需要讀者自行查證。
-        </p>
+    <footer class="site-footer">
+      <p class="tagline">研究公開投資人的言論、檢驗論點、模擬下注。</p>
+      <div class="links">
+        <a href="/about/">關於這個站</a>
+        <a href="/methodology/">方法論</a>
+        <a href="/feed.xml">RSS</a>
+        <a href="/feed.atom.xml">Atom</a>
+        <a href="/feed.json">JSON Feed</a>
+        <a href="/investors/">投資人清單</a>
       </div>
+      <p class="disclaimer">
+        alpha-lab 不構成投資建議。所有 investmentClaim 文章需要讀者自行查證並承擔風險。
+        每篇文章依其來源驗證狀態顯示 <code>draft / unverified / verified / corrected</code> 標籤。
+      </p>
     </footer>
   </body>
 </html>
