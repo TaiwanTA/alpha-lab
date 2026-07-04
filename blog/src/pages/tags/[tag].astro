@@ -21,36 +21,32 @@ const { tag, posts } = Astro.props;
 ---
 
 <Layout title={`#${tag} — alpha-lab`} description={`所有標記為 #${tag} 的文章`}>
-  <header class="page-header">
+  <header class="page-head">
     <nav class="breadcrumb">
+      <a href="/">Home</a>
+      <span class="breadcrumb-sep">/</span>
       <a href="/tags/">Tags</a>
-      <span>›</span>
-      <span>#{tag}</span>
+      <span class="breadcrumb-sep">/</span>
+      <span aria-current="page">#{tag}</span>
     </nav>
-    <h1>#{tag}</h1>
-    <p>{posts.length} 篇文章</p>
+    <h1 class="title-with-tag"># {tag}</h1>
+    <p class="lede">{posts.length} 篇文章</p>
   </header>
 
   <ol class="posts-list">
     {posts.map((post: any) => (
-      <li>
+      <li class={`post-card status-${post.data.status}`}>
         <article>
-          <header>
-            <a href={`/posts/${post.id}/`} class="post-title">{post.data.title}</a>
-            <span class={`status-badge status-${post.data.status}`}>{STATUS_LABELS[post.data.status]?.label}</span>
+          <header class="post-card-head">
+            <a href={`/posts/${post.id}/`} class="post-card-title">{post.data.title}</a>
+            <span class={`status-pill status-${post.data.status}`}><span class="pill-dot"></span>{STATUS_LABELS[post.data.status]?.label}</span>
           </header>
-          <p class="summary">{post.data.summary}</p>
-          <div class="row-meta">
-            <span class="date">{post.data.date}</span>
-            {post.data.investors.map((inv: string) => (
-              <a href={`/investors/${encodeURIComponent(inv)}/`}>{inv}</a>
-            ))}
-            <span class="row-tags">
-              {post.data.tags.map((t: string) => (
-                <a href={`/tags/${encodeURIComponent(t)}/`}>#{t}</a>
-              ))}
-            </span>
-          </div>
+          <p class="post-card-summary">{post.data.summary}</p>
+          <footer class="post-card-foot">
+            <time datetime={post.data.date}>{post.data.date}</time>
+            {post.data.investors.map((inv: string) => <a class="meta-link investor-link" href={`/investors/${encodeURIComponent(inv)}/`}>{inv}</a>)}
+            <span class="row-tags">{post.data.tags.map((t: string) => <a class="meta-link tag-link" href={`/tags/${encodeURIComponent(t)}/`}>#{t}</a>)}</span>
+          </footer>
         </article>
       </li>
     ))}
@@ -58,59 +54,79 @@ const { tag, posts } = Astro.props;
 </Layout>
 
 <style>
-  .page-header { margin-bottom: 2rem; }
+  .page-head { margin-bottom: 3rem; }
   .breadcrumb {
-    color: var(--color-muted);
-    font-size: 0.9rem;
-    margin-bottom: 0.5rem;
-  }
-  .breadcrumb a { color: var(--color-muted); text-decoration: none; }
-  .breadcrumb a:hover { color: var(--color-link); }
-  .page-header h1 { font-size: 2rem; margin: 0.25rem 0 0.5rem; }
-  .page-header p { color: var(--color-muted); margin: 0; }
-  .posts-list { list-style: none; padding: 0; margin: 0; }
-  .posts-list li {
-    border-bottom: 1px solid var(--color-border);
-    padding: 1.25rem 0;
-  }
-  .posts-list header {
     display: flex;
-    justify-content: space-between;
-    align-items: flex-start;
-    gap: 1rem;
-    margin-bottom: 0.4rem;
+    align-items: center;
+    gap: 0.5rem;
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    color: var(--color-fg-muted);
+    margin-bottom: 1rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
   }
-  .post-title {
-    font-size: 1.15rem;
+  .breadcrumb a { color: var(--color-fg-muted); text-decoration: none; }
+  .breadcrumb a:hover { color: var(--color-accent-2); }
+  .breadcrumb-sep { color: var(--color-fg-subtle); }
+  .breadcrumb [aria-current] { color: var(--color-fg); }
+  .title-with-tag {
+    font-family: var(--font-sans);
+    font-size: clamp(2rem, 5vw, 2.75rem);
+    font-weight: 700;
+    letter-spacing: -0.03em;
+    margin: 0 0 0.5rem;
+  }
+  .lede { color: var(--color-fg-muted); font-size: 1rem; margin: 0; }
+
+  .posts-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 1.25rem; }
+  .post-card {
+    background: var(--color-bg);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-lg);
+    padding: 1.5rem 1.75rem;
+    transition: transform 180ms cubic-bezier(0.4, 0, 0.2, 1), box-shadow 180ms ease, border-color 180ms ease;
+  }
+  .post-card:hover { transform: translateY(-2px); box-shadow: var(--shadow-card-hover); border-color: var(--color-border-2); }
+  .post-card.status-unverified { border-left: 3px solid #d97706; }
+  .post-card.status-verified   { border-left: 3px solid #15803d; }
+  .post-card.status-draft      { border-left: 3px solid var(--color-fg-subtle); }
+  .post-card.status-corrected  { border-left: 3px solid #2563eb; }
+
+  .post-card-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; margin-bottom: 0.5rem; }
+  .post-card-title {
+    font-family: var(--font-serif);
+    font-size: 1.35rem;
     font-weight: 600;
+    letter-spacing: -0.02em;
+    line-height: 1.3;
     color: var(--color-fg);
     text-decoration: none;
+    view-transition-name: post-title;
   }
-  .post-title:hover { color: var(--color-link); }
-  .summary { color: var(--color-muted); margin: 0 0 0.5rem; font-size: 0.95rem; }
-  .row-meta {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.4rem 1rem;
-    font-size: 0.85rem;
-    color: var(--color-muted);
+  .post-card-title:hover { color: var(--color-accent-2); }
+  .post-card-summary { font-family: var(--font-serif); font-size: 1rem; line-height: 1.55; color: var(--color-fg-2); margin: 0.4rem 0 1rem; }
+
+  .post-card-foot { display: flex; flex-wrap: wrap; gap: 0.4rem 1rem; align-items: center; font-size: 0.8rem; color: var(--color-fg-muted); }
+  .meta-link { color: var(--color-fg-muted); text-decoration: none; transition: color 120ms ease; }
+  .meta-link:hover { color: var(--color-accent-2); }
+  .investor-link::before { content: '◆ '; color: var(--color-accent-2); font-size: 0.65rem; }
+
+  .status-pill {
+    flex-shrink: 0;
+    display: inline-flex; align-items: center; gap: 0.35rem;
+    padding: 0.2rem 0.55rem; border-radius: 100px;
+    font-size: 0.7rem; font-weight: 500; text-transform: lowercase; letter-spacing: 0.04em;
   }
-  .row-meta a { color: var(--color-link); text-decoration: none; margin-right: 0.4rem; }
-  .status-badge {
-    font-weight: 600;
-    padding: 0.15rem 0.5rem;
-    border-radius: 3px;
-    font-size: 0.75rem;
-    white-space: nowrap;
-  }
-  .status-unverified { background: #fef3c7; color: #92400e; }
-  .status-verified   { background: #dcfce7; color: #14532d; }
-  .status-draft      { background: #f3f4f6; color: #374151; }
-  .status-corrected  { background: #dbeafe; color: #1e40af; }
+  .pill-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+  .status-pill.status-unverified { background: #fef3c7; color: #92400e; }
+  .status-pill.status-verified   { background: #dcfce7; color: #14532d; }
+  .status-pill.status-draft      { background: #f3f4f6; color: #4b5563; }
+  .status-pill.status-corrected  { background: #dbeafe; color: #1e3a8a; }
   @media (prefers-color-scheme: dark) {
-    .status-unverified { background: #422006; color: #fde68a; }
-    .status-verified   { background: #052e1a; color: #86efac; }
-    .status-draft      { background: #1f2937; color: #d1d5db; }
-    .status-corrected  { background: #1e293b; color: #93c5fd; }
+    .status-pill.status-unverified { background: #422006; color: #fde68a; }
+    .status-pill.status-verified   { background: #052e1a; color: #86efac; }
+    .status-pill.status-draft      { background: #1f2937; color: #d1d5db; }
+    .status-pill.status-corrected  { background: #1e293b; color: #93c5fd; }
   }
 </style>

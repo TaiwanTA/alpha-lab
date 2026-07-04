@@ -8,15 +8,20 @@ const tags = [...tagCounts.entries()];
 ---
 
 <Layout title="所有 Tags — alpha-lab" description="依主題瀏覽 alpha-lab 所有文章。">
-  <header class="page-header">
+  <header class="page-head">
+    <nav class="breadcrumb">
+      <a href="/">Home</a>
+      <span class="breadcrumb-sep">/</span>
+      <span aria-current="page">Tags</span>
+    </nav>
     <h1>所有 Tags</h1>
-    <p>{tags.length} 個主題 · {posts.length} 篇文章</p>
+    <p class="lede">{tags.length} 個主題 · {posts.length} 篇文章</p>
   </header>
 
   <ul class="tag-grid">
     {tags.map(([tag, count]) => (
       <li>
-        <a href={`/tags/${encodeURIComponent(tag)}/`}>
+        <a href={`/tags/${encodeURIComponent(tag)}/`} class="tag-card">
           <span class="tag-name">#{tag}</span>
           <span class="tag-count">{count}</span>
         </a>
@@ -26,27 +31,64 @@ const tags = [...tagCounts.entries()];
 </Layout>
 
 <style>
-  .page-header { margin-bottom: 2rem; }
-  .page-header h1 { font-size: 2rem; margin: 0 0 0.5rem; }
-  .page-header p { color: var(--color-muted); margin: 0; }
+  .page-head { margin-bottom: 3rem; }
+  .breadcrumb {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    color: var(--color-fg-muted);
+    margin-bottom: 1rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  .breadcrumb a { color: var(--color-fg-muted); text-decoration: none; }
+  .breadcrumb a:hover { color: var(--color-accent-2); }
+  .breadcrumb-sep { color: var(--color-fg-subtle); }
+  .breadcrumb [aria-current] { color: var(--color-fg); }
+  .page-head h1 {
+    font-family: var(--font-sans);
+    font-size: clamp(2rem, 5vw, 2.75rem);
+    font-weight: 700;
+    letter-spacing: -0.03em;
+    margin: 0 0 0.5rem;
+  }
+  .lede { color: var(--color-fg-muted); font-size: 1rem; margin: 0; }
+
   .tag-grid {
     list-style: none;
     padding: 0;
-    display: flex;
-    flex-wrap: wrap;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
     gap: 0.75rem;
   }
-  .tag-grid li { margin: 0; }
-  .tag-grid a {
-    display: inline-flex;
+  .tag-card {
+    display: flex;
+    justify-content: space-between;
     align-items: center;
-    gap: 0.5rem;
-    padding: 0.5rem 0.9rem;
+    padding: 0.85rem 1.1rem;
+    background: var(--color-bg-2);
     border: 1px solid var(--color-border);
-    border-radius: 6px;
+    border-radius: var(--radius-md);
     text-decoration: none;
     color: var(--color-fg);
+    transition: border-color 150ms ease, background-color 150ms ease, transform 150ms ease;
   }
-  .tag-grid a:hover { border-color: var(--color-link); text-decoration: none; }
-  .tag-count { color: var(--color-muted); font-size: 0.85rem; }
+  .tag-card:hover {
+    border-color: var(--color-accent-2);
+    background: var(--color-accent-tint);
+    transform: translateY(-2px);
+    text-decoration: none;
+  }
+  .tag-name { font-family: var(--font-mono); font-size: 0.9rem; color: var(--color-fg-2); }
+  .tag-count {
+    font-size: 0.8rem;
+    color: var(--color-fg-subtle);
+    background: var(--color-bg);
+    padding: 0.1rem 0.45rem;
+    border-radius: 100px;
+    border: 1px solid var(--color-border);
+    font-variant-numeric: tabular-nums;
+  }
 </style>

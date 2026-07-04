@@ -1,5 +1,16 @@
 ---
+import { ClientRouter } from 'astro:transitions';
 import '../styles/tokens.css';
+
+interface Props {
+  title?: string;
+  description?: string;
+  ogType?: 'article' | 'website';
+  publishedDate?: string;
+  modifiedDate?: string;
+  tags?: string[];
+  noindex?: boolean;
+}
 
 const { title, description, ogType, publishedDate, modifiedDate, tags, noindex } = Astro.props;
 
@@ -70,6 +81,8 @@ const OG_TYPE = ogType ?? 'website';
     )}
     ></script>
 
+    <ClientRouter />
+
     <style is:global>
       *, *::before, *::after { box-sizing: border-box; }
 
@@ -100,6 +113,39 @@ const OG_TYPE = ogType ?? 'website';
       ::selection {
         background: var(--color-accent-soft);
         color: var(--color-fg);
+      }
+
+      /* ───────── View Transitions ───────── */
+      @keyframes vt-fade-out { to { opacity: 0; transform: translateY(-6px); } }
+      @keyframes vt-fade-in { from { opacity: 0; transform: translateY(8px); } }
+      @keyframes vt-shrink-out { to { opacity: 0; transform: scale(0.96); } }
+      @keyframes vt-grow-in { from { opacity: 0; transform: scale(1.02); } }
+
+      ::view-transition-old(root),
+      ::view-transition-new(root) {
+        animation-duration: 280ms;
+        animation-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+      }
+      ::view-transition-old(root) { animation-name: vt-fade-out; }
+      ::view-transition-new(root) { animation-name: vt-fade-in; }
+
+      /* Shared element: post-card-title (list) ↔ .post-title (article) */
+      ::view-transition-group(post-title) { animation-duration: 360ms; }
+      ::view-transition-old(post-title) { animation-duration: 360ms; animation-name: vt-shrink-out; }
+      ::view-transition-new(post-title) { animation-duration: 360ms; animation-name: vt-grow-in; }
+
+      @media (prefers-reduced-motion: reduce) {
+        ::view-transition-old(root),
+        ::view-transition-new(root),
+        ::view-transition-old(post-title),
+        ::view-transition-new(post-title) {
+          animation-duration: 0.001ms !important;
+        }
+        html { scroll-behavior: auto; }
+        *, *::before, *::after {
+          animation-duration: 0.01ms !important;
+          transition-duration: 0.01ms !important;
+        }
       }
 
       /* Skip-to-content */
@@ -152,14 +198,12 @@ const OG_TYPE = ogType ?? 'website';
         font-weight: 500;
       }
 
-      /* ───────── Main wrapper ───────── */
       main.site-main {
         max-width: var(--max-width-wide);
         margin: 0 auto;
         padding: 1rem 2rem 6rem;
       }
 
-      /* ───────── Footer ───────── */
       footer.site-footer {
         max-width: var(--max-width-wide);
         margin: 0 auto;
@@ -194,14 +238,6 @@ const OG_TYPE = ogType ?? 'website';
         border-top: 1px dashed var(--color-border);
         font-size: 0.8rem;
         color: var(--color-fg-subtle);
-      }
-
-      @media (prefers-reduced-motion: reduce) {
-        html { scroll-behavior: auto; }
-        *, *::before, *::after {
-          animation-duration: 0.01ms !important;
-          transition-duration: 0.01ms !important;
-        }
       }
     </style>
   </head>

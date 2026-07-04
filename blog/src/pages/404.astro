@@ -4,60 +4,132 @@ import { getPublishedPosts } from '../lib/posts';
 
 const posts = await getPublishedPosts();
 const recent = posts.slice(0, 5);
-const allTags = [...new Set(posts.flatMap(p => p.data.tags))].slice(0, 12);
 ---
 
 <Layout title="Page not found — alpha-lab" noindex={true}>
-  <article class="md-page">
-    <h1>404 · 找不到這頁</h1>
-    <p class="lede">這個 URL 不存在 — 或者曾經存在,但某個 slug 重命名了(本站原則上不重命名 slug,如果你看到這個,可能是連結副本過期)。</p>
+  <div class="not-found">
+    <div class="error-code">404</div>
+    <h1>這頁找不到</h1>
+    <p class="lede">
+      這個 URL 不存在 — 或曾經存在,但 slug 被重命名了(本站原則上不重命名 slug,如果你看到這個,可能是連結副本過期)。
+    </p>
 
-    <h2>怎麼辦</h2>
-    <ul>
-      <li>用搜尋框找你要的內容 — <a href="/search/">/search/</a></li>
-      <li>看 <a href="/tags/">所有 tags</a> 找主題</li>
-      <li>看 <a href="/investors/">投資人索引</a> 找人</li>
-      <li>看 <a href="/archive/">完整 archive</a> 找時間點</li>
-    </ul>
+    <section class="card">
+      <h2>怎麼辦</h2>
+      <ul class="actions">
+        <li><a href="/">回首頁</a></li>
+        <li><a href="/search/">用搜尋找內容</a></li>
+        <li><a href="/tags/">看所有 Tags</a></li>
+        <li><a href="/investors/">投資人索引</a></li>
+        <li><a href="/archive/">完整 Archive</a></li>
+      </ul>
+    </section>
 
-    <h2>最近的文章</h2>
-    <ol class="recent-list">
-      {recent.map(post => (
-        <li>
-          <a href={`/posts/${post.id}/`}>{post.data.title}</a>
-          <span class="date">{post.data.date}</span>
-        </li>
-      ))}
-    </ol>
-
-    <h2>常用標籤</h2>
-    <ul class="tags">
-      {allTags.map(t => <li><a href={`/tags/${encodeURIComponent(t)}/`}>#{t}</a></li>)}
-    </ul>
-  </article>
+    {recent.length > 0 && (
+      <section class="card">
+        <h2>最近的文章</h2>
+        <ol class="recent-list">
+          {recent.map(post => (
+            <li>
+              <a href={`/posts/${post.id}/`}>{post.data.title}</a>
+              <time>{post.data.date}</time>
+            </li>
+          ))}
+        </ol>
+      </section>
+    )}
+  </div>
 </Layout>
 
 <style>
-  .md-page { max-width: var(--max-width); margin: 0 auto; }
-  .md-page h1 { font-size: 2rem; margin: 0 0 1rem; }
-  .md-page .lede { color: var(--color-muted); margin: 0 0 2rem; }
-  .md-page h2 { font-size: 1.5rem; margin: 2rem 0 1rem; border-top: 1px solid var(--color-border); padding-top: 1rem; }
-  .md-page ul, .md-page ol { padding-left: 1.5rem; }
-  .recent-list { list-style: none; padding: 0; }
-  .recent-list li {
-    padding: 0.5rem 0;
-    border-bottom: 1px solid var(--color-border);
-    display: flex;
-    gap: 1rem;
+  .not-found {
+    max-width: var(--max-width);
+    margin: 0 auto;
   }
-  .recent-list a { flex: 1; }
-  .recent-list .date { color: var(--color-muted); font-size: 0.85rem; }
-  .tags { list-style: none; padding: 0; display: flex; flex-wrap: wrap; gap: 0.5rem; }
-  .tags a {
-    background: var(--color-code-bg);
-    padding: 0.2rem 0.5rem;
-    border-radius: 3px;
+  .error-code {
+    font-family: var(--font-mono);
+    font-size: clamp(4rem, 12vw, 7rem);
+    font-weight: 700;
+    color: var(--color-accent-soft);
+    letter-spacing: -0.05em;
+    line-height: 1;
+    margin-bottom: 0.5rem;
+  }
+  .not-found h1 {
+    font-family: var(--font-sans);
+    font-size: clamp(2rem, 5vw, 2.75rem);
+    font-weight: 700;
+    letter-spacing: -0.03em;
+    margin: 0 0 1rem;
+  }
+  .lede {
+    font-family: var(--font-serif);
+    font-style: italic;
+    color: var(--color-fg-2);
+    margin: 0 0 3rem;
+    font-size: 1.15rem;
+    line-height: 1.5;
+  }
+  .card {
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-lg);
+    padding: 1.75rem;
+    margin-bottom: 1.5rem;
+  }
+  .card h2 {
+    font-family: var(--font-sans);
+    font-size: 1.1rem;
+    font-weight: 600;
+    margin: 0 0 1rem;
+  }
+  .actions {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem 0.75rem;
+  }
+  .actions li a {
+    display: inline-block;
+    padding: 0.4rem 0.85rem;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
     text-decoration: none;
+    font-size: 0.9rem;
+    color: var(--color-fg);
+    transition: border-color 120ms ease, background-color 120ms ease;
+  }
+  .actions li a:hover {
+    border-color: var(--color-accent-2);
+    background: var(--color-accent-tint);
+    text-decoration: none;
+  }
+
+  .recent-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+  }
+  .recent-list li {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 1rem;
+    align-items: baseline;
+    padding: 0.55rem 0;
+    border-bottom: 1px dashed var(--color-border);
+  }
+  .recent-list a {
+    font-family: var(--font-serif);
+    font-size: 1rem;
+    color: var(--color-fg);
+    text-decoration: none;
+  }
+  .recent-list a:hover { color: var(--color-accent-2); }
+  .recent-list time {
+    font-family: var(--font-mono);
     font-size: 0.85rem;
+    color: var(--color-fg-subtle);
+    font-variant-numeric: tabular-nums;
   }
 </style>
