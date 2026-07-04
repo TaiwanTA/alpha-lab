@@ -1,0 +1,45 @@
+name: Deploy to Cloudflare Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: pages-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Build and deploy
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: blog/package-lock.json
+
+      - name: Install dependencies
+        working-directory: blog
+        run: npm ci
+
+      - name: Lint
+        working-directory: blog
+        run: npm run lint
+
+      - name: Build
+        working-directory: blog
+        run: npm run build
+
+      - name: Deploy to Cloudflare Pages
+        working-directory: blog
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_KEY }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CF_ACCOUNT_ID }}
+        run: npx wrangler pages deploy dist --project-name=alpha-lab --commit-dirty=true
