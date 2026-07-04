@@ -1,6 +1,6 @@
 name = "alpha-lab"
 compatibility_date = "2026-07-03"
-compatibility_flags = ["nodejs_compat"]
+compatibility_flags = [ "nodejs_compat" ]
 
 # Cloudflare Pages 透過 `wrangler pages deploy` 部署時不需要 build 設定
 # build 是 GH Actions 做的(workflow: .github/workflows/deploy.yml)
