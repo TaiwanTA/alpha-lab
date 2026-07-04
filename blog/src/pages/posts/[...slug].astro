@@ -1,0 +1,128 @@
+---
+import { getCollection, render } from 'astro:content';
+import Layout from '../../layouts/Layout.astro';
+
+export async function getStaticPaths() {
+  const posts = await getCollection('blog');
+  return posts.map(post => ({
+    params: { slug: post.id },
+    props: { post },
+  }));
+}
+
+const { post } = Astro.props;
+const { Content } = await render(post);
+const isUnverified = post.data.status === 'unverified';
+---
+
+<Layout title={`${post.data.title} — alpha-lab`}>
+  <article>
+    {isUnverified && (
+      <div class="banner">
+        <strong>風格示範 / 未驗證</strong> — 這篇文章的所有具體事實,來自 LLM 內建知識而未經原始來源驗證。
+        作為研究示範看風格就好,不應作為投資依據。
+      </div>
+    )}
+
+    <header>
+      <h1>{post.data.title}</h1>
+      <p class="meta">
+        <span class="date">{post.data.date}</span>
+        {post.data.tags.length > 0 && (
+          <span class="tags">
+            {post.data.tags.map(t => <span class="tag">#{t}</span>)}
+          </span>
+        )}
+        {isUnverified && <span class="status-badge">unverified</span>}
+      </p>
+    </header>
+
+    <Content />
+  </article>
+</Layout>
+
+<style>
+  .banner {
+    background: #fff4e5;
+    border-left: 4px solid #d97706;
+    padding: 1rem 1.25rem;
+    margin: 0 0 2rem;
+    font-size: 0.95rem;
+    color: #7c2d12;
+    border-radius: 4px;
+  }
+
+  .meta {
+    color: #666;
+    font-size: 0.9rem;
+    margin: 0 0 2rem;
+    display: flex;
+    gap: 1rem;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+
+  .tags { display: inline-flex; gap: 0.5rem; flex-wrap: wrap; }
+  .tag {
+    background: #f3f4f6;
+    color: #374151;
+    padding: 0.15rem 0.5rem;
+    border-radius: 3px;
+    font-size: 0.85rem;
+  }
+
+  .status-badge {
+    background: #fef3c7;
+    color: #92400e;
+    padding: 0.15rem 0.5rem;
+    border-radius: 3px;
+    font-size: 0.85rem;
+    font-weight: 600;
+  }
+
+  :global(article h1) { font-size: 2rem; margin: 0 0 1rem; line-height: 1.3; }
+  :global(article h2) {
+    font-size: 1.5rem;
+    margin: 2.5rem 0 1rem;
+    padding-top: 1rem;
+    border-top: 1px solid #eee;
+  }
+  :global(article h3) { font-size: 1.2rem; margin: 1.5rem 0 0.5rem; }
+  :global(article p) { margin: 1rem 0; }
+  :global(article ul),
+  :global(article ol) { padding-left: 1.5rem; }
+  :global(article li) { margin: 0.25rem 0; }
+  :global(article blockquote) {
+    border-left: 3px solid #ddd;
+    padding-left: 1rem;
+    margin: 1rem 0;
+    color: #555;
+  }
+  :global(article table) {
+    border-collapse: collapse;
+    width: 100%;
+    margin: 1rem 0;
+    font-size: 0.95rem;
+  }
+  :global(article th),
+  :global(article td) {
+    border: 1px solid #ddd;
+    padding: 0.5rem 0.75rem;
+    text-align: left;
+  }
+  :global(article th) {
+    background: #f9fafb;
+    font-weight: 600;
+  }
+  :global(article code) {
+    background: #f3f4f6;
+    padding: 0.1rem 0.3rem;
+    border-radius: 3px;
+    font-size: 0.9em;
+  }
+  :global(article hr) {
+    border: none;
+    border-top: 1px solid #eee;
+    margin: 2rem 0;
+  }
+</style>

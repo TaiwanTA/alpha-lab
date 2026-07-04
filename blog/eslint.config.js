@@ -19,6 +19,8 @@ export default antfu(
     rules: {
       // Astro 內部 JSX-like 語法,放寬一些規則
       'no-unused-vars': 'off',
+      // Astro frontmatter 必須用 top-level await 處理 async data
+      'antfu/no-top-level-await': 'off',
       // Astro plugin 把 <style> block 誤判為 JSX,關掉這些 style 規則
       'style/jsx-one-expression-per-line': 'off',
       'style/no-multiple-empty-lines': 'off',
