@@ -13,11 +13,6 @@ jobs:
   deploy:
     name: Build and deploy
     runs-on: ubuntu-latest
-    # 組織層 secrets/vars 預設不會傳到 workflow,需要 opt-in
-    secrets: inherit
-    permissions:
-      contents: read
-      deployments: write
 
     steps:
       - name: Checkout
