@@ -1,102 +1,221 @@
 ---
-import { getCollection } from 'astro:content';
 import Layout from '../layouts/Layout.astro';
+import { getAllInvestors, getAllTags, getPublishedPosts, STATUS_LABELS } from '../lib/posts';
+
+const posts = await getPublishedPosts();
+const tags = getAllTags(posts);
+const investors = getAllInvestors(posts);
+const sortedByInvestorCount = [...investors.entries()].sort((a, b) => b[1].length - a[1].length).slice(0, 5);
 
 const today = new Date().toISOString().slice(0, 10);
-const posts = (await getCollection('blog')).sort(
-  (a, b) => b.data.date.localeCompare(a.data.date),
-);
 ---
 
 <Layout title="alpha-lab — 知名投資人研究">
-  <header>
+  <div class="hero">
     <h1>alpha-lab</h1>
-    <p class="tagline">研究知名投資人的觀點、論點、與市場直覺</p>
-  </header>
-
-  <section>
-    <h2>Posts</h2>
-    <ul class="post-list">
-      {posts.map(post => (
-        <li>
-          <a href={`/posts/${post.id}/`}>{post.data.title}</a>
-          <p class="meta">
-            <span class="date">{post.data.date}</span>
-            {post.data.status === 'unverified' && <span class="badge">unverified</span>}
-          </p>
-          <p class="summary">{post.data.summary}</p>
-        </li>
-      ))}
-    </ul>
-  </section>
-
-  <footer>
-    <p>更新於 {today}</p>
-    <p class="note">
-      所有文章若標示 <span class="badge-inline">unverified</span>,表示內容未經原始來源驗證 — 這是刻意標示,不表示內容有誤,只表示作者(AI agent)沒有完成查證。
-      這個站的兩難:整理公開資訊、研究方法論是 AI 能做的;但可重複查證每個論點的真偽、不是。請讀者自負風險。
+    <p class="tagline">研究公開投資人的言論、論點、與決策。每一篇明示來源、可重複查證或標為未驗證。</p>
+    <p class="subtagline">
+      本站有 <strong>{posts.length}</strong> 篇已發文 · <strong>{tags.size}</strong> 個主題 · <strong>{investors.size}</strong> 個被追蹤的投資人。
     </p>
+  </div>
+
+  <div class="home-grid">
+    <section class="posts-section">
+      <div class="section-header">
+        <h2>最新文章</h2>
+        <a href="/archive/" class="section-link">完整 archive →</a>
+      </div>
+      <ol class="posts-list">
+        {posts.map(post => (
+          <li class={`post-row status-${post.data.status}`}>
+            <article>
+              <header>
+                <a href={`/posts/${post.id}/`} class="post-title">{post.data.title}</a>
+                <span class={`status-badge status-${post.data.status}`}>{STATUS_LABELS[post.data.status]?.label ?? post.data.status}</span>
+              </header>
+              <p class="summary">{post.data.summary}</p>
+              <div class="row-meta">
+                <span class="date">{post.data.date}</span>
+                {post.data.investors.length > 0 && (
+                  <span class="row-investors">
+                    {post.data.investors.map((inv: string) => (
+                      <a href={`/investors/${encodeURIComponent(inv)}/`}>{inv}</a>
+                    ))}
+                  </span>
+                )}
+                {post.data.tags.length > 0 && (
+                  <span class="row-tags">
+                    {post.data.tags.map((t: string) => (
+                      <a href={`/tags/${encodeURIComponent(t)}/`}>#{t}</a>
+                    ))}
+                  </span>
+                )}
+              </div>
+            </article>
+          </li>
+        ))}
+      </ol>
+    </section>
+
+    <aside class="side">
+      <section class="card">
+        <h3>熱門 Tags</h3>
+        <ul class="tag-cloud">
+          {[...tags.entries()].slice(0, 12).map(([tag, count]) => (
+            <li><a href={`/tags/${encodeURIComponent(tag)}/`}>#{tag}<span class="count"> {count}</span></a></li>
+          ))}
+          {tags.size > 12 && <li><a href="/tags/">全部 {tags.size} tags →</a></li>}
+        </ul>
+      </section>
+
+      <section class="card">
+        <h3>追蹤的投資人</h3>
+        <ul class="investor-list">
+          {sortedByInvestorCount.map(([inv, list]) => (
+            <li>
+              <a href={`/investors/${encodeURIComponent(inv)}/`}>{inv}</a>
+              <span class="count">{list.length}</span>
+            </li>
+          ))}
+          {investors.size > 5 && <li><a href="/investors/">全部 →</a></li>}
+        </ul>
+      </section>
+
+      <section class="card">
+        <h3>訂閱</h3>
+        <ul class="subscribe">
+          <li><a href="/feed.xml">RSS</a> — 訂閱本體</li>
+          <li><a href="/feed.atom.xml">Atom</a></li>
+          <li><a href="/feed.json">JSON Feed</a></li>
+        </ul>
+        <p class="card-note">本站會每天更新(目標)。</p>
+      </section>
+    </aside>
+  </div>
+
+  <footer class="home-footer">
+    <p>更新於 {today}。</p>
   </footer>
 </Layout>
 
 <style>
-  header { margin-bottom: 3rem; }
-  h1 { font-size: 2.5rem; margin: 0 0 0.5rem; }
-  .tagline { color: #666; font-size: 1.1rem; margin: 0; }
+  .hero { margin-bottom: 3rem; }
+  .hero h1 { font-size: 2.5rem; margin: 0 0 0.5rem; }
+  .tagline { font-size: 1.1rem; color: var(--color-muted); margin: 0 0 1rem; max-width: 60ch; }
+  .subtagline { font-size: 0.95rem; color: var(--color-muted); margin: 0; }
 
-  .post-list { list-style: none; padding: 0; }
-  .post-list li {
-    margin-bottom: 2rem;
-    padding-bottom: 1.5rem;
-    border-bottom: 1px solid #eee;
+  .home-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 3rem;
   }
-  .post-list a {
-    font-size: 1.3rem;
-    font-weight: 600;
-    text-decoration: none;
-    color: #111;
+  @media (min-width: 1024px) {
+    .home-grid {
+      grid-template-columns: minmax(0, 1fr) 280px;
+    }
   }
-  .post-list a:hover { text-decoration: underline; }
-  .meta {
-    color: #999;
-    font-size: 0.85rem;
-    margin: 0.25rem 0;
+
+  .section-header {
     display: flex;
-    gap: 0.75rem;
+    align-items: baseline;
+    gap: 1rem;
+    margin-bottom: 1.5rem;
+  }
+  .section-header h2 { font-size: 1.5rem; margin: 0; flex: 1; border-top: 0; padding-top: 0; }
+  .section-link { font-size: 0.9rem; color: var(--color-link); text-decoration: none; }
+
+  .posts-list { list-style: none; padding: 0; margin: 0; }
+  .post-row {
+    border-bottom: 1px solid var(--color-border);
+    padding: 1.25rem 0;
+  }
+  .post-row article header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 1rem;
+    margin-bottom: 0.4rem;
+  }
+  .post-title {
+    font-size: 1.2rem;
+    font-weight: 600;
+    color: var(--color-fg);
+    text-decoration: none;
+  }
+  .post-title:hover { color: var(--color-link); text-decoration: underline; }
+  .summary { color: var(--color-muted); margin: 0 0 0.5rem; font-size: 0.95rem; }
+  .row-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem 1rem;
+    font-size: 0.85rem;
+    color: var(--color-muted);
     align-items: center;
   }
-  .summary {
-    color: #555;
-    margin: 0.25rem 0 0;
+  .row-tags a, .row-investors a {
+    color: var(--color-link);
+    text-decoration: none;
+    margin-right: 0.4rem;
   }
 
-  .badge {
-    background: #fef3c7;
-    color: #92400e;
-    padding: 0.1rem 0.4rem;
+  .status-badge {
+    font-weight: 600;
+    padding: 0.15rem 0.5rem;
     border-radius: 3px;
     font-size: 0.75rem;
-    font-weight: 600;
+    white-space: nowrap;
   }
-  .badge-inline {
-    background: #fef3c7;
-    color: #92400e;
-    padding: 0.05rem 0.3rem;
-    border-radius: 3px;
-    font-size: 0.85rem;
-    font-weight: 600;
+  .status-unverified { background: #fef3c7; color: #92400e; }
+  .status-verified   { background: #dcfce7; color: #14532d; }
+  .status-draft      { background: #f3f4f6; color: #374151; }
+  .status-corrected  { background: #dbeafe; color: #1e40af; }
+  @media (prefers-color-scheme: dark) {
+    .status-unverified { background: #422006; color: #fde68a; }
+    .status-verified   { background: #052e1a; color: #86efac; }
+    .status-draft      { background: #1f2937; color: #d1d5db; }
+    .status-corrected  { background: #1e293b; color: #93c5fd; }
   }
 
-  footer {
-    margin-top: 4rem;
-    color: #666;
+  .side .card {
+    border: 1px solid var(--color-border);
+    border-radius: 6px;
+    padding: 1rem 1.25rem;
+    margin-bottom: 1rem;
+  }
+  .side .card h3 {
+    font-size: 0.9rem;
+    margin: 0 0 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--color-muted);
+  }
+  .side ul { list-style: none; padding: 0; margin: 0; }
+  .side li { margin: 0.4rem 0; font-size: 0.9rem; }
+  .side a { text-decoration: none; }
+  .side a:hover { text-decoration: underline; }
+  .count { color: var(--color-muted); font-size: 0.8rem; }
+
+  .tag-cloud { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+  .tag-cloud li { margin: 0; }
+  .tag-cloud a {
+    background: var(--color-code-bg);
+    padding: 0.2rem 0.5rem;
+    border-radius: 3px;
     font-size: 0.85rem;
   }
-  .note {
-    background: #f9fafb;
-    border-left: 3px solid #d1d5db;
-    padding: 0.75rem 1rem;
-    margin-top: 1rem;
-    line-height: 1.5;
+
+  .investor-list li {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+  }
+
+  .subscribe li { font-size: 0.85rem; }
+  .card-note { font-size: 0.8rem; color: var(--color-muted); margin: 0.5rem 0 0; }
+
+  .home-footer {
+    margin-top: 4rem;
+    color: var(--color-muted);
+    font-size: 0.85rem;
   }
 </style>

@@ -1,3 +1,5 @@
+import mdx from '@astrojs/mdx';
+import sitemap from '@astrojs/sitemap';
 // @ts-check
 import { defineConfig } from 'astro/config';
 
@@ -10,4 +12,10 @@ export default defineConfig({
   build: {
     format: 'directory',
   },
+  integrations: [
+    sitemap({
+      filter: page => !page.includes('/search/'),
+    }),
+    mdx(),
+  ],
 });

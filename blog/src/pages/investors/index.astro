@@ -1,0 +1,56 @@
+---
+import Layout from '../../layouts/Layout.astro';
+import { getAllInvestors, getPublishedPosts } from '../../lib/posts';
+
+const posts = await getPublishedPosts();
+const investorMap = getAllInvestors(posts);
+const investors = [...investorMap.entries()];
+---
+
+<Layout title="追蹤的投資人 — alpha-lab" description="本站所有追蹤的投資人清單,依篇數排序。">
+  <header class="page-header">
+    <h1>追蹤的投資人</h1>
+    <p>{investors.length} 位 · 從公開言論 / SEC 13F / 訪談 / 社群媒體抓的</p>
+  </header>
+
+  <ol class="investor-list">
+    {investors.map(([name, list]) => (
+      <li>
+        <a href={`/investors/${encodeURIComponent(name)}/`} class="name">{name}</a>
+        <span class="count">{list.length} 篇</span>
+        <span class="last">
+          最近: {list.sort((a, b) => b.data.date.localeCompare(a.data.date))[0].data.date}
+        </span>
+      </li>
+    ))}
+  </ol>
+</Layout>
+
+<style>
+  .page-header { margin-bottom: 2rem; }
+  .page-header h1 { font-size: 2rem; margin: 0 0 0.5rem; }
+  .page-header p { color: var(--color-muted); margin: 0; }
+  .investor-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+  }
+  .investor-list li {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 0.4rem 1rem;
+    padding: 0.75rem 0;
+    border-bottom: 1px solid var(--color-border);
+  }
+  .name {
+    font-size: 1.05rem;
+    font-weight: 600;
+    color: var(--color-fg);
+    text-decoration: none;
+    flex: 0 0 auto;
+  }
+  .name:hover { color: var(--color-link); }
+  .count { color: var(--color-muted); font-size: 0.85rem; }
+  .last { color: var(--color-muted); font-size: 0.85rem; margin-left: auto; }
+</style>

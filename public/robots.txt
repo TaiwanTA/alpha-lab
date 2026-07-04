@@ -1,0 +1,5 @@
+User-agent: *
+Allow: /
+Disallow: /search/
+Disallow: /draft/
+Sitemap: https://alpha-lab.pages.dev/sitemap-index.xml

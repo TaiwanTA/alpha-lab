@@ -1,0 +1,63 @@
+---
+import Layout from '../layouts/Layout.astro';
+import { getPublishedPosts } from '../lib/posts';
+
+const posts = await getPublishedPosts();
+const recent = posts.slice(0, 5);
+const allTags = [...new Set(posts.flatMap(p => p.data.tags))].slice(0, 12);
+---
+
+<Layout title="Page not found — alpha-lab" noindex={true}>
+  <article class="md-page">
+    <h1>404 · 找不到這頁</h1>
+    <p class="lede">這個 URL 不存在 — 或者曾經存在,但某個 slug 重命名了(本站原則上不重命名 slug,如果你看到這個,可能是連結副本過期)。</p>
+
+    <h2>怎麼辦</h2>
+    <ul>
+      <li>用搜尋框找你要的內容 — <a href="/search/">/search/</a></li>
+      <li>看 <a href="/tags/">所有 tags</a> 找主題</li>
+      <li>看 <a href="/investors/">投資人索引</a> 找人</li>
+      <li>看 <a href="/archive/">完整 archive</a> 找時間點</li>
+    </ul>
+
+    <h2>最近的文章</h2>
+    <ol class="recent-list">
+      {recent.map(post => (
+        <li>
+          <a href={`/posts/${post.id}/`}>{post.data.title}</a>
+          <span class="date">{post.data.date}</span>
+        </li>
+      ))}
+    </ol>
+
+    <h2>常用標籤</h2>
+    <ul class="tags">
+      {allTags.map(t => <li><a href={`/tags/${encodeURIComponent(t)}/`}>#{t}</a></li>)}
+    </ul>
+  </article>
+</Layout>
+
+<style>
+  .md-page { max-width: var(--max-width); margin: 0 auto; }
+  .md-page h1 { font-size: 2rem; margin: 0 0 1rem; }
+  .md-page .lede { color: var(--color-muted); margin: 0 0 2rem; }
+  .md-page h2 { font-size: 1.5rem; margin: 2rem 0 1rem; border-top: 1px solid var(--color-border); padding-top: 1rem; }
+  .md-page ul, .md-page ol { padding-left: 1.5rem; }
+  .recent-list { list-style: none; padding: 0; }
+  .recent-list li {
+    padding: 0.5rem 0;
+    border-bottom: 1px solid var(--color-border);
+    display: flex;
+    gap: 1rem;
+  }
+  .recent-list a { flex: 1; }
+  .recent-list .date { color: var(--color-muted); font-size: 0.85rem; }
+  .tags { list-style: none; padding: 0; display: flex; flex-wrap: wrap; gap: 0.5rem; }
+  .tags a {
+    background: var(--color-code-bg);
+    padding: 0.2rem 0.5rem;
+    border-radius: 3px;
+    text-decoration: none;
+    font-size: 0.85rem;
+  }
+</style>

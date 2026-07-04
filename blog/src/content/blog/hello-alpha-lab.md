@@ -4,6 +4,8 @@ date: "2026-07-03"
 summary: "本站啟動。第一篇 placeholder,風格待確認。"
 status: "unverified"
 tags: ["meta"]
+investors: []
+tickers: []
 ---
 
 這是第一篇 placeholder post,用來驗證整個 pipeline(內容撰寫 → build → deploy)能跑通。

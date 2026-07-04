@@ -3,7 +3,10 @@ title: "Michael Burry:給反向投資人的一張 cheatsheet"
 date: "2026-07-04"
 summary: "主題研究示範 — Burry 的方法論是否仍可複製,以及複製他會死在哪裡。"
 status: "unverified"
-tags: ["主題研究", "Michael Burry", "反向投資", "風格示範"]
+tags: ["主題研究", "反向投資", "風格示範", "long-form"]
+investors: ["Michael Burry"]
+tickers: []
+investmentClaim: true
 ---
 
 > **風格示範 / 未驗證**

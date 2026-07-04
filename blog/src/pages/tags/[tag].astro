@@ -1,0 +1,116 @@
+---
+import Layout from '../../layouts/Layout.astro';
+import { getPublishedPosts, STATUS_LABELS } from '../../lib/posts';
+
+export async function getStaticPaths() {
+  const posts = await getPublishedPosts();
+  const tagSet = new Set<string>();
+  for (const post of posts) {
+    for (const t of post.data.tags) tagSet.add(t);
+  }
+  return [...tagSet].map(tag => ({
+    params: { tag },
+    props: {
+      tag,
+      posts: posts.filter(p => p.data.tags.includes(tag)),
+    },
+  }));
+}
+
+const { tag, posts } = Astro.props;
+---
+
+<Layout title={`#${tag} — alpha-lab`} description={`所有標記為 #${tag} 的文章`}>
+  <header class="page-header">
+    <nav class="breadcrumb">
+      <a href="/tags/">Tags</a>
+      <span>›</span>
+      <span>#{tag}</span>
+    </nav>
+    <h1>#{tag}</h1>
+    <p>{posts.length} 篇文章</p>
+  </header>
+
+  <ol class="posts-list">
+    {posts.map((post: any) => (
+      <li>
+        <article>
+          <header>
+            <a href={`/posts/${post.id}/`} class="post-title">{post.data.title}</a>
+            <span class={`status-badge status-${post.data.status}`}>{STATUS_LABELS[post.data.status]?.label}</span>
+          </header>
+          <p class="summary">{post.data.summary}</p>
+          <div class="row-meta">
+            <span class="date">{post.data.date}</span>
+            {post.data.investors.map((inv: string) => (
+              <a href={`/investors/${encodeURIComponent(inv)}/`}>{inv}</a>
+            ))}
+            <span class="row-tags">
+              {post.data.tags.map((t: string) => (
+                <a href={`/tags/${encodeURIComponent(t)}/`}>#{t}</a>
+              ))}
+            </span>
+          </div>
+        </article>
+      </li>
+    ))}
+  </ol>
+</Layout>
+
+<style>
+  .page-header { margin-bottom: 2rem; }
+  .breadcrumb {
+    color: var(--color-muted);
+    font-size: 0.9rem;
+    margin-bottom: 0.5rem;
+  }
+  .breadcrumb a { color: var(--color-muted); text-decoration: none; }
+  .breadcrumb a:hover { color: var(--color-link); }
+  .page-header h1 { font-size: 2rem; margin: 0.25rem 0 0.5rem; }
+  .page-header p { color: var(--color-muted); margin: 0; }
+  .posts-list { list-style: none; padding: 0; margin: 0; }
+  .posts-list li {
+    border-bottom: 1px solid var(--color-border);
+    padding: 1.25rem 0;
+  }
+  .posts-list header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 1rem;
+    margin-bottom: 0.4rem;
+  }
+  .post-title {
+    font-size: 1.15rem;
+    font-weight: 600;
+    color: var(--color-fg);
+    text-decoration: none;
+  }
+  .post-title:hover { color: var(--color-link); }
+  .summary { color: var(--color-muted); margin: 0 0 0.5rem; font-size: 0.95rem; }
+  .row-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem 1rem;
+    font-size: 0.85rem;
+    color: var(--color-muted);
+  }
+  .row-meta a { color: var(--color-link); text-decoration: none; margin-right: 0.4rem; }
+  .status-badge {
+    font-weight: 600;
+    padding: 0.15rem 0.5rem;
+    border-radius: 3px;
+    font-size: 0.75rem;
+    white-space: nowrap;
+  }
+  .status-unverified { background: #fef3c7; color: #92400e; }
+  .status-verified   { background: #dcfce7; color: #14532d; }
+  .status-draft      { background: #f3f4f6; color: #374151; }
+  .status-corrected  { background: #dbeafe; color: #1e40af; }
+  @media (prefers-color-scheme: dark) {
+    .status-unverified { background: #422006; color: #fde68a; }
+    .status-verified   { background: #052e1a; color: #86efac; }
+    .status-draft      { background: #1f2937; color: #d1d5db; }
+    .status-corrected  { background: #1e293b; color: #93c5fd; }
+  }
+</style>

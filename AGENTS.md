@@ -19,11 +19,25 @@
 
 ## 工作流(分階段,user 強調 one at a time)
 1. ✅ 階段 1:工作區規劃
-2. ⏳ 階段 2:blog 技術棧 + 準備
+2. ⏳ 階段 2:blog tech stack + 準備
+   - 完成條件(兩個**都**要達成):
+     - ✅ 整個跑通:lint / build / CI / deploy 全鏈,site 上看得到東西
+     - ⏳ 風格確認:**user 在 Telegram 上看過線上版本並回饋「方向對」**,不能只有 agent 自認
+   - 完成條件的「最低標(below this is unacceptable)」功能清單:
+     - TOC(table of contents)於長文頁面
+     - 首頁文章列表 + 排序(by date / investor / type)
+     - tag system + `/tags/` 列表頁 + `/tags/<tag>/` 篩選
+     - 文章內文 post-level 搜尋(client-side,不需後端)
+     - 文章頁面附「上一篇 / 下一篇」導航
+     - RSS feed(`/rss.xml`)— 訂閱規格
+     - sitemap.xml — SEO 必要
+     - 閱讀時間 / 字數估算 — 顯示在 header
+   - user 追加需求整合到這份清單,不重複提問
 3. ⏳ 階段 3:查詢/寫稿流程
 4. ⏳ 階段 4:真實工作(投資人清單在最後才決定)
 
 > **不要搶進**。做一步停一步等 user 確認。
+> **不要自認階段完成**:必須 user 確認才算階段結,特別是風格這類主觀判定。
 
 ## Blog 長度風格
 依類型調整長度密度,不要為長而長:

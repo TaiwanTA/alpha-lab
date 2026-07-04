@@ -1,0 +1,121 @@
+---
+import Layout from '../../layouts/Layout.astro';
+import { formatDate, getPublishedPosts, STATUS_LABELS } from '../../lib/posts';
+
+export async function getStaticPaths() {
+  const posts = await getPublishedPosts();
+  const investorSet = new Set<string>();
+  for (const post of posts) {
+    for (const i of post.data.investors) investorSet.add(i);
+  }
+  return [...investorSet].map(investor => ({
+    params: { investor },
+    props: {
+      investor,
+      posts: posts.filter(p => p.data.investors.includes(investor)),
+    },
+  }));
+}
+
+const { investor, posts } = Astro.props;
+
+const timeline = [...posts].sort((a, b) => a.data.date.localeCompare(b.data.date));
+const first = timeline[0];
+const last = timeline[timeline.length - 1];
+---
+
+<Layout title={investor} description={`所有提及 ${investor} 的研究文章`}>
+  <header class="page-header">
+    <nav class="breadcrumb">
+      <a href="/investors/">Investors</a>
+      <span>›</span>
+      <span>{investor}</span>
+    </nav>
+    <h1>{investor}</h1>
+    <p>
+      {posts.length} 篇研究 · 從 {first?.data.date} 到 {last?.data.date}
+    </p>
+  </header>
+
+  <section class="card">
+    <h2>立場演變時間軸</h2>
+    <ol class="timeline">
+      {timeline.map(post => (
+        <li class="timeline-item">
+          <time>{formatDate(post.data.date)}</time>
+          <a href={`/posts/${post.id}/`}>{post.data.title}</a>
+          <span class={`status-badge status-${post.data.status}`}>{STATUS_LABELS[post.data.status]?.label}</span>
+          <p>{post.data.summary}</p>
+        </li>
+      ))}
+    </ol>
+  </section>
+</Layout>
+
+<style>
+  .page-header { margin-bottom: 2rem; }
+  .breadcrumb { color: var(--color-muted); font-size: 0.9rem; margin-bottom: 0.5rem; }
+  .breadcrumb a { color: var(--color-muted); text-decoration: none; }
+  .page-header h1 { font-size: 2rem; margin: 0.25rem 0 0.5rem; }
+  .page-header p { color: var(--color-muted); margin: 0; }
+  .card {
+    border: 1px solid var(--color-border);
+    border-radius: 6px;
+    padding: 1.5rem;
+  }
+  .card h2 { font-size: 1.3rem; margin: 0 0 1rem; border-top: 0; padding-top: 0; }
+  .timeline {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+  }
+  .timeline-item {
+    border-left: 2px solid var(--color-border);
+    padding-left: 1rem;
+    margin-left: 0.5rem;
+    padding-bottom: 1.5rem;
+    position: relative;
+  }
+  .timeline-item::before {
+    content: '';
+    position: absolute;
+    left: -6px;
+    top: 0.25rem;
+    width: 10px;
+    height: 10px;
+    background: var(--color-link);
+    border-radius: 50%;
+  }
+  .timeline-item:last-child { padding-bottom: 0; }
+  .timeline-item time {
+    display: block;
+    color: var(--color-muted);
+    font-size: 0.85rem;
+    margin-bottom: 0.25rem;
+  }
+  .timeline-item a {
+    font-weight: 600;
+    color: var(--color-fg);
+    text-decoration: none;
+  }
+  .timeline-item a:hover { color: var(--color-link); }
+  .timeline-item p { margin: 0.4rem 0 0; color: var(--color-muted); font-size: 0.95rem; }
+  .status-badge {
+    font-weight: 600;
+    padding: 0.1rem 0.4rem;
+    border-radius: 3px;
+    font-size: 0.7rem;
+    margin-left: 0.5rem;
+    vertical-align: middle;
+  }
+  .status-unverified { background: #fef3c7; color: #92400e; }
+  .status-verified   { background: #dcfce7; color: #14532d; }
+  .status-draft      { background: #f3f4f6; color: #374151; }
+  .status-corrected  { background: #dbeafe; color: #1e40af; }
+  @media (prefers-color-scheme: dark) {
+    .status-unverified { background: #422006; color: #fde68a; }
+    .status-verified   { background: #052e1a; color: #86efac; }
+    .status-draft      { background: #1f2937; color: #d1d5db; }
+    .status-corrected  { background: #1e293b; color: #93c5fd; }
+  }
+</style>

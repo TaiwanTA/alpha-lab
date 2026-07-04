@@ -1,0 +1,174 @@
+---
+import Layout from '../layouts/Layout.astro';
+---
+
+<Layout title="Search — alpha-lab" description="搜尋 alpha-lab 的所有文章" noindex={true}>
+  <article class="search-page">
+    <h1>Search</h1>
+    <p class="lede">全文搜尋(支援中英文、CJK segmentation)。使用 <code>/</code> 快捷鍵聚焦搜尋框。<code>Esc</code> 離開。</p>
+
+    <div class="search-controls">
+      <input id="search-input" type="search" placeholder="輸入關鍵字…(標籤、投資人、文章內容)" autocomplete="off" autofocus />
+    </div>
+    <p id="search-status" class="status">載入索引中…</p>
+    <ul id="search-results"></ul>
+  </article>
+</Layout>
+
+<script>
+import MiniSearch from 'minisearch';
+
+const statusEl = document.getElementById('search-status')!;
+const inputEl = document.getElementById('search-input') as HTMLInputElement;
+const resultsEl = document.getElementById('search-results')!;
+
+const mini = new MiniSearch({
+  fields: ['title', 'summary', 'tags', 'investors', 'body'],
+  storeFields: ['title', 'summary', 'tags', 'investors', 'date', 'status'],
+  searchOptions: {
+    boost: { title: 4, tags: 3, investors: 3 },
+    fuzzy: 0.2,
+    prefix: true,
+  },
+});
+
+function escapeHTML(s: string): string {
+  return s.replace(/[&<>"']/g, (c) => {
+    const map: Record<string, string> = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', '\'': '&#39;' };
+    return map[c] || c;
+  });
+}
+
+function renderResults(matches: { id: string; title: string; summary: string; date: string; tags: string[]; investors: string[] }[]): void {
+  if (matches.length === 0) {
+    resultsEl.innerHTML = '<li class="empty">沒有符合的內容。試試別的關鍵字,或去 <a href="/tags/">/tags/</a> 看看。</li>';
+    return;
+  }
+  const html = matches.map((m) => {
+    const tagLinks = m.tags.map(t => `<a class="tag" href="/tags/${encodeURIComponent(t)}/">#${escapeHTML(t)}</a>`).join('');
+    const invLinks = m.investors.map(inv => `<a class="investor" href="/investors/${encodeURIComponent(inv)}/">${escapeHTML(inv)}</a>`).join('');
+    return `<li class="result">
+          <a class="result-title" href="/posts/${escapeHTML(m.id)}/">${escapeHTML(m.title)}</a>
+          <p class="result-summary">${escapeHTML(m.summary)}</p>
+          <div class="result-meta">
+            <span class="date">${escapeHTML(m.date)}</span>
+            ${tagLinks}
+            ${invLinks}
+          </div>
+        </li>`;
+  }).join('');
+  resultsEl.innerHTML = html;
+}
+
+function debounce(fn: () => void, ms: number): () => void {
+  let t: ReturnType<typeof setTimeout> | null = null;
+  return (): void => {
+    if (t)
+      clearTimeout(t);
+    t = setTimeout(fn, ms);
+  };
+}
+
+const doSearch = debounce((): void => {
+  const q = inputEl.value.trim();
+  if (!q) {
+    resultsEl.innerHTML = '';
+    statusEl.textContent = '索引就緒';
+    return;
+  }
+  const matches = mini.search(q) as { id: string; title: string; summary: string; date: string; tags: string[]; investors: string[] }[];
+  statusEl.textContent = matches.length === 0 ? '沒有結果' : `${matches.length} 個結果`;
+  renderResults(matches.slice(0, 50));
+}, 150);
+
+inputEl.addEventListener('input', doSearch);
+
+document.addEventListener('keydown', (e: KeyboardEvent): void => {
+  if (e.key === '/' && document.activeElement !== inputEl) {
+    e.preventDefault();
+    inputEl.focus();
+  }
+  else if (e.key === 'Escape' && document.activeElement === inputEl) {
+    inputEl.blur();
+  }
+});
+
+// Wait, just call the async IIFE without awaiting — promise floats.
+(async () => {
+  try {
+    const res = await fetch('/search-index.json');
+    if (!res.ok)
+      throw new Error(`HTTP ${res.status}`);
+    const docs = await res.json();
+    mini.addAll(docs);
+    statusEl.textContent = `索引就緒 — ${docs.length} 篇可用搜尋`;
+  }
+  catch (err) {
+    statusEl.textContent = `索引載入失敗:${(err as Error).message}`;
+  }
+})();
+</script>
+
+<style>
+  .search-page { max-width: 720px; margin: 0 auto; }
+  .search-page h1 { font-size: 2rem; margin: 0 0 0.5rem; }
+  .lede { color: var(--color-muted); margin: 0 0 1.5rem; }
+  .search-controls { margin-bottom: 1rem; }
+  #search-input {
+    width: 100%;
+    padding: 0.7rem 1rem;
+    font-size: 1rem;
+    border: 1px solid var(--color-border);
+    border-radius: 6px;
+    background: var(--color-bg);
+    color: var(--color-fg);
+    font-family: var(--font-base);
+  }
+  #search-input:focus {
+    outline: 2px solid var(--color-link);
+    outline-offset: 1px;
+  }
+  .status {
+    color: var(--color-muted);
+    font-size: 0.9rem;
+    margin: 0 0 1rem;
+  }
+  #search-results {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+  }
+  .result {
+    padding: 1rem 0;
+    border-bottom: 1px solid var(--color-border);
+  }
+  .result-title {
+    font-size: 1.1rem;
+    font-weight: 600;
+    text-decoration: none;
+    color: var(--color-fg);
+  }
+  .result-title:hover { color: var(--color-link); }
+  .result-summary {
+    margin: 0.4rem 0;
+    color: var(--color-muted);
+    font-size: 0.95rem;
+  }
+  .result-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem 0.8rem;
+    font-size: 0.85rem;
+    color: var(--color-muted);
+  }
+  .result-meta a {
+    color: var(--color-link);
+    text-decoration: none;
+  }
+  .result-meta a:hover { text-decoration: underline; }
+  .empty {
+    color: var(--color-muted);
+    font-size: 0.95rem;
+    padding: 1rem 0;
+  }
+</style>
