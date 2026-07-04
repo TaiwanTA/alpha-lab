@@ -315,18 +315,13 @@ const showLastmod = diffDays > 7;
   .post-body :global(p) { margin: 1.25em 0; }
   .post-body :global(h2) {
     font-family: var(--font-sans);
-    font-size: 1.5rem;
+    font-size: 1.45rem;
     font-weight: 700;
     letter-spacing: -0.02em;
     margin: 3em 0 1em;
-    padding-top: 0.5em;
+    padding-top: 1em;
     border-top: 1px solid var(--color-border);
     scroll-margin-top: 1rem;
-  }
-  .post-body :global(h2)::before {
-    content: '# ';
-    color: var(--color-accent-2);
-    font-weight: 600;
   }
   .post-body :global(h3) {
     font-family: var(--font-sans);
@@ -391,9 +386,15 @@ const showLastmod = diffDays > 7;
   }
   .post-body :global(hr) {
     border: none;
-    border-top: 1px solid var(--color-border);
     margin: 3em auto;
     width: 30%;
+    text-align: center;
+  }
+  .post-body :global(hr)::before {
+    content: '···';
+    color: var(--color-fg-subtle);
+    letter-spacing: 0.5em;
+    font-size: 0.85rem;
   }
   .post-body :global(a) {
     color: var(--color-accent-2);

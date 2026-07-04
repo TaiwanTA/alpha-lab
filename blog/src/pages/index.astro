@@ -139,11 +139,13 @@ const sortedByInvestorCount = [...investors.entries()].sort((a, b) => b[1].lengt
   }
   .hero-lede {
     font-family: var(--font-serif);
-    font-size: clamp(1.1rem, 2vw, 1.3rem);
+    font-style: italic;
+    font-size: clamp(1.15rem, 2vw, 1.35rem);
     line-height: 1.55;
     color: var(--color-fg-2);
     margin: 0 0 2rem;
-    max-width: 36ch;
+    max-width: 38ch;
+    letter-spacing: -0.005em;
   }
 
   .hero-stats {
