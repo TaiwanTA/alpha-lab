@@ -69,6 +69,8 @@ bun run typecheck
 ## 踩過的雷(避免再撞)
 - **Bun.sql 不會自動把 JS array 轉 Postgres array** — `WHERE id = ANY(${ids}::text[])` 會炸,要用 `IN (${sql.unsafe(idList)})`。ids 來自程式內部時 `sql.unsafe` 安全
 - **X API bearer token 需先在 developer.x.com 開 pay-per-use billing**,沒開就只回 402
+- **X API v2 沒有 `in_reply_to_status_id` 這個 tweet field** — 看 X API v1 文檔學到的人會踩。v2 的 reply 資訊放在 `referenced_tweets[]` 裡,要找 `type=="replied_to"` 的那筆取 `id`。quote tweet 是 `type=="quoted"`,不該當 parent。X 的錯誤訊息會列出合法 field 名稱,可以直接看
+- **`bun test` 會動 DB**,不是單純 unit test — `db.test.ts` 需要一個真的 Postgres。要先建 `alpha_lab_test` DB + 跑 migration:`docker exec alpha-lab-postgres createdb -U alpha alpha_lab_test && DATABASE_URL=postgres://alpha:...@localhost:5432/alpha_lab_test bun run migrate`。`x-client` / `raw-writer` / `adapter` 那幾個 test 檔才是純單元測試,不需要 DB
 
 ## 量級參考
 - 50 萬推文:raw JSONL ~1-3GB,DB ~500MB-1GB
