@@ -12,6 +12,15 @@ interface XUserTimelineConfig {
   max_tweets_per_run?: number;
 }
 
+// 從 referenced_tweets 抓出 reply 的 parent(replied_to type)的 id
+// X API v2 把 reply 資訊放在 referenced_tweets 陣列裡,沒有獨立欄位
+function extractReplyParentId(tweet: XTweetWithAuthor): string | null {
+  const refs = tweet.referenced_tweets;
+  if (!refs || refs.length === 0) return null;
+  const reply = refs.find((r) => r.type === "replied_to");
+  return reply?.id ?? null;
+}
+
 export class XUserTimelineAdapter implements SourceAdapter {
   readonly type = "x_user_timeline";
 
@@ -58,25 +67,26 @@ export class XUserTimelineAdapter implements SourceAdapter {
 
   private toRawItem(tweet: XTweetWithAuthor): RawItem {
     const createdAt = new Date(tweet.created_at);
+    const parentId = extractReplyParentId(tweet);
     return {
       source_type: this.type,
       source_label: `@${tweet.author.username}`,
       external_id: tweet.id,
-      external_parent: tweet.in_reply_to_status_id ?? null,
+      external_parent: parentId,
       created_at: createdAt,
-      context: formatContext(tweet),
+      context: formatContext(tweet, parentId),
       raw_payload: tweet,
     };
   }
 }
 
-function formatContext(tweet: XTweetWithAuthor): string {
+function formatContext(tweet: XTweetWithAuthor, parentId: string | null): string {
   const lines: string[] = [];
   lines.push(`Tweet by @${tweet.author.username} (id: ${tweet.id})`);
   lines.push(`Posted: ${tweet.created_at}`);
   lines.push(`URL: https://x.com/${tweet.author.username}/status/${tweet.id}`);
-  if (tweet.in_reply_to_status_id) {
-    lines.push(`In reply to: ${tweet.in_reply_to_status_id}`);
+  if (parentId) {
+    lines.push(`In reply to: ${parentId}`);
   }
   if (tweet.lang) {
     lines.push(`Language: ${tweet.lang}`);

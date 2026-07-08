@@ -21,13 +21,18 @@ export interface XUser {
   name: string;
 }
 
+export interface XReferencedTweet {
+  type: "replied_to" | "quoted" | "retweeted";
+  id: string;
+}
+
 export interface XApiTweet {
   id: string;
   text: string;
   created_at: string;
   author_id: string;
   conversation_id: string;
-  in_reply_to_status_id?: string;
+  referenced_tweets?: XReferencedTweet[];
   lang?: string;
   entities?: Record<string, unknown>;
   public_metrics?: Record<string, number>;
@@ -107,7 +112,7 @@ export class XClient {
     const params: Record<string, string> = {
       max_results: "100",
       "tweet.fields":
-        "created_at,conversation_id,in_reply_to_status_id,lang,entities,public_metrics",
+        "created_at,conversation_id,referenced_tweets,lang,entities,public_metrics",
       expansions: "author_id",
     };
     if (paginationToken) params.pagination_token = paginationToken;
@@ -132,7 +137,7 @@ export class XClient {
     }>("/tweets", {
       ids: ids.join(","),
       "tweet.fields":
-        "created_at,conversation_id,in_reply_to_status_id,lang,entities,public_metrics",
+        "created_at,conversation_id,referenced_tweets,lang,entities,public_metrics",
       expansions: "author_id",
     });
 

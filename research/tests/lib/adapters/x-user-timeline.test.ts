@@ -14,6 +14,14 @@ function makeTweet(overrides: Partial<XTweetWithAuthor> = {}): XTweetWithAuthor 
   };
 }
 
+// Helper:產生一則 reply tweet(透過 referenced_tweets)
+function makeReplyTweet(parentId: string, overrides: Partial<XTweetWithAuthor> = {}): XTweetWithAuthor {
+  return makeTweet({
+    referenced_tweets: [{ type: "replied_to", id: parentId }],
+    ...overrides,
+  });
+}
+
 function makeFakeClient(
   tweets: XTweetWithAuthor[] = [],
   byIds: XTweetWithAuthor[] = [],
@@ -94,7 +102,7 @@ describe("XUserTimelineAdapter.fetchNew", () => {
   });
 
   test("context includes 'In reply to' for replies", async () => {
-    const tweet = makeTweet({ id: "200", in_reply_to_status_id: "100" });
+    const tweet = makeReplyTweet("100", { id: "200" });
     const adapter = new XUserTimelineAdapter(makeFakeClient([tweet]));
     const items: any[] = [];
     for await (const item of adapter.fetchNew({}, "user-1", null)) {
@@ -102,6 +110,36 @@ describe("XUserTimelineAdapter.fetchNew", () => {
     }
     expect(items[0].external_parent).toBe("100");
     expect(items[0].context).toContain("In reply to: 100");
+  });
+
+  test("external_parent is null for quote tweets (only replied_to counts)", async () => {
+    const tweet = makeTweet({
+      id: "300",
+      referenced_tweets: [{ type: "quoted", id: "999" }],
+    });
+    const adapter = new XUserTimelineAdapter(makeFakeClient([tweet]));
+    const items: any[] = [];
+    for await (const item of adapter.fetchNew({}, "user-1", null)) {
+      items.push(item);
+    }
+    expect(items[0].external_parent).toBeNull();
+    expect(items[0].context).not.toContain("In reply to:");
+  });
+
+  test("external_parent picks replied_to when both quote and reply exist", async () => {
+    const tweet = makeTweet({
+      id: "400",
+      referenced_tweets: [
+        { type: "quoted", id: "111" },
+        { type: "replied_to", id: "222" },
+      ],
+    });
+    const adapter = new XUserTimelineAdapter(makeFakeClient([tweet]));
+    const items: any[] = [];
+    for await (const item of adapter.fetchNew({}, "user-1", null)) {
+      items.push(item);
+    }
+    expect(items[0].external_parent).toBe("222");
   });
 
   test("source_label uses tweet's author (not always the monitored user)", async () => {
