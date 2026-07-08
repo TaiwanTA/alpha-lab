@@ -1,43 +1,45 @@
 # AGENTS.md — Workspace
 
 ## 這裡做什麼
-你(user 指派的長期任務)是「知名投資人研究」的 agent:
-- 從 X / Reddit / 公開訪談 / SEC 13F 抓資料
-- 研究投資人觀點、做成報告
-- 維護一個類似 blog 的網站(部署到 Cloudflare Pages)
-- 反思自己寫的內容、決策,並模擬下注以校準判斷
+你是「知名投資人研究」的 agent:
+- 抓資料(X / Reddit / SEC 13F 等),寫入資料湖
+- LLM 分析推文 / 持股 / 訪談,產出 findings
+- 維護一個對外的 blog(部署到 Cloudflare Pages,已上線)
+- 反思產出、校準判斷、模擬下注(Phase 4)
 
-## 兩個頂層區
-- `research/` — 你自主維護的研究工作區(主體)。看 `research/AGENTS.md`
-- `blog/` — 對外發表(階段 2 才填)
+## 兩個環境
+- **local workspace** — commit 跟 dev 用,看 `research/AGENTS.md` 跟 `blog/AGENTS.md`
+  - `research/` — pipeline 程式碼 + raw + tests
+  - `blog/` — 對外發表,已上線
+- **VM** — 部署目標,跑 pipeline 跟 Postgres
+  - `gcloud compute ssh --zone "asia-east1-b" "alpha-lab" --project "g6online-352310"`
+  - 部署路徑:`/opt/alpha-lab/research/`
+  - bun 在 `~/.bun/bin`(沒加進系統 PATH,跑命令前 `export PATH=$HOME/.bun/bin:$PATH`)
+  - Postgres 跑在 `docker compose`,`alpha-lab-postgres` container,绑 `127.0.0.1:5432`
+
+## 路徑規則
+- local 工作目錄:`/home/joker/alpha-lab`(讀 `research/AGENTS.md` 跟 `blog/AGENTS.md`)
+- VM 部署:`/opt/alpha-lab/...`
+- 部署流程:local commit → tar(exclude node_modules + .env) → scp → 在 VM 解開 → `bun install` + `bun run migrate`
 
 ## 路徑規則(寫檔前先看)
-- cwd = `/opt/data/workspace`(實體)
-- **不要用 `~/`**(展開為 `/opt/data/home`,在這個容器裡不是 cwd)
-- **不要寫 `/workspace`**(`write_file` 會拒,不在 HERMES_WRITE_SAFE_ROOT 白名單)
-- 用 cwd 相對路徑 或 `/opt/data/workspace/...`
+- 用 cwd 相對路徑 或絕對路徑
+- 部署到 VM 用 `/opt/alpha-lab/...`
 
-## 工作流(分階段,user 強調 one at a time)
-1. ✅ 階段 1:工作區規劃
-2. ⏳ 階段 2:blog tech stack + 準備
-   - 完成條件(兩個**都**要達成):
-     - ✅ 整個跑通:lint / build / CI / deploy 全鏈,site 上看得到東西
-     - ⏳ 風格確認:**user 在 Telegram 上看過線上版本並回饋「方向對」**,不能只有 agent 自認
-   - 完成條件的「最低標(below this is unacceptable)」功能清單:
-     - TOC(table of contents)於長文頁面
-     - 首頁文章列表 + 排序(by date / investor / type)
-     - tag system + `/tags/` 列表頁 + `/tags/<tag>/` 篩選
-     - 文章內文 post-level 搜尋(client-side,不需後端)
-     - 文章頁面附「上一篇 / 下一篇」導航
-     - RSS feed(`/rss.xml`)— 訂閱規格
-     - sitemap.xml — SEO 必要
-     - 閱讀時間 / 字數估算 — 顯示在 header
-   - user 追加需求整合到這份清單,不重複提問
-3. ⏳ 階段 3:查詢/寫稿流程
-4. ⏳ 階段 4:真實工作(投資人清單在最後才決定)
+## 進度
 
-> **不要搶進**。做一步停一步等 user 確認。
-> **不要自認階段完成**:必須 user 確認才算階段結,特別是風格這類主觀判定。
+> 舊 phase plan 已過時,這裡只標當前ground truth。後續方案見下方「後續規劃」段。
+
+1. ✅ Phase 1:工作區規劃
+2. ✅ Phase 2:blog tech stack + 上線(user 確認 OK)
+3. ⏳ Phase 3:資料 pipeline + LLM 分析
+   - ✅ Pipeline:X → Postgres,Bill Ackman 一個 source,~1093 條 items 入庫
+   - ⏳ LLM agent 消費 items 表(還沒做)
+   - ⏳ Dagu 排程(還沒裝)
+4. ⏳ Phase 4:真實工作(投資人清單最後才決定)
+
+> 不要搶進。做一步停一步等 user 確認。
+> 不要自認階段完成:必須 user 確認才算階段結,特別是風格這類主觀判定。
 
 ## Blog 長度風格
 依類型調整長度密度,不要為長而長:
@@ -49,4 +51,4 @@
 原則:每一段要扛一個 source 或一個 insight;撐不起來的話就刪掉。
 
 ## 維護
-這份文件要隨階段進展更新(階段完成 ✅ 改 ⏳、新決定補上、過時資訊刪掉)。
+這份文件要隨進展更新(階段完成 ✅ 改 ⏳、新決定補上、過時資訊刪掉)。
