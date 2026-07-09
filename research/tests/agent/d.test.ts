@@ -340,32 +340,37 @@ describe("D agent generateReport — Kilo PR #8 fixes", () => {
   });
 
   test("sort tiebreaker uses created_at when importance is equal", async () => {
-    // 3 signals all importance 5, different created_at
+    // 3 signals all importance 5,不同 created_at,不同 title(Kilo PR #8 iter 3:
+    // 之前都用 default title 'Ackman on NVDA' 無法區分誰排第一,等於沒驗證 tiebreaker)
     const older = makeSignal({
       id: "older",
+      title: "OlderSignal",
       importance: 5,
       created_at: new Date("2026-07-01"),
     });
     const middle = makeSignal({
       id: "middle",
+      title: "MiddleSignal",
       importance: 5,
       created_at: new Date("2026-07-05"),
     });
     const newest = makeSignal({
       id: "newest",
+      title: "NewestSignal",
       importance: 5,
       created_at: new Date("2026-07-09"),
     });
-    // Pass in random order to verify sort picks newest-first by created_at
+    // Pass in scrambled order to verify sort picks newest-first by created_at
     const deps = makeFakeDeps({
       active: [older, newest, middle],
     });
     await generateReport("pre", deps, new Date("2026-07-09T13:00:00Z"));
     const calls = (deps.recallHindsight as any).mock.calls;
-    // First recall query should be for 'newest' (most recent created_at)
-    expect(calls[0][0]).toBe("Ackman on NVDA"); // title is same, can't distinguish
-    // But we can verify all 3 were called
     expect(calls.length).toBe(3);
+    // Tiebreaker = newest created_at first when importance equal
+    expect(calls[0][0]).toBe("NewestSignal"); // 2026-07-09
+    expect(calls[1][0]).toBe("MiddleSignal"); // 2026-07-05
+    expect(calls[2][0]).toBe("OlderSignal"); // 2026-07-01
   });
 
   test("sanitizes signal title with newlines (no markdown breakage in prompt)", async () => {
