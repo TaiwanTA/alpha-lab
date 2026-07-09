@@ -33,3 +33,28 @@ export interface SourceConfig {
 export interface SourcesFile {
   sources: SourceConfig[];
 }
+
+// Signal:市場訊號實體(B agent 建立,C agent 追蹤,D agent 引用)
+export interface Signal {
+  id: string;
+  slug: string | null;
+  title: string;
+  description: string;
+  importance: number;          // 1-5
+  status: string;              // discovered / tracking / matured / faded / invalid
+  tags: string[];
+  source_items: string[];
+  created_at: Date;
+  updated_at: Date;
+}
+
+// 用於 insertSignal,省略有 default 的欄位
+export interface NewSignal {
+  slug?: string | null;
+  title: string;
+  description: string;
+  importance?: number;         // 預設 3
+  status?: string;             // 預設 'discovered'
+  tags?: string[];
+  source_items?: string[];
+}
