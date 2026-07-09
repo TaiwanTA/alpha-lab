@@ -157,8 +157,10 @@ export async function listSignals(filter: ListSignalsFilter = {}): Promise<Signa
   }
 
   if (filter.minImportance !== undefined) {
-    // 強制 Number 防止 SQL injection(只有數字能通過)
-    conditions.push(`importance >= ${Number(filter.minImportance)}`);
+    // Number() 強制轉數字防 SQL injection,NaN/Infinity 守衛避免 Postgres 報錯
+    const min = Number(filter.minImportance);
+    if (!Number.isFinite(min)) return [];
+    conditions.push(`importance >= ${min}`);
   }
 
   if (filter.tags && filter.tags.length > 0) {
