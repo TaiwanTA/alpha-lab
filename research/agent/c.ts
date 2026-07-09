@@ -300,7 +300,6 @@ export async function research(
       console.error(`[C] skipping invalid observation: ${v.error}`, rawObs);
       continue;
     }
-    validFindings.push(v.value);
     // Kilo PR #7 CRITICAL:document_id 在 run 內要唯一,
     // 否則同 run 多條 observation 互相 upsert 覆蓋 → 加 per-observation index
     const documentId = `signal-${signal.id}-${runStartIso}-${obsIndex}`;
@@ -318,6 +317,9 @@ export async function research(
         document_id: documentId,
       });
       retained++;
+      // Kilo PR #7 (iteration 2) WARNING:只能 push 已成功 retain 的 finding;
+      // 否則 generateReportMarkdown 會把 retain 失敗的 observation 列為 new
+      validFindings.push(v.value);
     } catch (err) {
       failed++;
       console.error(`[C] failed to retain observation:`, err);

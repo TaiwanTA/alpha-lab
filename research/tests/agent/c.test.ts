@@ -284,6 +284,10 @@ describe("C agent research — error handling", () => {
     expect(result.observationsRetained).toBe(1);
     expect(result.observationsFailed).toBe(1);
     expect(deps.retainHindsight).toHaveBeenCalledTimes(2);
+    // Kilo PR #7 (iter 2):failed observation should NOT appear in report
+    const reportContent = (deps.writeReport as any).mock.calls[0][1];
+    expect(reportContent).not.toContain("first will fail");
+    expect(reportContent).toContain("second will succeed");
   });
 
   test("signal status upgraded even if 0 observations", async () => {
