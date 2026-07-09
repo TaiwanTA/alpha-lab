@@ -198,10 +198,10 @@ export async function publish(
       pushed = true;
       log.withMetadata({ branch }).info("pushed");
     } else {
-      // 區分:spawn fail(git 不在 PATH / SIGKILL)vs 非 0 exit(remote ahead / 認證 / 網路)
-      // (Kilo PR #11 iter 2:訊息分開,給 operator 對的排查方向)
-      const isSpawnFail = pushResult.spawnError !== null && pushResult.spawnError !== undefined;
-      if (isSpawnFail) {
+      // 區分:spawn fail(git 不在 PATH)、signal kill(OOM / CI timeout)、non-0 exit(remote ahead / 認證)
+      // (Kilo PR #11 iter 2+4:訊息分支,給 operator 對的排查方向)
+      const kind = pushResult.failureKind;
+      if (kind === "spawn-error") {
         log
           .withMetadata({
             branch,
@@ -210,6 +210,16 @@ export async function publish(
           .warn(
             "git push failed to spawn — local commit preserved. " +
               "Likely `git` binary missing from PATH (install git or fix PATH).",
+          );
+      } else if (kind === "signal-kill") {
+        log
+          .withMetadata({
+            branch,
+            spawnError: pushResult.spawnError,
+          })
+          .warn(
+            "git push process killed (likely OOM / CI timeout) — local commit preserved. " +
+              "Increase memory / timeout budget on the runner.",
           );
       } else {
         log
@@ -253,7 +263,10 @@ interface GitResult {
   ok: boolean;
   stdout: string;
   stderr: string;
-  spawnError?: string | null;  // spawn 失敗原因(no binary / SIGKILL 等)
+  spawnError?: string | null;  // spawn 失敗原因(no binary / 沒權限 / OOM kill / signal 殺掉 等)
+  // 區分 ENOENT-style failure(git 不存在/沒權限)vs signal kill(被外部殺掉)— 訊息應不同
+  // (Kilo PR #11 iter 4:之前把 signal-kill 也當 ENOENT 提示用戶「git missing」誤導)
+  failureKind?: "spawn-error" | "signal-kill" | "non-zero-exit";
 }
 
 function runGit(
@@ -282,6 +295,7 @@ function runGit(
       stdout: "",
       stderr: msg,
       spawnError: msg,
+      failureKind: "spawn-error",
     };
   }
   // signal kill(被外部 SIGTERM / SIGKILL 殺掉)— status 是 null 但 error 也 null
@@ -296,6 +310,7 @@ function runGit(
       stdout: "",
       stderr: msg,
       spawnError: msg,
+      failureKind: "signal-kill",
     };
   }
   const stdout = result.stdout ?? "";
@@ -310,6 +325,7 @@ function runGit(
     stdout: stdout.trim(),
     stderr: stderr.trim(),
     spawnError: null,
+    failureKind: result.status === 0 ? undefined : "non-zero-exit",
   };
 }
 
