@@ -217,7 +217,11 @@ describe("ask", () => {
       return Promise.reject(new TypeError("network down"));
     };
     globalThis.fetch = fetchMock;
-    await expect(ask("test")).rejects.toThrow(LlmError);
+    // pin 住 status=504 + instanceof LlmError,避免日後 status code 改了測試還 pass
+    await expect(ask("test")).rejects.toMatchObject({
+      status: 504,
+      name: "LlmError",
+    });
     expect(callCount).toBe(3);  // MAX_ATTEMPTS
   });
 
