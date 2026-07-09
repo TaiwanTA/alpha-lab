@@ -81,11 +81,9 @@ export function extractTitle(raw: string, fallback: string): string {
     if (typeof t === "string" && t.trim().length > 0) return t.trim();
     if (typeof t === "number") return String(t);
   }
-  const h1 = fm.body.match(/^#\s+(.+?)\s*$/m);
-  if (h1 && h1[1] !== undefined) {
-    const text = stripInlineMarkdown(h1[1]).trim();
-    if (text.length > 0) return text;
-  }
+  // 用 extractTitleFromBody(避免重複 H1 抓取邏輯,Kilo PR #11 Gemini medium)
+  const fromBody = extractTitleFromBody(fm.body);
+  if (fromBody !== null && fromBody.length > 0) return fromBody;
   return fallback;
 }
 
@@ -144,10 +142,18 @@ function stripInlineMarkdown(s: string): string {
 }
 
 // 簡單 truncate:邊界在空白 + 加 …(避免截在單字中間)
+// 中文容錯:若截斷點前一個 char 不是 ASCII(等機空白分隔),直接切(中文本就無空格分隔,
+// 強回溯會一路回溯到 ASCII 才停在中文段最前,幾乎截空)(Kilo PR #11 Gemini high priority)
 function truncate(s: string, maxChars: number): string {
   if (s.length <= maxChars) return s;
   let cutAt = maxChars - 1;
-  while (cutAt > 0 && s[cutAt] !== " ") cutAt--;
+  // 只有當 maxChars 段內有 ASCII 空白時才回溯 (避免中文全無空白時 cutAt=0)
+  if (s.slice(0, maxChars).includes(" ")) {
+    while (cutAt > 0 && s[cutAt] !== " ") cutAt--;
+  } else {
+    // 段內無空白(純中文 / 純中文混 emoji 等),直接切 maxChars 邊界
+    cutAt = maxChars - 1;
+  }
   const sliced = cutAt > 0 ? s.slice(0, cutAt) : s.slice(0, maxChars - 1);
   return sliced.trimEnd() + "…";
 }
@@ -365,12 +371,18 @@ function formatFrontmatterValue(value: unknown): string {
   return JSON.stringify(value);
 }
 
-// 需要 quotes 的情境:含冒號 / 中括號 / YAML 控制字元 / 中文等
-// 簡單判斷:全為英數 + hyphen + underscore 才不需要 quoting
+// 需要 quotes 的情境:含冒號 / 中括號 / YAML 控制字元 / 中文 / YAML 保留字(true/false/null/數字字串)等
+// 簡單判斷:全為英數 + hyphen + underscore 且 `不` 是 YAML 保留字 才不需 quoting
+// (Kilo PR #11 CRITICAL:"true"/"false"/"42" 等 YAML 保留字串值需 quoting,
+// 否則 serializeFrontmatter 寫出 `summary: true` 會被 parseFrontmatter
+// 又讀成 boolean,round-trip typing drift)
 function needsQuoting(s: string): boolean {
   if (s.length === 0) return true;
-  if (/^[A-Za-z0-9_-]+$/.test(s)) return false;
-  return true;
+  if (!/^[A-Za-z0-9_-]+$/.test(s)) return true;
+  // YAML 保留字串 / 數字字串需 quoting
+  if (s === "true" || s === "false" || s === "null" || s === "~") return true;
+  if (/^-?\d+(?:\.\d+)?$/.test(s)) return true;  // 數字字串
+  return false;
 }
 
 export interface BuildFrontmatterInput {
@@ -455,10 +467,25 @@ function dedupeStrings(arr: string[]): string[] {
 }
 
 function extractTitleFromBody(body: string): string | null {
-  const m = body.match(/^#\s+(.+?)\s*$/m);
-  if (!m || m[1] === undefined) return null;
-  const text = stripInlineMarkdown(m[1]).trim();
-  return text.length > 0 ? text : null;
+  // 跳過 code fence ``` 與 ~~~ 內的內容(Kilo PR #11 Gemini medium priority:
+  // 全域正則 `body.match(/^#\s+(.+?)\s*$/m)` 會 match code block 內的 `# comment`)
+  const lines = body.split("\n");
+  let inFence = false;
+  for (const line of lines) {
+    const fenceMatch = line.match(/^(\s*)(```|~~~)/);
+    if (fenceMatch) {
+      inFence = !inFence;
+      continue;
+    }
+    if (inFence) continue;
+    // 單行 H1 — 不能在 blockquote(> # foo)內
+    const h1 = line.match(/^(?!>)#\s+(.+?)\s*$/);
+    if (h1 && h1[1] !== undefined) {
+      const text = stripInlineMarkdown(h1[1]).trim();
+      if (text.length > 0) return text;
+    }
+  }
+  return null;
 }
 
 function extractSummaryFromBody(body: string, maxChars: number): string {

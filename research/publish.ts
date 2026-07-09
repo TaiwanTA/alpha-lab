@@ -15,7 +15,17 @@
 
 import { readFile, stat, writeFile, mkdir as mkdirAsync } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { resolve as resolvePath, join as joinPath, relative as relativePath } from "node:path";
+import {
+  resolve as resolvePath,
+  join as joinPath,
+  relative as relativePath,
+  dirname,
+  isAbsolute as pathIsAbsolute,
+} from "node:path";
+// path.isAbsolute 對 Windows UNC (\\server\share) 跟 drive (C:\) 都會正確回 true
+// 跨平台路徑偵測:不要自己 regex 檢查(Kilo PR #11 + Gemini high priority:
+// /home/... startsWith("/") + /^[A-Za-z]:[\\/]/ 漏 UNC \\server\share,
+// Windows 上 lastIndexOf("/") 切 dirname 也錯)。改用 node:path 內建 API。
 import { spawnSync } from "node:child_process";
 import {
   detectType,
@@ -73,9 +83,11 @@ export async function publish(
   opts: PublishOptions = {},
 ): Promise<PublishResult> {
   const cwd = opts.cwd ?? process.cwd();
-  const isAbs = (p: string) => p.startsWith("/") || /^[A-Za-z]:[\\/]/.test(p);
+  // 用 node:path.isAbsolute 做跨平台絕對路徑偵測(POSIX / Windows drive / UNC)
   const monorepoRoot = cwd;
-  const absSource = isAbs(sourcePath) ? sourcePath : joinPath(cwd, sourcePath);
+  const absSource = pathIsAbsolute(sourcePath)
+    ? sourcePath
+    : joinPath(cwd, sourcePath);
 
   if (!existsSync(absSource)) {
     throw new Error(`source not found: ${absSource}`);
@@ -96,7 +108,7 @@ export async function publish(
 
   const date = deriveDate(absSource, type, sourceStat.mtime);
   const blogDirRaw = opts.blogDir ?? process.env["PUBLISH_BLOG_DIR"] ?? DEFAULT_BLOG_DIR;
-  const blogDir = isAbs(blogDirRaw)
+  const blogDir = pathIsAbsolute(blogDirRaw)
     ? blogDirRaw
     : resolvePath(monorepoRoot, blogDirRaw);
 
@@ -148,7 +160,9 @@ export async function publish(
   }
 
   // 7. 寫檔
-  const targetDir = targetAbsPath.slice(0, targetAbsPath.lastIndexOf("/"));
+  // 用 dirname() 跨平台(POSIX / 跟 Windows \ 都能正確)(Kilo PR #11 WARNING:
+  // lastIndexOf("/") 在 Windows 切到整個 path 當 dir 會臭)
+  const targetDir = dirname(targetAbsPath);
   await mkdirAsync(targetDir, { recursive: true });
   await writeFile(targetAbsPath, composed, "utf-8");
   log.withMetadata({ target: targetRelPath }).info("target written");
@@ -191,8 +205,9 @@ export async function publish(
           stdout: pushResult.stdout,
         })
         .warn(
-          "git push failed — local commit preserved; review and push manually " +
-            `(git push origin ${branch}). Common cause: remote has new commits — run \`git pull --rebase\` then retry.`,
+          "git push failed — local commit preserved. " +
+            `Manually inspect remote and push (e.g. \`git push origin ${branch}\` or ` +
+            `\`git pull --rebase origin ${branch} && git push origin ${branch}\` if remote is ahead).`,
         );
     }
   }
@@ -233,6 +248,20 @@ function runGit(
     encoding: "utf-8",
     stdio: ["ignore", "pipe", "pipe"],
   });
+  // git binary 本身失敗(ENOENT=git 不存在 / SIGKILL=OOM kill 等等)
+  // result.status 是 null 而非 0(Kilo PR #11 Gemini medium priority)
+  if (result.error) {
+    if (!allowFail) {
+      throw new Error(
+        `git ${args.join(" ")} failed to spawn: ${result.error.message}`,
+      );
+    }
+    return {
+      ok: false,
+      stdout: "",
+      stderr: result.error.message,
+    };
+  }
   const stdout = result.stdout ?? "";
   const stderr = result.stderr ?? "";
   if (result.status !== 0 && !allowFail) {
@@ -269,21 +298,30 @@ function parseCliArgs(argv: readonly string[]): ParsedArgs {
   let sourcePath: string | null = null;
   let push = false;
   let dryRun = false;
+  let seenSeparator = false;
   for (const arg of argv) {
-    if (arg === "--push") {
-      push = true;
+    // -- separator:之後所有 args 都當位置參數(Kilo PR #11 SUGGESTION:
+    // 不然路徑剛好以 `--` 開頭(罕見但可能)會被當 unknown flag)
+    if (!seenSeparator && arg === "--") {
+      seenSeparator = true;
       continue;
     }
-    if (arg === "--dry-run") {
-      dryRun = true;
-      continue;
-    }
-    if (arg === "--help" || arg === "-h") {
-      printHelp();
-      process.exit(0);
-    }
-    if (arg.startsWith("--")) {
-      throw new Error(`unknown flag: ${arg}`);
+    if (!seenSeparator) {
+      if (arg === "--push") {
+        push = true;
+        continue;
+      }
+      if (arg === "--dry-run") {
+        dryRun = true;
+        continue;
+      }
+      if (arg === "--help" || arg === "-h") {
+        printHelp();
+        process.exit(0);
+      }
+      if (arg.startsWith("--")) {
+        throw new Error(`unknown flag: ${arg}`);
+      }
     }
     if (sourcePath !== null) {
       throw new Error(`multiple source paths given; only one allowed`);
