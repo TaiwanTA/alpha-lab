@@ -17,6 +17,8 @@ import {
   getActiveSignals,
   updateSignalStatus,
   updateSignal,
+  getUnprocessedItems,
+  markItemsProcessed,
 } from "../../lib/db.ts";
 import { runMigrations } from "../../lib/migrator.ts";
 import { join } from "node:path";
@@ -292,5 +294,80 @@ describe("signals", () => {
     expect(got!.tags).toContain(`has"quote`);
     expect(got!.tags).toContain(`back\\slash`);
     expect(got!.tags).toContain(`has{brace}`);
+  });
+});
+
+describe("items processing (getUnprocessedItems + markItemsProcessed)", () => {
+  test("getUnprocessedItems returns items with processed_at IS NULL", async () => {
+    // u-2 created_at 顯著晚於 u-1,DESC 排序才能確定 u-2 在前
+    const earlier = new Date("2026-07-01T00:00:00Z");
+    const later = new Date("2026-07-09T00:00:00Z");
+    await insertItems([
+      {
+        source_type: "x_user_timeline",
+        source_label: "@BillAckman",
+        external_id: "u-1",
+        external_parent: null,
+        created_at: earlier,
+        context: "tweet 1",
+        raw_payload: {},
+      },
+      {
+        source_type: "x_user_timeline",
+        source_label: "@BillAckman",
+        external_id: "u-2",
+        external_parent: null,
+        created_at: later,
+        context: "tweet 2",
+        raw_payload: {},
+      },
+    ]);
+
+    const unprocessed = await getUnprocessedItems(50);
+    expect(unprocessed).toHaveLength(2);
+    expect(unprocessed.every((i) => i.processed_at === null)).toBe(true);
+    // 應按 created_at DESC 排序
+    expect(unprocessed[0]!.external_id).toBe("u-2");
+  });
+
+  test("markItemsProcessed sets processed_at on specified items", async () => {
+    await insertItems([
+      {
+        source_type: "x_user_timeline",
+        source_label: "@BillAckman",
+        external_id: "m-1",
+        external_parent: null,
+        created_at: new Date(),
+        context: "tweet",
+        raw_payload: {},
+      },
+    ]);
+
+    await markItemsProcessed("x_user_timeline", ["m-1"]);
+
+    const unprocessed = await getUnprocessedItems(50);
+    expect(unprocessed.find((i) => i.external_id === "m-1")).toBeUndefined();
+  });
+
+  test("markItemsProcessed does nothing for empty input", async () => {
+    // Should not throw
+    await markItemsProcessed("x_user_timeline", []);
+  });
+
+  test("getUnprocessedItems respects limit", async () => {
+    await insertItems(
+      ["a", "b", "c"].map((id) => ({
+        source_type: "x_user_timeline",
+        source_label: "@BillAckman",
+        external_id: id,
+        external_parent: null,
+        created_at: new Date(),
+        context: `tweet ${id}`,
+        raw_payload: {},
+      })),
+    );
+
+    const limited = await getUnprocessedItems(2);
+    expect(limited).toHaveLength(2);
   });
 });

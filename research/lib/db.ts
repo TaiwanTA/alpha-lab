@@ -3,7 +3,14 @@
 //   insertItems 用 ON CONFLICT DO NOTHING,idempotent
 
 import { sql } from "bun";
-import type { RawItem, FetchState, Signal, NewSignal, SignalStatus } from "./types.ts";
+import type {
+  RawItem,
+  FetchState,
+  Signal,
+  NewSignal,
+  SignalStatus,
+  ItemRow,
+} from "./types.ts";
 
 export async function initDb(): Promise<void> {
   await sql`SELECT 1`;
@@ -185,6 +192,42 @@ export async function updateSignal(
 
 function escapeSqlString(s: string): string {
   return s.replace(/'/g, "''");
+}
+
+// --- Items processing (給 B agent 用) ---
+
+// 拿「未處理」items(任何 source_type),按 created_at DESC 排序,限制 N 條
+// 回傳 ItemRow(含 processed_at = null,因為查的就是 NULL 的)
+export async function getUnprocessedItems(limit: number = 50): Promise<ItemRow[]> {
+  return await sql<ItemRow[]>`
+    SELECT source_type, source_label, external_id, external_parent,
+           created_at, fetched_at, context, processed_at
+    FROM items
+    WHERE processed_at IS NULL
+    ORDER BY created_at DESC
+    LIMIT ${limit}
+  `;
+}
+
+// 標記 items 已處理(在 B agent 處理完後調用,不管有沒有建 signals)
+// 用 IN + sql.unsafe pattern(因為 ids 是 string array,見 AGENTS.md 踩雷段)
+// Kilo PR #6 SUGGESTION:batches of 1000 避免單一 SQL statement 太長
+const MARK_BATCH_SIZE = 1000;
+
+export async function markItemsProcessed(
+  sourceType: string,
+  externalIds: string[],
+): Promise<void> {
+  if (externalIds.length === 0) return;
+  for (let i = 0; i < externalIds.length; i += MARK_BATCH_SIZE) {
+    const batch = externalIds.slice(i, i + MARK_BATCH_SIZE);
+    const idList = batch.map((id) => `'${escapeSqlString(id)}'`).join(",");
+    await sql`
+      UPDATE items
+      SET processed_at = now()
+      WHERE source_type = ${sourceType} AND external_id IN (${sql.unsafe(idList)})
+    `;
+  }
 }
 
 // Postgres array literal: {"a","b"} (元素包雙引號)
