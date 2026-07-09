@@ -4,7 +4,7 @@
 //   入口(main / if (import.meta.main))可顯式呼叫 initLogger() 覆寫,例如要指定 logDir。
 //   createLogger(component) 回傳 child logger,持久帶 component context(每條 log 都自帶)
 //
-// 注意:convertSystem 不可跨 re-init reuse:
+// 注意:child logger 不可跨 re-init reuse:
 //   initLogger() 會 dispose 舊 file transport,先前 createLogger() 拿到的 child logger
 //   雖然還在記憶體,但其寫入會落到已關閉的 stream(test 想換 logDir 時,fine — 直接重新 createLogger)。
 //   這是 OK 的副作用:production 只 init 一次,test 走 fixture 重新 createLogger 而非 reuse。
@@ -91,7 +91,6 @@ function getState(): LoggerState {
   if (state) return state;
   // 第一次存取:用 env var defaults lazy init。@kilocode-bot PR #9 iter 1 CRITICAL:
   // 不在 module load eager init,避免每個 import 點建 ./logs/ 副作用 + race。
-  _defaultInitialized = true;
   initLogger();
   if (!state) throw new Error("logger init failed");
   return state;
@@ -122,4 +121,3 @@ export function getLogDir(): string | null {
 
 // module load 不做副作用 init — 第一次 createLogger() / getLog() 時 lazy init。
 // 想覆寫 env var defaults 的入口(例如 cron 想指定絕對路徑 logDir)顯式呼叫 initLogger()
-let _defaultInitialized = false;
