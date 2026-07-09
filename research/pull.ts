@@ -170,7 +170,7 @@ async function main(): Promise<void> {
   }
 
   pullLog
-    .withMetadata({ new: totalNew, context: totalContext })
+    .withMetadata({ new_items: totalNew, context_items: totalContext })
     .info("done");
   process.exit(0);
 }
