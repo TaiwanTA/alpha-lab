@@ -261,10 +261,12 @@ async function triggerCForNewSignals(signalIds: string[]): Promise<string[]> {
   }
   // Kilo PR #10 iter 2:若全部 trigger 都失敗(例如 SDK bundle 缺、workflow-plugin 沒載),
   // 代表系統性問題,往上 throw 讓 bWorkflow 中斷並進 workflow_runs 表的 failed 狀態;
-  // 個別 signal 失敗還是容忍不中斷
+  // 個別 signal 失敗還是容忍不中斷。
+  // Kilo PR #10 iter 3:throw message 不列 signalIds(可能很長 + 機敏),
+  // 個別 failed signalId 已 console.error 紀錄到 logger 檔,夠 debug
   if (signalIds.length > 0 && failed.length === signalIds.length) {
     throw new Error(
-      `all ${signalIds.length} C workflow triggers failed; signalIds=${signalIds.join(",")}`,
+      `all ${signalIds.length} C workflow triggers failed; check workflow-server logs for individual signalIds`,
     );
   }
   return runIds;
