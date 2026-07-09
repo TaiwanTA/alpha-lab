@@ -156,8 +156,11 @@ function truncate(s: string, maxChars: number): string {
   if (windowHasSpace) {
     // 回溯找最近空白
     while (cutAt > 0 && s[cutAt] !== " ") cutAt--;
-    // 若最近空白位置太早(切出來不到 maxChars 一半),直切 maxChars 邊界寧長不過短
-    if (cutAt < maxChars / 2) {
+    // floor 採 0.8(寬鬆些,Kilo PR #11 iter 3:之前 0.5 太嚴,
+    // maxChars=10 空白在 6 結果截到 5,降 floor 到 0.8 → 若 cutAt 比
+    // maxChars * 0.8 早才直切;改可截較短英文句以保內容完整性)
+    const floor = Math.floor(maxChars * 0.8);
+    if (cutAt < floor) {
       cutAt = maxChars - 1;
     }
   } else {

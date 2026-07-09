@@ -284,6 +284,20 @@ function runGit(
       spawnError: msg,
     };
   }
+  // signal kill(被外部 SIGTERM / SIGKILL 殺掉)— status 是 null 但 error 也 null
+  // (Kilo PR #11 iter 3:之前走 `status !== 0` 路徑 throw `exit=null` 誤導)
+  if (result.signal !== null && result.status === null) {
+    const msg = `git process killed by signal ${result.signal}`;
+    if (!allowFail) {
+      throw new Error(`git ${args.join(" ")} ${msg}`);
+    }
+    return {
+      ok: false,
+      stdout: "",
+      stderr: msg,
+      spawnError: msg,
+    };
+  }
   const stdout = result.stdout ?? "";
   const stderr = result.stderr ?? "";
   if (result.status !== 0 && !allowFail) {
@@ -300,13 +314,12 @@ function runGit(
 }
 
 function readGitHead(cwd: string): string | null {
-  const r = spawnSync("git", ["rev-parse", "HEAD"], {
-    cwd,
-    encoding: "utf-8",
-    stdio: ["ignore", "pipe", "pipe"],
-  });
-  if (r.status !== 0) return null;
-  return (r.stdout ?? "").trim() || null;
+  // 用 runGit 統一錯誤處理(Kilo PR #11 iter 3:之前 raw spawnSync 沒處理
+  // result.error / result.signal,silently 回 null 誤導 user 以為 commit 失敗)
+  // allowFail=true 因為新 repo 無 commit 時 rev-parse HEAD 會 fail(合法狀況)
+  const r = runGit(["rev-parse", "HEAD"], cwd, process.env as Record<string, string>, true);
+  if (!r.ok) return null;
+  return r.stdout || null;
 }
 
 // ---- CLI ----
