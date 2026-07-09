@@ -160,9 +160,17 @@ export async function askMessages(
         model: data.model ?? model,
       };
     } catch (err) {
-      // AbortError(超時)跟 TypeError(網路錯誤)也 retry
-      if (err instanceof LlmError) throw err;
-      // 其餘網路/超時錯誤:剩餘 attempts 繼續 retry
+      // 只 retry transient 錯誤:AbortError(超時) + TypeError(網路斷/DNS 失敗)
+      // 不 retry:deterministic throws(LlmError for 4xx API errors,
+      // SyntaxError for JSON parse failure, Error for no choices / missing content)
+      // 這些重試沒意義,會浪費 3 次大約同樣的失敗
+      const isTransientError =
+        err instanceof Error &&
+        (err.name === "AbortError" ||
+          err instanceof TypeError ||
+          err.message.includes("fetch failed"));
+
+      if (!isTransientError) throw err;
       if (attempt >= MAX_ATTEMPTS - 1) throw err;
       const baseMs = 1000 * Math.pow(2, attempt);
       const jitter = Math.floor(Math.random() * 250);

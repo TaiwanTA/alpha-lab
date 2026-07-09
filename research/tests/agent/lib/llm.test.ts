@@ -184,6 +184,56 @@ describe("ask", () => {
     expect((err as LlmError).status).toBe(400);
     expect((err as LlmError).body).toBe("Bad request");
   });
+
+  test("retries on TypeError (network error)", async () => {
+    let callCount = 0;
+    fetchMock = () => {
+      callCount++;
+      if (callCount < 3) {
+        // TypeError — bun fetch throws "fetch failed" on network/DNS issues
+        return Promise.reject(new TypeError("fetch failed"));
+      }
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            choices: [{ message: { content: "ok" } }],
+            usage: {},
+            model: "test-model",
+          }),
+          { status: 200 },
+        ),
+      );
+    };
+    globalThis.fetch = fetchMock;
+    const result = await ask("test");
+    expect(result.content).toBe("ok");
+    expect(callCount).toBe(3);
+  });
+
+  test("does NOT retry on deterministic error (no choices)", async () => {
+    let callCount = 0;
+    fetchMock = () => {
+      callCount++;
+      return Promise.resolve(
+        new Response(JSON.stringify({ choices: [] }), { status: 200 }),
+      );
+    };
+    globalThis.fetch = fetchMock;
+    await expect(ask("test")).rejects.toThrow(/no choices/);
+    // Should NOT retry — only 1 call
+    expect(callCount).toBe(1);
+  });
+
+  test("does NOT retry on LlmError for 4xx", async () => {
+    let callCount = 0;
+    fetchMock = () => {
+      callCount++;
+      return Promise.resolve(new Response("Bad request", { status: 400 }));
+    };
+    globalThis.fetch = fetchMock;
+    await expect(ask("test")).rejects.toThrow(LlmError);
+    expect(callCount).toBe(1);
+  });
 });
 
 describe("askMessages", () => {
