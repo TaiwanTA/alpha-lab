@@ -166,6 +166,22 @@ function validateCandidate(raw: unknown):
   if (!validSourceIds) {
     return { ok: false, error: "source_item_ids contains non-string element" };
   }
+  // Kilo PR #6 review (iteration 2) WARNING:空的 source_item_ids 失去 provenance;
+  // 之後 validItemIds.filter(...) 也可能成空(若 LLM 全瞎編),需要 reject 避免
+  // 不附 provenance 的訊號進 DB(downstream 無法追溯到原始 item)
+  if ((c.source_item_ids as string[]).length === 0) {
+    return { ok: false, error: "source_item_ids is empty (no provenance)" };
+  }
+
+  // Kilo PR #6 review (iteration 2) SUGGESTION:LLM 可能回超長 description
+  // 限制 800 chars(給 1-3 sentences 應該夠,過長時 reject 讓 LLM 重試)
+  const MAX_DESC_LEN = 800;
+  if ((c.description as string).length > MAX_DESC_LEN) {
+    return {
+      ok: false,
+      error: `description too long (${(c.description as string).length} > ${MAX_DESC_LEN})`,
+    };
+  }
 
   return {
     ok: true,
@@ -251,6 +267,15 @@ export async function discover(deps: BDependencies): Promise<DiscoverResult> {
       const validItemIds = valid.source_item_ids.filter((id) =>
         knownIds.has(id),
       );
+
+      // Kilo WARNING:LLM 可能給出的所有 ids 都是 hallucinated,
+      // validItemIds 完全空 → 訊號沒法追溯到任何真實 item,reject
+      if (validItemIds.length === 0) {
+        console.error(
+          `[B] skipping signal "${valid.title}": all source_item_ids are unknown (LLM hallucinated)`,
+        );
+        continue;
+      }
 
       await deps.insertSignal({
         title: valid.title,

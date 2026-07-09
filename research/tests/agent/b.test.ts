@@ -338,6 +338,108 @@ describe("B agent discover — candidate validation", () => {
     expect(result.newSignals).toBe(1);
   });
 
+  test("skips candidate with empty source_item_ids (no provenance)", async () => {
+    const items = [makeItem("tw1")];
+    const deps = makeFakeDeps({
+      items,
+      llmContent: JSON.stringify({
+        signals: [{
+          title: "No provenance",
+          description: "d",
+          importance: 3,
+          tags: [],
+          source_item_ids: [],
+        }],
+      }),
+    });
+
+    const result = await discover(deps);
+    expect(result.newSignals).toBe(0);
+    expect(deps.insertSignal).not.toHaveBeenCalled();
+  });
+
+  test("skips candidate when all source_item_ids are hallucinated", async () => {
+    const items = [makeItem("tw1")];
+    const deps = makeFakeDeps({
+      items,
+      llmContent: JSON.stringify({
+        signals: [{
+          title: "Hallucinated",
+          description: "d",
+          importance: 3,
+          tags: [],
+          source_item_ids: ["fake-id-1", "fake-id-2"],
+        }],
+      }),
+    });
+
+    const result = await discover(deps);
+    expect(result.newSignals).toBe(0);
+    expect(deps.insertSignal).not.toHaveBeenCalled();
+  });
+
+  test("accepts candidate with mixed real and hallucinated ids", async () => {
+    const items = [makeItem("tw1")];
+    const deps = makeFakeDeps({
+      items,
+      llmContent: JSON.stringify({
+        signals: [{
+          title: "Mixed ids",
+          description: "d",
+          importance: 3,
+          tags: [],
+          source_item_ids: ["tw1", "fake-id"],
+        }],
+      }),
+    });
+
+    const result = await discover(deps);
+    expect(result.newSignals).toBe(1);
+    const inserted = (deps.insertSignal as any).mock.calls[0][0];
+    // Only "tw1" survived filter
+    expect(inserted.source_items).toEqual(["tw1"]);
+  });
+
+  test("skips candidate with description too long (> 800 chars)", async () => {
+    const items = [makeItem("tw1")];
+    const longDesc = "x".repeat(801);
+    const deps = makeFakeDeps({
+      items,
+      llmContent: JSON.stringify({
+        signals: [{
+          title: "Long desc",
+          description: longDesc,
+          importance: 3,
+          tags: [],
+          source_item_ids: ["tw1"],
+        }],
+      }),
+    });
+
+    const result = await discover(deps);
+    expect(result.newSignals).toBe(0);
+    expect(deps.insertSignal).not.toHaveBeenCalled();
+  });
+
+  test("accepts candidate with description exactly 800 chars", async () => {
+    const items = [makeItem("tw1")];
+    const deps = makeFakeDeps({
+      items,
+      llmContent: JSON.stringify({
+        signals: [{
+          title: "Boundary",
+          description: "x".repeat(800),
+          importance: 3,
+          tags: [],
+          source_item_ids: ["tw1"],
+        }],
+      }),
+    });
+
+    const result = await discover(deps);
+    expect(result.newSignals).toBe(1);
+  });
+
   test("throws when LLM returns null root", async () => {
     const items = [makeItem("tw1")];
     const deps = makeFakeDeps({
