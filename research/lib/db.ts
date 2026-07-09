@@ -3,7 +3,7 @@
 //   insertItems 用 ON CONFLICT DO NOTHING,idempotent
 
 import { sql } from "bun";
-import type { RawItem, FetchState } from "./types.ts";
+import type { RawItem, FetchState, Signal, NewSignal } from "./types.ts";
 
 export async function initDb(): Promise<void> {
   await sql`SELECT 1`;
@@ -65,4 +65,115 @@ export async function upsertFetchState(state: FetchState): Promise<void> {
       last_run_at = EXCLUDED.last_run_at,
       last_status = EXCLUDED.last_status
   `;
+}
+
+// --- Signals ---
+
+export async function insertSignal(signal: NewSignal): Promise<Signal> {
+  // Bun.sql 的 sql({...}) 不會把 JS array 轉成 Postgres array literal,
+  // 用 sql.unsafe 手動拼(參考 haveItems 已有做法)
+  const values = [
+    signal.slug === undefined ? "NULL" : signal.slug === null
+      ? "NULL"
+      : `'${escapeSqlString(signal.slug)}'`,
+    `'${escapeSqlString(signal.title)}'`,
+    `'${escapeSqlString(signal.description)}'`,
+    String(signal.importance ?? 3),
+    `'${escapeSqlString(signal.status ?? "discovered")}'`,
+    `'${pgArrayLiteral(signal.tags ?? [])}'::text[]`,
+    `'${pgArrayLiteral(signal.source_items ?? [])}'::text[]`,
+  ];
+  const rows = await sql.unsafe<Signal[]>(
+    `INSERT INTO signals (slug, title, description, importance, status, tags, source_items)
+     VALUES (${values.join(", ")})
+     RETURNING *`,
+  );
+  return rows[0]!;
+}
+
+export async function getSignalById(id: string): Promise<Signal | null> {
+  const rows = await sql<Signal[]>`
+    SELECT * FROM signals WHERE id = ${id}::uuid
+  `;
+  return rows[0] ?? null;
+}
+
+export async function getSignalsByStatus(status: string): Promise<Signal[]> {
+  return await sql<Signal[]>`
+    SELECT * FROM signals
+    WHERE status = ${status}
+    ORDER BY importance DESC, created_at DESC
+  `;
+}
+
+// active = discovered 或 tracking
+export async function getActiveSignals(): Promise<Signal[]> {
+  return await sql<Signal[]>`
+    SELECT * FROM signals
+    WHERE status IN ('discovered', 'tracking')
+    ORDER BY importance DESC, created_at DESC
+  `;
+}
+
+export async function updateSignalStatus(
+  id: string,
+  status: string,
+): Promise<void> {
+  await sql`
+    UPDATE signals
+    SET status = ${status}, updated_at = now()
+    WHERE id = ${id}::uuid
+  `;
+}
+
+// 用 COALESCE 模式:有給的欄位才更新
+// tags / source_items 是 TEXT[],Bun.sql 不會自動轉 JS array → Postgres array,
+// 要用 array literal 拼進 SQL(參考 haveItems 已有做法)
+export async function updateSignal(
+  id: string,
+  fields: Partial<NewSignal>,
+): Promise<void> {
+  const setClauses: string[] = [];
+
+  if (fields.title !== undefined) {
+    setClauses.push(`title = '${escapeSqlString(fields.title)}'`);
+  }
+  if (fields.description !== undefined) {
+    setClauses.push(`description = '${escapeSqlString(fields.description)}'`);
+  }
+  if (fields.importance !== undefined) {
+    setClauses.push(`importance = ${Number(fields.importance)}`);
+  }
+  if (fields.status !== undefined) {
+    setClauses.push(`status = '${escapeSqlString(fields.status)}'`);
+  }
+  if (fields.slug !== undefined) {
+    const v = fields.slug === null ? "NULL" : `'${escapeSqlString(fields.slug)}'`;
+    setClauses.push(`slug = ${v}`);
+  }
+  if (fields.tags !== undefined) {
+    setClauses.push(`tags = '${pgArrayLiteral(fields.tags)}'::text[]`);
+  }
+  if (fields.source_items !== undefined) {
+    setClauses.push(
+      `source_items = '${pgArrayLiteral(fields.source_items)}'::text[]`,
+    );
+  }
+
+  if (setClauses.length === 0) return;
+  setClauses.push("updated_at = now()");
+
+  const safeId = escapeSqlString(id);
+  await sql.unsafe(
+    `UPDATE signals SET ${setClauses.join(", ")} WHERE id = '${safeId}'::uuid`,
+  );
+}
+
+function escapeSqlString(s: string): string {
+  return s.replace(/'/g, "''");
+}
+
+function pgArrayLiteral(arr: string[]): string {
+  // Postgres array literal:{"a","b"}  — 元素內的雙引號要 escape
+  return `{${arr.map((t) => `"${t.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`).join(",")}}`;
 }

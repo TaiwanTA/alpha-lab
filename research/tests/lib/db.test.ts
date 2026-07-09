@@ -11,6 +11,12 @@ import {
   haveItems,
   getFetchState,
   upsertFetchState,
+  insertSignal,
+  getSignalById,
+  getSignalsByStatus,
+  getActiveSignals,
+  updateSignalStatus,
+  updateSignal,
 } from "../../lib/db.ts";
 import { runMigrations } from "../../lib/migrator.ts";
 import { join } from "node:path";
@@ -27,7 +33,7 @@ beforeAll(async () => {
 });
 
 beforeEach(async () => {
-  await sql`TRUNCATE items, fetch_state, schema_migrations RESTART IDENTITY CASCADE`;
+  await sql`TRUNCATE items, fetch_state, signals, schema_migrations RESTART IDENTITY CASCADE`;
   await runMigrations(MIGRATIONS_DIR);
 });
 
@@ -143,5 +149,110 @@ describe("fetch_state", () => {
   test("getFetchState returns null when not exists", async () => {
     const got = await getFetchState("x_user_timeline", "nonexistent");
     expect(got).toBeNull();
+  });
+});
+
+describe("signals", () => {
+  test("insertSignal creates a row with defaults", async () => {
+    const signal = await insertSignal({
+      title: "Ackman tweets about NVDA",
+      description: "Ackman mentioned NVDA in 3 tweets today",
+    });
+    expect(signal.id).toBeDefined();
+    expect(signal.importance).toBe(3); // default
+    expect(signal.status).toBe("discovered"); // default
+    expect(signal.tags).toEqual([]); // default empty array
+    expect(signal.source_items).toEqual([]); // default empty array
+    expect(signal.created_at).toBeDefined();
+    expect(signal.updated_at).toBeDefined();
+  });
+
+  test("insertSignal respects custom importance and tags", async () => {
+    const signal = await insertSignal({
+      title: " Fed rate decision imminent",
+      description: "FOMC meeting tomorrow",
+      importance: 5,
+      tags: ["macro", "fed"],
+      source_items: ["tw-1", "tw-2"],
+    });
+    expect(signal.importance).toBe(5);
+    expect(signal.tags).toEqual(["macro", "fed"]);
+    expect(signal.source_items).toEqual(["tw-1", "tw-2"]);
+  });
+
+  test("getSignalById returns the signal", async () => {
+    const inserted = await insertSignal({ title: "Test", description: "d" });
+    const got = await getSignalById(inserted.id);
+    expect(got).not.toBeNull();
+    expect(got!.title).toBe("Test");
+  });
+
+  test("getSignalById returns null for nonexistent", async () => {
+    const got = await getSignalById("00000000-0000-0000-0000-000000000000");
+    expect(got).toBeNull();
+  });
+
+  test("getSignalsByStatus filters correctly", async () => {
+    await insertSignal({ title: "A", description: "d", status: "discovered" });
+    await insertSignal({ title: "B", description: "d", status: "tracking" });
+    await insertSignal({ title: "C", description: "d", status: "matured" });
+
+    const discovered = await getSignalsByStatus("discovered");
+    expect(discovered.every((s) => s.status === "discovered")).toBe(true);
+    expect(discovered.some((s) => s.title === "A")).toBe(true);
+  });
+
+  test("getActiveSignals returns discovered + tracking only", async () => {
+    await insertSignal({ title: "D1", description: "d", status: "discovered" });
+    await insertSignal({ title: "T1", description: "d", status: "tracking" });
+    await insertSignal({ title: "M1", description: "d", status: "matured" });
+    await insertSignal({ title: "F1", description: "d", status: "faded" });
+
+    const active = await getActiveSignals();
+    expect(active.every((s) => s.status === "discovered" || s.status === "tracking")).toBe(true);
+    expect(active.some((s) => s.title === "D1")).toBe(true);
+    expect(active.some((s) => s.title === "T1")).toBe(true);
+    expect(active.every((s) => s.title !== "M1")).toBe(true);
+    expect(active.every((s) => s.title !== "F1")).toBe(true);
+  });
+
+  test("updateSignalStatus changes status and bumps updated_at", async () => {
+    const inserted = await insertSignal({ title: "S", description: "d" });
+    const originalUpdatedAt = inserted.updated_at;
+    // Wait a tiny bit to ensure updated_at changes
+    await new Promise((r) => setTimeout(r, 10));
+    await updateSignalStatus(inserted.id, "tracking");
+    const got = await getSignalById(inserted.id);
+    expect(got!.status).toBe("tracking");
+    expect(got!.updated_at.getTime()).toBeGreaterThan(originalUpdatedAt.getTime());
+  });
+
+  test("updateSignal changes arbitrary fields", async () => {
+    const inserted = await insertSignal({ title: "Old", description: "old desc", importance: 2 });
+    await updateSignal(inserted.id, { title: "New", importance: 5 });
+    const got = await getSignalById(inserted.id);
+    expect(got!.title).toBe("New");
+    expect(got!.importance).toBe(5);
+    expect(got!.description).toBe("old desc"); // unchanged
+  });
+
+  test("importance CHECK constraint rejects 0", async () => {
+    // expect this to throw
+    try {
+      await insertSignal({ title: "Bad", description: "d", importance: 0 });
+      // If we get here, the constraint didn't fire
+      expect(false).toBe(true);
+    } catch (e) {
+      // expected
+    }
+  });
+
+  test("importance CHECK constraint rejects 6", async () => {
+    try {
+      await insertSignal({ title: "Bad", description: "d", importance: 6 });
+      expect(false).toBe(true);
+    } catch (e) {
+      // expected
+    }
   });
 });
