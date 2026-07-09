@@ -82,3 +82,12 @@ bun run typecheck
 - 排程(Phase 3 會用 Dagu 包)
 - 自動 retry 整個 pipeline(用 Dagu 的 retry 機制)
 - migration 的 down(不做,見上方決策)
+
+## 後續規劃
+見 `docs/ADR-001-pipeline-redesign.md`。簡版:
+- ✅ A: 推文同步(已上線)
+- ⏳ B: 訊號發現(每 1-2h,從 items 找市場訊號)
+- ⏳ C: 事件追蹤研究(每訊號一個 agent,用 Hindsight 存觀察)
+- ⏳ D: 報告生產(MVP 先做美股盤前 + 盤後)
+
+核心原則:每個 agent 只做一件事並且足夠專注 → 費用更少、品質更好、更可預測。
