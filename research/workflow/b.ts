@@ -244,6 +244,7 @@ async function discoverStep(): Promise<DiscoverStepResult> {
 async function triggerCForNewSignals(signalIds: string[]): Promise<string[]> {
   "use step";
   const runIds: string[] = [];
+  const failed: string[] = [];
   // 其中一個 signal trigger 失敗不中斷後續,繼續 trigger 剩下的
   // (Kilo PR #10 + Gemini:DB / 網路暫時性錯誤不該 block 其他 signals)
   for (const signalId of signalIds) {
@@ -252,10 +253,19 @@ async function triggerCForNewSignals(signalIds: string[]): Promise<string[]> {
       runIds.push(run.runId);
       console.log(`[B-workflow] triggered C for signal=${signalId} run_id=${run.runId}`);
     } catch (err) {
+      failed.push(signalId);
       console.error(
         `[B-workflow] failed to trigger C for signal=${signalId}: ${err instanceof Error ? err.message : err}`,
       );
     }
+  }
+  // Kilo PR #10 iter 2:若全部 trigger 都失敗(例如 SDK bundle 缺、workflow-plugin 沒載),
+  // 代表系統性問題,往上 throw 讓 bWorkflow 中斷並進 workflow_runs 表的 failed 狀態;
+  // 個別 signal 失敗還是容忍不中斷
+  if (signalIds.length > 0 && failed.length === signalIds.length) {
+    throw new Error(
+      `all ${signalIds.length} C workflow triggers failed; signalIds=${signalIds.join(",")}`,
+    );
   }
   return runIds;
 }

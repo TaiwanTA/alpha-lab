@@ -104,17 +104,17 @@ function jsonOk(body: Record<string, unknown>, status = 200): Response {
 async function main(): Promise<void> {
   // 1. logger init(必要顯式 init 才能確定行為,例如 LOG_CONSOLE=false)
   //
-  // 但:workflow-server.ts 間接 import `lib/logger.ts`(透過 workflow/* 內 inline
-  // 邏輯保留 `createLogger` 呼叫)+ loadBuiltHandlers() 載的 SDK bundle 內也有
-  // module-level `createLogger(...)` side-effect,這些會在 import chain 中觸發 logger
-  // lazy init(state 從 null 變成實例)。當 main() 跑 initLogger(...) 時,雖然
-  // `disposeState(prev)` 會 dispose 舊 fileTransport,但 LogFileRotationTransport
-  // 內部 `Symbol.dispose` 是帶 setTimeout 的 async 解尾,第二次 `new LogFileRotationTransport`
-  // 在同步路徑跑時可能還沒從 file-stream-rotator 的 registry 移除該 filename → throw。
+  // workflow-server.ts 透過 loadBuiltHandlers() 載 SDK bundle(.well-known/workflow/v1/{flow,step,webhook}.js),
+  // bundle 內由 SDK StandaloneBuilder 從 workflow/{a,b,c,d}.ts + agent/* 產生出來的程式碼中,
+  // 會保留 `var log = createLogger("x-client")` 等 module-level side-effect。
+  // bundle 被 import 時觸發 lazy-init logger(state 從 null 變成實例)。
+  // 當 main() 跑 initLogger(...) 時,雖然 disposeState(prev) 會 dispose 舊 fileTransport,
+  // 但 LogFileRotationTransport 內部 `Symbol.dispose` 是帶 setTimeout 的 async 解尾,
+  // 第二次 `new LogFileRotationTransport` 在同步路徑跑時可能還沒從 file-stream-rotator
+  // 的 registry 移除該 filename → throw。
   //
   // 解法:initLogger 用 try/catch。若 throw,代表 logger 已被 lazy-init 過(state 不為 null),
-  // 沿用現有 logger 即可(production 路徑不會發生 — agent 的 import chain 不會 lazy-init,
-  // 只有 workflow-server 透過 SDK bundle 才有此副作用)。
+  // 沿用現有 logger 即可(production 路徑不會發生 — 只有 workflow-server 載 SDK bundle 才有此副作用)。
   try {
     initLogger({ logConsole: process.env.LOG_CONSOLE !== "false" });
   } catch (err) {
@@ -141,10 +141,12 @@ async function main(): Promise<void> {
 
   // 4. Bun.serve
   // 驗證 port 是合法正整數,否則 Bun.serve 會 throw 難以理解的錯誤
-  // (e.g. WORKFLOW_SERVER_PORT="abc" → Number("abc") = NaN → Bun.serve throw)
-  const portEnv = Number(process.env.WORKFLOW_SERVER_PORT ?? 8090);
+  // (Kilo PR #10:empty string / NaN / out-of-range 都要擋,
+  //  WORKFLOW_SERVER_PORT="" 之前 Number("") = 0 會 fail < 1 check 但沒走 fallback)
+  const portRaw = process.env.WORKFLOW_SERVER_PORT;
+  const portEnv = portRaw && portRaw.trim() !== "" ? Number(portRaw) : 8090;
   if (!Number.isInteger(portEnv) || portEnv < 1 || portEnv > 65535) {
-    log.withMetadata({ env_value: process.env.WORKFLOW_SERVER_PORT }).error(
+    log.withMetadata({ env_value: portRaw }).error(
       "WORKFLOW_SERVER_PORT must be an integer 1-65535",
     );
     process.exit(1);
