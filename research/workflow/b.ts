@@ -244,10 +244,18 @@ async function discoverStep(): Promise<DiscoverStepResult> {
 async function triggerCForNewSignals(signalIds: string[]): Promise<string[]> {
   "use step";
   const runIds: string[] = [];
+  // 其中一個 signal trigger 失敗不中斷後續,繼續 trigger 剩下的
+  // (Kilo PR #10 + Gemini:DB / 網路暫時性錯誤不該 block 其他 signals)
   for (const signalId of signalIds) {
-    const run = await start(cWorkflow, [signalId]);
-    runIds.push(run.runId);
-    console.log(`[B-workflow] triggered C for signal=${signalId} run_id=${run.runId}`);
+    try {
+      const run = await start(cWorkflow, [signalId]);
+      runIds.push(run.runId);
+      console.log(`[B-workflow] triggered C for signal=${signalId} run_id=${run.runId}`);
+    } catch (err) {
+      console.error(
+        `[B-workflow] failed to trigger C for signal=${signalId}: ${err instanceof Error ? err.message : err}`,
+      );
+    }
   }
   return runIds;
 }

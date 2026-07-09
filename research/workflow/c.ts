@@ -3,7 +3,7 @@
 // 一個 cWorkflow run = 對一個 signal 跑一次 C agent。C 本身冪等,trigger 失敗重試安全。
 
 import { sql } from "bun";
-import { join } from "node:path";
+import { join, dirname } from "node:path";
 import { mkdir, writeFile } from "node:fs/promises";
 import { HindsightClient, HindsightError } from "../lib/hindsight-client.ts";
 import type { HindsightMemory } from "../lib/hindsight-client.ts";
@@ -60,14 +60,23 @@ async function fetchItemsByExternalIds(
   sourceType: string = "x_user_timeline",
 ): Promise<ItemRow[]> {
   if (externalIds.length === 0) return [];
-  const idList = externalIds.map((id) => `'${escapeSqlString(id)}'`).join(",");
-  return await sql<ItemRow[]>`
-    SELECT source_type, source_label, external_id, external_parent,
-           created_at, fetched_at, context, processed_at
-    FROM items
-    WHERE source_type = ${sourceType} AND external_id IN (${sql.unsafe(idList)})
-    ORDER BY created_at DESC
-  `;
+  // 分批 (Postgres IN list 過長會撐爆 query parser;Kilo PR #10 WARNING)。
+  // 每批 200 個 id,典型 LLM 給 50-200 個,基本一批就解決
+  const BATCH_SIZE = 200;
+  const results: ItemRow[] = [];
+  for (let i = 0; i < externalIds.length; i += BATCH_SIZE) {
+    const batch = externalIds.slice(i, i + BATCH_SIZE);
+    const idList = batch.map((id) => `'${escapeSqlString(id)}'`).join(",");
+    const rows = await sql<ItemRow[]>`
+      SELECT source_type, source_label, external_id, external_parent,
+             created_at, fetched_at, context, processed_at
+      FROM items
+      WHERE source_type = ${sourceType} AND external_id IN (${sql.unsafe(idList)})
+      ORDER BY created_at DESC
+    `;
+    results.push(...rows);
+  }
+  return results;
 }
 
 function slugify(title: string): string {
@@ -216,7 +225,10 @@ async function researchLogic(signalId: string): Promise<ResearchStepResult> {
       console.log(`[C-workflow] skipping invalid observation: ${v.error}`);
       continue;
     }
-    const documentId = `signal-${signal.id}-${runStartIso}-${obsIndex}`;
+    // 用 randomUUID 確保 document_id 唯一:之前用 runStartIso+obsIndex 在 workflow
+    // retry 整個 step 時會撞(Kilo PR #10:retry 時 runStartIso 跟 obsIndex 一樣,
+    // retain 第二次會 fail / overwrite)。UUID 跨 retry 永遠唯一,跟 workflow runs 1:1 不衝突
+    const documentId = `signal-${signal.id}-${crypto.randomUUID()}`;
     obsIndex++;
     try {
       await hindsight.retain(HINDSIGHT_BANK_ID, {
@@ -245,7 +257,7 @@ async function researchLogic(signalId: string): Promise<ResearchStepResult> {
   const reportPath = `drafts/event-tracking/${slug}.md`;
   const reportContent = generateReportMarkdown(signal, items, prior, validFindings);
   const fullPath = join(process.cwd(), reportPath);
-  const dir = fullPath.slice(0, fullPath.lastIndexOf("/"));
+  const dir = dirname(fullPath);
   await mkdir(dir, { recursive: true });
   await writeFile(fullPath, reportContent, "utf-8");
   console.log(`[C-workflow] wrote ${reportPath}`);

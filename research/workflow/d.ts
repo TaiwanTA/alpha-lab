@@ -191,6 +191,9 @@ async function generateReportLogic(type: "pre" | "post"): Promise<DStepResult> {
   try {
     await hindsight.getBank(HINDSIGHT_BANK_ID);
   } catch (err) {
+    // HindsightError 在 lib/hindsight-client.ts 已驗證:`constructor(public readonly status: number, ...)`,
+    // status 來自 fetch().status 直接放,err.status 是真 HTTP status。
+    // (Kilo PR #10:確認 404 detection 沒問題)
     if (err instanceof HindsightError && err.status === 404) {
       await hindsight.createBank({
         bank_id: HINDSIGHT_BANK_ID,

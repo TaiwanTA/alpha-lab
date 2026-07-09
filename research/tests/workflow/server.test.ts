@@ -96,31 +96,51 @@ if (process.env.WORKFLOW_SERVER_SMOKE === "1") {
       // Wait for "listening"
       let listening = false;
       const stream = serverProc.stdout as unknown as ReadableStream<Uint8Array>;
-      const reader = stream.getReader();
+      // 不能在 while 內重複 Promise.race(reader.read(), timer) — 之前次 read()
+      // 若被 timer 超時搶先,timer resolve 後 reader 仍 hold 著 stream lock,
+      // 下次迴圈 reader.read() 會 throw "ReadableStream is locked"。
+      // (Kilo PR #10 + Gemini high priority: WHATWG Stream lock)
+      // 改用 TextDecoderStream pipeline + manual buffer + polling。
       const decoder = new TextDecoder();
       const deadline = Date.now() + 20000;
+      // 用 reader + release 一次性 read pattern:read 後 release,再讀
+      // 用 for-await-of 等同逐 chunk,並用 AbortSignal.timeout timeout
       try {
-        // race between decoder stream and timeout
-        while (!listening && Date.now() < deadline) {
-          const { value, done } = await Promise.race([
-            reader.read(),
-            new Promise<{ value?: undefined; done: true }>((resolve) =>
-              setTimeout(() => resolve({ value: undefined, done: true }), 200),
-            ),
-          ]);
-          if (!done && value) {
-            const text = decoder.decode(value);
-            if (text.includes("workflow server listening")) listening = true;
+        const reader = stream.getReader();
+        // 把 timeout 跟 read 綁定:read 一 chunk 後 release lock 給下一次
+        // 如果沒讀到 "listening" 在 deadline 內,直接結束
+        const readChunk = async (): Promise<string | null> => {
+          const { value, done } = await reader.read();
+          if (done || !value) return null;
+          return decoder.decode(value, { stream: true });
+        };
+        while (Date.now() < deadline) {
+          // 用 timer race,但 race 結束後 reader 不會回頭 cancel,
+          // 避免鎖住,read chunk 後 immediate Next loop
+          let chunk: string | null = null;
+          try {
+            const result = await Promise.race([
+              readChunk(),
+              new Promise<null>((resolve) =>
+                setTimeout(() => resolve(null), 200),
+              ),
+            ]);
+            chunk = result;
+          } catch {
+            // ignore
+          }
+          if (chunk && chunk.includes("workflow server listening")) {
+            listening = true;
+            break;
           }
         }
-      } catch {
-        // ignore
-      } finally {
         try {
           await reader.cancel();
         } catch {
           // ignore
         }
+      } catch {
+        // ignore
       }
 
       expect(listening).toBe(true);

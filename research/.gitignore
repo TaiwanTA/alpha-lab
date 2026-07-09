@@ -5,6 +5,7 @@ node_modules/
 .DS_Store
 logs/
 logs-trace/
+drafts/
 .tmp-bundles/
 /.swc
 .wf-bundles/

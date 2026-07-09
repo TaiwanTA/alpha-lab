@@ -103,26 +103,25 @@ function jsonOk(body: Record<string, unknown>, status = 200): Response {
 
 async function main(): Promise<void> {
   // 1. logger init(必要顯式 init 才能確定行為,例如 LOG_CONSOLE=false)
-  // 但 step.js / flow.js bundle 內有 `var log = createLogger("x-client")`
-  // module-level side-effect,只要 import 該檔就會 lazy-init logger — 這在
-  // workflow-server.ts 自身的 import chain 更早發生(L99 載 built handlers
-  // 之前),所以 state 不為 null,而 filename registry 已佔住。直接重 init
-  // 會撞同一 filename。
   //
-  // 解法:initLogger 已內建 `if (state) disposeState(state)`。Symbol.dispose
-  // 是 async(setTimeout 等 compression)但 first init 不會壓縮,所以
-  // activeFilenames.delete 在同步路徑就跑。實際驗證:重 init 會 throw
-  // "already in use" — 推測 setImmediate/微任務順序問題。
+  // 但:workflow-server.ts 間接 import `lib/logger.ts`(透過 workflow/* 內 inline
+  // 邏輯保留 `createLogger` 呼叫)+ loadBuiltHandlers() 載的 SDK bundle 內也有
+  // module-level `createLogger(...)` side-effect,這些會在 import chain 中觸發 logger
+  // lazy init(state 從 null 變成實例)。當 main() 跑 initLogger(...) 時,雖然
+  // `disposeState(prev)` 會 dispose 舊 fileTransport,但 LogFileRotationTransport
+  // 內部 `Symbol.dispose` 是帶 setTimeout 的 async 解尾,第二次 `new LogFileRotationTransport`
+  // 在同步路徑跑時可能還沒從 file-stream-rotator 的 registry 移除該 filename → throw。
   //
-  // 簡單解法:先 sync 跑 delete from activeFilenames,再 call construct。
-
-  // 先 sync 觸碰 logDir,確保 mkdir 完成
+  // 解法:initLogger 用 try/catch。若 throw,代表 logger 已被 lazy-init 過(state 不為 null),
+  // 沿用現有 logger 即可(production 路徑不會發生 — agent 的 import chain 不會 lazy-init,
+  // 只有 workflow-server 透過 SDK bundle 才有此副作用)。
   try {
     initLogger({ logConsole: process.env.LOG_CONSOLE !== "false" });
-  } catch {
-    // initLogger 可能因 registry 衝突 throw — 此時 logger 已被某 module
-    // lazy-init 過(state 不為 null),fallback 沿用。
-    // 我們仍要拿 child logger,所以走 getLog() 拿到現有。
+  } catch (err) {
+    // logger state 已存在(lazy-init 過),沿用即可;不能用 wLog 因還沒 createLogger
+    console.warn(
+      `[workflow-server] initLogger fallback to existing state: ${err instanceof Error ? err.message : String(err)}`,
+    );
   }
 
   const log = createLogger("workflow-server");
@@ -141,7 +140,16 @@ async function main(): Promise<void> {
   }
 
   // 4. Bun.serve
-  const port = Number(process.env.WORKFLOW_SERVER_PORT ?? 8090);
+  // 驗證 port 是合法正整數,否則 Bun.serve 會 throw 難以理解的錯誤
+  // (e.g. WORKFLOW_SERVER_PORT="abc" → Number("abc") = NaN → Bun.serve throw)
+  const portEnv = Number(process.env.WORKFLOW_SERVER_PORT ?? 8090);
+  if (!Number.isInteger(portEnv) || portEnv < 1 || portEnv > 65535) {
+    log.withMetadata({ env_value: process.env.WORKFLOW_SERVER_PORT }).error(
+      "WORKFLOW_SERVER_PORT must be an integer 1-65535",
+    );
+    process.exit(1);
+  }
+  const port = portEnv;
   const server = Bun.serve({
     port,
     async fetch(req: Request): Promise<Response> {
@@ -229,7 +237,8 @@ async function main(): Promise<void> {
         }
       } catch (err) {
         log.withMetadata({ pathname, method }).withError(err).error("handler error");
-        return jsonError(err instanceof Error ? err.message : "internal error", 500);
+        // 不外露內部錯誤訊息給 client(server 只 listen 127.0.0.1 但仍避免資訊洩漏)
+        return jsonError("internal error", 500);
       }
 
       return notFound();

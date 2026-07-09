@@ -6,6 +6,10 @@
 # 對應的 /a /b /d/pre /d/post routes,以 trigger A/B/C/D workflow runs。
 #
 # 不依賴 systemd cron — 用 systemd timer 是 spec 決定(更可靠 + log 整合)
+#
+# Bun 路徑:不寫死某個 install 路徑(/home/alpha/.local/share/mise/... 太脆),
+# 走 alpha user 的 PATH 即可,讓 mise / 直接裝的 bun 都能被找到。
+# 若 alpha user 沒裝 bun,執行前先 `mise install bun@latest` + `mise use -g bun@latest`。
 
 [Unit]
 Description=alpha-lab Vercel Workflow runtime
@@ -19,7 +23,10 @@ Type=simple
 User=alpha
 WorkingDirectory=/opt/alpha-lab/research
 EnvironmentFile=/opt/alpha-lab/research/.env
-ExecStart=/home/alpha/.local/share/mise/installs/bun/latest/bin/bun run workflow-server.ts
+# Bun 路徑走 alpha user 的 PATH,mise / 直接裝的 bun 都不寫死路徑
+# (alpha user 預設 PATH 應該含 ~/.bun/bin 或 mise shims)
+Environment="PATH=/home/alpha/.bun/bin:/home/alpha/.local/share/mise/shims:/usr/local/bin:/usr/bin:/bin"
+ExecStart=bun run workflow-server.ts
 Restart=on-failure
 RestartSec=10
 

@@ -44,7 +44,9 @@ plugin({
       { filter: /\.(ts|tsx)$/ },
       async (args) => {
         // 跳過 node_modules — 不要對外部 dep 做 transform(workflow SDK 自己已編譯)
-        if (args.path.includes("/node_modules/")) {
+        // 用 regex 跨平台支援 Windows(\) 跟 POSIX(/)分隔符
+        // (Kilo PR #10 + Gemini: literal "/node_modules/" 在 Windows 失效)
+        if (/[\\/]node_modules[\\/]/.test(args.path)) {
           return { contents: await Bun.file(args.path).text(), loader: "js" };
         }
 
