@@ -51,6 +51,13 @@ export interface Signal {
   updated_at: Date;
 }
 
+// items 表的 row(extend RawItem,加 DB-only 欄位 fetched_at + 給 B agent 的 processed_at)
+// 給 B agent 用,因為它讀 items 表的「未處理」部分
+export interface ItemRow extends RawItem {
+  fetched_at: Date;
+  processed_at: Date | null;
+}
+
 // 用於 insertSignal,省略有 default 的欄位
 export interface NewSignal {
   slug?: string | null;
