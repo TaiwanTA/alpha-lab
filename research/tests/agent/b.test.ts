@@ -86,6 +86,8 @@ describe("B agent discover — happy path", () => {
     expect(inserted.title).toBe("Ackman on NVDA");
     expect(inserted.importance).toBe(4);
     expect(inserted.source_items).toEqual(["tw1"]);
+    // newSignalIds populated (Step 7b:workflow per-signal trigger 需求)
+    expect(result.newSignalIds).toContain("signal-1");
     // Both items marked processed
     expect(deps.markItemsProcessed).toHaveBeenCalledTimes(1);
     const markArgs = (deps.markItemsProcessed as any).mock.calls[0];
@@ -105,6 +107,7 @@ describe("B agent discover — happy path", () => {
     const result = await discover(deps);
     expect(result.itemsProcessed).toBe(2);
     expect(result.newSignals).toBe(0);
+    expect(result.newSignalIds).toEqual([]);  // 無訊號 → 無 id
     expect(deps.insertSignal).not.toHaveBeenCalled();
     expect(deps.markItemsProcessed).toHaveBeenCalledTimes(1);
   });
@@ -175,6 +178,8 @@ describe("B agent discover — error handling", () => {
     const result = await discover(deps);
     // First insert failed, second succeeded
     expect(result.newSignals).toBe(1);
+    // newSignalIds 只含成功的那一個(workflow trigger 只對真實存在的 signal 跑 C)
+    expect(result.newSignalIds).toEqual(["signal-2"]);
     expect(deps.insertSignal).toHaveBeenCalledTimes(2);
     // Both items still marked processed despite partial failure
     expect(deps.markItemsProcessed).toHaveBeenCalledTimes(1);

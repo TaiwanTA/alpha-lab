@@ -9,7 +9,7 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
     ports:
-      - "127.0.0.1:5432:5432"
+      - "127.0.0.1:5433:5432"  # dev port 5433:5432 — VM 上 port 5432 不衝突
     restart: unless-stopped
 
 volumes:

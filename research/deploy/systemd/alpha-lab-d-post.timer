@@ -1,0 +1,13 @@
+# alpha-lab D 盤後報告 trigger timer — 美東 Mon-Fri 16:30
+
+[Unit]
+Description=alpha-lab D post-market workflow trigger timer (Mon-Fri 16:30 ET)
+
+[Timer]
+OnCalendar=Mon..Fri 16:30:00
+Timezone=America/New_York
+Persistent=true
+Unit=alpha-lab-d-post.service
+
+[Install]
+WantedBy=timers.target

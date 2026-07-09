@@ -444,7 +444,7 @@ function generateReportMarkdown(
 }
 
 // 預設 deps:CLI 用真 DB + Hindsight + LLM
-async function getDefaultDeps(): Promise<CDependencies> {
+export async function getDefaultDeps(): Promise<CDependencies> {
   const { getSignalById, updateSignalStatus, initDb } = await import(
     "../lib/db.ts"
   );
