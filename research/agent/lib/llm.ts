@@ -106,9 +106,11 @@ export async function askMessages(
         res.status === 429 ||
         res.status >= 500
       ) {
-        const text = await res.text();
         await res.body?.cancel();
-        await sleep(1000 * Math.pow(2, attempt));
+        // Jitter 防止多 job 並發 thundering herd
+        const baseMs = 1000 * Math.pow(2, attempt);
+        const jitter = Math.floor(Math.random() * 250);
+        await sleep(baseMs + jitter);
         attempt++;
         continue;
       }
@@ -119,7 +121,10 @@ export async function askMessages(
       }
 
       const data = (await res.json()) as {
-        choices?: Array<{ message?: { content?: string } }>;
+        choices?: Array<{
+          message?: { content?: string };
+          finish_reason?: string;
+        }>;
         usage?: {
           prompt_tokens?: number;
           completion_tokens?: number;
@@ -133,6 +138,14 @@ export async function askMessages(
       }
 
       const content = choice.message?.content;
+      // finish_reason 非法狀態(只有 content_filter 才該 throw;
+      // length / tool_calls 都可能有 content,正常處理)
+      if (choice.finish_reason === "content_filter") {
+        throw new LlmError(
+          451,
+          "LLM API returned content_filter — content blocked by provider",
+        );
+      }
       if (content === undefined || content === null) {
         throw new Error("LLM API returned choice without content");
       }
@@ -146,13 +159,23 @@ export async function askMessages(
         },
         model: data.model ?? model,
       };
+    } catch (err) {
+      // AbortError(超時)跟 TypeError(網路錯誤)也 retry
+      if (err instanceof LlmError) throw err;
+      // 其餘網路/超時錯誤:剩餘 attempts 繼續 retry
+      if (attempt >= MAX_ATTEMPTS - 1) throw err;
+      const baseMs = 1000 * Math.pow(2, attempt);
+      const jitter = Math.floor(Math.random() * 250);
+      await sleep(baseMs + jitter);
+      attempt++;
     } finally {
       clearTimeout(timer);
     }
   }
 
+  // 504 = 跟 HTTP gateway timeout 同義,比 599 自訂更標準
   throw new LlmError(
-    599,
+    504,
     `LLM request failed after ${MAX_ATTEMPTS} attempts`,
   );
 }
