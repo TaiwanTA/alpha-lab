@@ -11,8 +11,15 @@ import {
   haveItems,
   getFetchState,
   upsertFetchState,
+  insertSignal,
+  insertSignals,
+  getSignal,
+  getSignalBySlug,
+  listSignals,
+  updateSignalStatus,
 } from "../../lib/db.ts";
 import { runMigrations } from "../../lib/migrator.ts";
+import type { NewSignal } from "../../lib/types.ts";
 import { join } from "node:path";
 
 const MIGRATIONS_DIR = join(import.meta.dir, "..", "..", "migrations");
@@ -27,7 +34,7 @@ beforeAll(async () => {
 });
 
 beforeEach(async () => {
-  await sql`TRUNCATE items, fetch_state, schema_migrations RESTART IDENTITY CASCADE`;
+  await sql`TRUNCATE items, fetch_state, signals, schema_migrations RESTART IDENTITY CASCADE`;
   await runMigrations(MIGRATIONS_DIR);
 });
 
@@ -143,5 +150,134 @@ describe("fetch_state", () => {
   test("getFetchState returns null when not exists", async () => {
     const got = await getFetchState("x_user_timeline", "nonexistent");
     expect(got).toBeNull();
+  });
+});
+
+function makeSignal(overrides: Partial<NewSignal> = {}): NewSignal {
+  return {
+    title: "Ackman trims NVDA",
+    description: "Pershing Square Q3 13F shows reduced NVDA position",
+    importance: 3,
+    status: "discovered",
+    tags: ["ackman", "nvda"],
+    source_items: ["1001", "1002"],
+    ...overrides,
+  };
+}
+
+describe("signals", () => {
+  test("insertSignal returns server-generated uuid", async () => {
+    const id = await insertSignal(makeSignal());
+    expect(id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);
+
+    const got = await getSignal(id);
+    expect(got).not.toBeNull();
+    expect(got!.title).toBe("Ackman trims NVDA");
+  });
+
+  test("insertSignal rejects importance outside 1..5 (CHECK constraint)", async () => {
+    // bypass TS literal-union with `as any` — 驗證 DB CHECK constraint
+    const bad = { ...makeSignal(), importance: 0 } as unknown as NewSignal;
+    await expect(insertSignal(bad)).rejects.toThrow();
+  });
+
+  test("insertSignal defaults status to 'discovered' when omitted", async () => {
+    const { status: _ignored, ...withoutStatus } = makeSignal();
+    void _ignored;
+    const id = await insertSignal(withoutStatus);
+    const got = await getSignal(id);
+    expect(got!.status).toBe("discovered");
+  });
+
+  test("insertSignals bulk insert returns count, respects ON CONFLICT DO NOTHING", async () => {
+    const first = await insertSignals([makeSignal({ title: "a" }), makeSignal({ title: "b" })]);
+    expect(first).toBe(2);
+
+    // 用 raw SQL 預先塞一個固定 id 的 row,再插同 id 測 ON CONFLICT
+    await sql`
+      INSERT INTO signals (id, title, description, importance, status)
+      VALUES ('00000000-0000-0000-0000-000000000001', 'preset', 'preset', 3, 'discovered')
+    `;
+
+    // 第二輪帶一個 explicit id(撞 preset)+ 一個走 default id
+    const conflictRow = {
+      id: "00000000-0000-0000-0000-000000000001",
+      ...makeSignal({ title: "should conflict" }),
+    };
+    const second = await insertSignals([
+      conflictRow as unknown as NewSignal,
+      makeSignal({ title: "c" }),
+    ]);
+    expect(second).toBe(1); // 只有 c 進去
+  });
+
+  test("getSignal returns null when missing", async () => {
+    const got = await getSignal("00000000-0000-0000-0000-000000000000");
+    expect(got).toBeNull();
+  });
+
+  test("getSignalBySlug returns the row or null", async () => {
+    const id = await insertSignal(makeSignal({ slug: "ackman-nvda-cuts-2026q3" }));
+    const got = await getSignalBySlug("ackman-nvda-cuts-2026q3");
+    expect(got?.id).toBe(id);
+
+    const missing = await getSignalBySlug("does-not-exist");
+    expect(missing).toBeNull();
+  });
+
+  test("listSignals filters by status", async () => {
+    await insertSignal(makeSignal({ title: "t1", status: "discovered" }));
+    await insertSignal(makeSignal({ title: "t2", status: "tracking" }));
+    await insertSignal(makeSignal({ title: "t3", status: "tracking" }));
+
+    const tracking = await listSignals({ status: "tracking" });
+    expect(tracking).toHaveLength(2);
+    expect(tracking.every((s) => s.status === "tracking")).toBe(true);
+
+    const discovered = await listSignals({ status: "discovered" });
+    expect(discovered).toHaveLength(1);
+  });
+
+  test("listSignals filters by minImportance (>=)", async () => {
+    await insertSignal(makeSignal({ title: "low", importance: 2 }));
+    await insertSignal(makeSignal({ title: "high4", importance: 4 }));
+    await insertSignal(makeSignal({ title: "high5", importance: 5 }));
+
+    const important = await listSignals({ minImportance: 4 });
+    expect(important).toHaveLength(2);
+    expect(important.every((s) => s.importance >= 4)).toBe(true);
+  });
+
+  test("listSignals filters by tags (any-of via &&)", async () => {
+    await insertSignal(makeSignal({ title: "nvda", tags: ["nvda", "ai"] }));
+    await insertSignal(makeSignal({ title: "tsla", tags: ["tsla", "ev"] }));
+    await insertSignal(makeSignal({ title: "ai-policy", tags: ["ai", "policy"] }));
+
+    // 給 ["nvda"] 應只命中第一條(只有它有 nvda)
+    const nvdaOnly = await listSignals({ tags: ["nvda"] });
+    expect(nvdaOnly).toHaveLength(1);
+    expect(nvdaOnly[0]!.title).toBe("nvda");
+
+    // 給 ["ai"] 應命中第一條 + 第三條(any-of)
+    const aiAny = await listSignals({ tags: ["ai"] });
+    expect(aiAny).toHaveLength(2);
+
+    // 給 ["nvda", "tsla"] 應命中前兩條
+    const multi = await listSignals({ tags: ["nvda", "tsla"] });
+    expect(multi).toHaveLength(2);
+  });
+
+  test("updateSignalStatus updates status and bumps updated_at", async () => {
+    const id = await insertSignal(makeSignal());
+    const before = await getSignal(id);
+    expect(before!.status).toBe("discovered");
+
+    // 確保 updated_at 跟 created_at 之間有可觀察的差距(now() per-statement)
+    await new Promise((r) => setTimeout(r, 20));
+
+    await updateSignalStatus(id, "tracking");
+    const after = await getSignal(id);
+    expect(after!.status).toBe("tracking");
+    expect(after!.updated_at.getTime()).toBeGreaterThan(before!.updated_at.getTime());
   });
 });
