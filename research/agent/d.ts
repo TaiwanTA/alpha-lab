@@ -212,9 +212,13 @@ export async function generateReport(
   }
   // Kilo PR #8 WARNING:post 模式之前 merge active + matured 之后才 slice(0,10),
   // 没按 importance 排序。改成:先 sort importance DESC,再取 top 10
+  // Kilo PR #8 iter 2 SUGGESTION:加 created_at 作 tiebreaker 確保同 importance 時順序穩定
   signals = signals
     .slice()
-    .sort((a, b) => b.importance - a.importance)
+    .sort((a, b) =>
+      b.importance - a.importance ||
+      b.created_at.getTime() - a.created_at.getTime()
+    )
     .slice(0, MAX_SIGNALS_FOR_RECALL);
   console.log(`[D] ${type} report — top ${signals.length} signals by importance`);
 
@@ -265,11 +269,11 @@ export async function generateReport(
 
   // 6. 不解析 LLM output 结构,直接写进 markdown(LLM 已 follow format)
   const content = llmResult.content;
-  // Kilo PR #8 SUGGESTION:LLM 回空字串(罕见但可能:text filter / token 0)
-  // 仍会产生 0 byte report 污染。reject。
-  if (content.length < MIN_LLM_CONTENT_LEN) {
+  // Kilo PR #8 iter 2:trim 之后才检查长度,避免纯空白字串通过
+  const trimmedLength = content.trim().length;
+  if (trimmedLength < MIN_LLM_CONTENT_LEN) {
     throw new Error(
-      `LLM returned empty/too-short content (${content.length} chars). Not writing report.`,
+      `LLM returned empty/too-short content (trimmed ${trimmedLength} chars, raw ${content.length}). Not writing report.`,
     );
   }
   const path = reportPath(type, now);
