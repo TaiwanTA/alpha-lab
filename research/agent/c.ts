@@ -13,6 +13,7 @@ import { ask } from "./lib/llm.ts";
 import type { AskResult } from "./lib/llm.ts";
 import {
   HindsightClient,
+  HindsightError,
   type HindsightMemory,
 } from "../lib/hindsight-client.ts";
 import type { Signal, ItemRow } from "../lib/types.ts";
@@ -91,6 +92,7 @@ export interface CDependencies {
 export interface ResearchResult {
   signalId: string;
   observationsRetained: number;
+  observationsFailed: number;
   reportPath: string;
 }
 
@@ -182,19 +184,35 @@ function validateFinding(
   if (!Array.isArray(f.entities)) {
     return { ok: false, error: "entities is not array" };
   }
-  if (!(f.entities as unknown[]).every((e) => typeof e === "string")) {
-    return { ok: false, error: "entities contains non-string" };
+  // Kilo SUGGESTION:對 entities / tags 字串做長度檢查(防 LLM 給超常字串)
+  const MAX_ENTITY_LEN = 100;
+  for (const e of f.entities as unknown[]) {
+    if (typeof e !== "string") {
+      return { ok: false, error: "entities contains non-string" };
+    }
+    if (e.length > MAX_ENTITY_LEN) {
+      return { ok: false, error: `entity too long: ${e.length} > ${MAX_ENTITY_LEN}` };
+    }
   }
 
   if (!Array.isArray(f.tags)) {
     return { ok: false, error: "tags is not array" };
   }
-  if (!(f.tags as unknown[]).every((t) => typeof t === "string")) {
-    return { ok: false, error: "tags contains non-string" };
+  const MAX_TAG_LEN = 100;
+  for (const t of f.tags as unknown[]) {
+    if (typeof t !== "string") {
+      return { ok: false, error: "tags contains non-string" };
+    }
+    if (t.length > MAX_TAG_LEN) {
+      return { ok: false, error: `tag too long: ${t.length} > ${MAX_TAG_LEN}` };
+    }
   }
 
   if (typeof f.source !== "string") {
     return { ok: false, error: `invalid source: ${typeof f.source}` };
+  }
+  if ((f.source as string).length > 200) {
+    return { ok: false, error: `source too long: ${(f.source as string).length} > 200` };
   }
 
   return {
@@ -272,8 +290,10 @@ export async function research(
 
   // 7. 寫進 Hindsight(逐條 validate → retain)
   let retained = 0;
+  let failed = 0;
   const validFindings: ResearchFinding[] = [];
-  const nowIso = new Date().toISOString();
+  const runStartIso = new Date().toISOString();
+  let obsIndex = 0;
   for (const rawObs of obsField) {
     const v = validateFinding(rawObs);
     if (!v.ok) {
@@ -281,28 +301,37 @@ export async function research(
       continue;
     }
     validFindings.push(v.value);
+    // Kilo PR #7 CRITICAL:document_id 在 run 內要唯一,
+    // 否則同 run 多條 observation 互相 upsert 覆蓋 → 加 per-observation index
+    const documentId = `signal-${signal.id}-${runStartIso}-${obsIndex}`;
+    obsIndex++;
     try {
       await deps.retainHindsight({
         text: v.value.observation,
         context: signal.title,
         type: "observation",
-        occurred_start: nowIso,
-        occurred_end: nowIso,
-        entities: v.value.entities,
-        tags: [...signal.tags, ...v.value.tags, `signal:${signal.id}`],
-        document_id: `signal-${signal.id}-${nowIso}`,
+        occurred_start: runStartIso,
+        occurred_end: runStartIso,
+        // Kilo SUGGESTION:entities / tags 合併後去重,避免重複
+        entities: [...new Set(v.value.entities)],
+        tags: [...new Set([...signal.tags, ...v.value.tags, `signal:${signal.id}`])],
+        document_id: documentId,
       });
       retained++;
     } catch (err) {
+      failed++;
       console.error(`[C] failed to retain observation:`, err);
     }
   }
   console.log(
-    `[C] retained ${retained}/${obsField.length} observations into Hindsight`,
+    `[C] retained ${retained}/${obsField.length} observations into Hindsight (${failed} failed)`,
   );
 
   // 8. 寫 markdown report draft
-  const slug = slugify(signal.title) || signal.id;
+  // Kilo SUGGESTION:相近日的 signal 可能撞 slug → 附加 signal.id 前 8 碼保唯一
+  const titleSlug = slugify(signal.title) || "signal";
+  const idSuffix = signal.id.replace(/-/g, "").slice(0, 8);
+  const slug = `${titleSlug}-${idSuffix}`;
   const reportPath = `drafts/event-tracking/${slug}.md`;
   const reportContent = generateReportMarkdown(
     signal,
@@ -322,6 +351,7 @@ export async function research(
   return {
     signalId: signal.id,
     observationsRetained: retained,
+    observationsFailed: failed,
     reportPath,
   };
 }
@@ -414,17 +444,22 @@ async function getDefaultDeps(): Promise<CDependencies> {
     retainHindsight: (memory) => hindsight.retain(HINDSIGHT_BANK_ID, memory),
     ensureHindsightBank: async () => {
       if (bankEnsured) return;
-      // 檢查是否已存在,不存在就 create
+      // Kilo WARNING:之前「任何 error 就 create」會把 5xx/網路錯當成 bank 不存在。
+      // 改成只 404 時 create,其他 error 真 throw 讓 caller 知道
       try {
         await hindsight.getBank(HINDSIGHT_BANK_ID);
-      } catch {
-        // 如果 bank 不存在(404),create one
-        await hindsight.createBank({
-          bank_id: HINDSIGHT_BANK_ID,
-          name: "Alpha Lab",
-          mission: DEFAULT_BANK_MISSION,
-        });
-        console.log(`[C] created Hindsight bank "${HINDSIGHT_BANK_ID}"`);
+      } catch (err) {
+        if (err instanceof HindsightError && err.status === 404) {
+          await hindsight.createBank({
+            bank_id: HINDSIGHT_BANK_ID,
+            name: "Alpha Lab",
+            mission: DEFAULT_BANK_MISSION,
+          });
+          console.log(`[C] created Hindsight bank "${HINDSIGHT_BANK_ID}"`);
+        } else {
+          // 5xx / 網路錯:rethrow,不誤建 bank
+          throw err;
+        }
       }
       bankEnsured = true;
     },

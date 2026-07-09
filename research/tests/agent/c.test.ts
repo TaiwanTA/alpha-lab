@@ -282,6 +282,7 @@ describe("C agent research — error handling", () => {
 
     const result = await research(signal.id, deps);
     expect(result.observationsRetained).toBe(1);
+    expect(result.observationsFailed).toBe(1);
     expect(deps.retainHindsight).toHaveBeenCalledTimes(2);
   });
 
@@ -294,7 +295,80 @@ describe("C agent research — error handling", () => {
 
     const result = await research(signal.id, deps);
     expect(result.observationsRetained).toBe(0);
+    expect(result.observationsFailed).toBe(0);
     expect(deps.updateSignalStatus).toHaveBeenCalledWith(signal.id, "tracking");
+  });
+
+  test("document_id is unique per observation in same run (no upsert collision)", async () => {
+    // Kilo PR #7 CRITICAL:同 run 多條 observation 必須有 unique document_id,
+    // 否則 Hindsight upsert 會覆蓋
+    const signal = makeSignal();
+    const deps = makeFakeDeps({
+      signal,
+      items: [makeItem("tw1")],
+      llmContent: JSON.stringify({
+        observations: [
+          { observation: "first", entities: [], tags: [], source: "tw1" },
+          { observation: "second", entities: [], tags: [], source: "tw1" },
+          { observation: "third", entities: [], tags: [], source: "tw1" },
+        ],
+      }),
+    });
+
+    const result = await research(signal.id, deps);
+    expect(result.observationsRetained).toBe(3);
+    expect(deps.retainHindsight).toHaveBeenCalledTimes(3);
+    // 驗證三個 document_id 互不相同
+    const docIds = (deps.retainHindsight as any).mock.calls.map((c: any) => c[0].document_id);
+    expect(new Set(docIds).size).toBe(3);
+  });
+
+  test("entities and tags are deduplicated before retain (no duplicate in single observation)", async () => {
+    const signal = makeSignal({ tags: ["nvda", "ackman"] });
+    const deps = makeFakeDeps({
+      signal,
+      llmContent: JSON.stringify({
+        observations: [{
+          observation: "test",
+          entities: ["nvda", "nvda", "ackman"],
+          tags: ["position", "position", "long"],
+          source: "tw1",
+        }],
+      }),
+    });
+
+    await research(signal.id, deps);
+    const memory = (deps.retainHindsight as any).mock.calls[0][0];
+    // entities dedup
+    expect(memory.entities).toEqual(["nvda", "ackman"]);
+    // tags dedup (incl signal.tags + observation tags + signal: namespace)
+    expect(memory.tags).toContain("nvda");
+    expect(memory.tags).toContain("ackman");
+    expect(memory.tags).toContain("position");
+    expect(memory.tags).toContain("long");
+    expect(memory.tags).toContain(`signal:${signal.id}`);
+    // 沒有重複
+    expect(new Set(memory.tags).size).toBe(memory.tags.length);
+  });
+
+  test("entity too long is rejected", async () => {
+    const signal = makeSignal();
+    const longEntity = "x".repeat(101);
+    const deps = makeFakeDeps({
+      signal,
+      llmContent: JSON.stringify({
+        observations: [{
+          observation: "test",
+          entities: [longEntity],
+          tags: [],
+          source: "tw1",
+        }],
+      }),
+    });
+
+    const result = await research(signal.id, deps);
+    expect(result.observationsRetained).toBe(0);
+    expect(deps.retainHindsight).not.toHaveBeenCalled();
   });
 });
 
