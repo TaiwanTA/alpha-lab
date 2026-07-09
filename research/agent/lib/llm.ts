@@ -160,18 +160,21 @@ export async function askMessages(
         model: data.model ?? model,
       };
     } catch (err) {
-      // 只 retry transient 錯誤:AbortError(超時) + TypeError(網路斷/DNS 失敗)
-      // 不 retry:deterministic throws(LlmError for 4xx API errors,
-      // SyntaxError for JSON parse failure, Error for no choices / missing content)
-      // 這些重試沒意義,會浪費 3 次大約同樣的失敗
+      // 只 retry transient 錯誤:AbortError(超時) + TypeError(網路斷/DNS 失敗,Bun fetch 在這種情況下丟 TypeError)
+      // 不 retry:deterministic throws(LlmError for 4xx API errors, SyntaxError for JSON
+      // parse failure, Error for no choices / missing content)這些重試沒意義,會浪費 3 次大約同樣的失敗
       const isTransientError =
         err instanceof Error &&
-        (err.name === "AbortError" ||
-          err instanceof TypeError ||
-          err.message.includes("fetch failed"));
+        (err.name === "AbortError" || err instanceof TypeError);
 
       if (!isTransientError) throw err;
-      if (attempt >= MAX_ATTEMPTS - 1) throw err;
+      if (attempt >= MAX_ATTEMPTS - 1) {
+        // 跟 5xx-retry 路徑用盡時的 throw LlmError(504) 對稱
+        throw new LlmError(
+          504,
+          `LLM request failed after ${MAX_ATTEMPTS} attempts (${err.name}: ${err.message})`,
+        );
+      }
       const baseMs = 1000 * Math.pow(2, attempt);
       const jitter = Math.floor(Math.random() * 250);
       await sleep(baseMs + jitter);

@@ -210,6 +210,43 @@ describe("ask", () => {
     expect(callCount).toBe(3);
   });
 
+  test("transient retry exhaustion throws LlmError(504)", async () => {
+    let callCount = 0;
+    fetchMock = () => {
+      callCount++;
+      return Promise.reject(new TypeError("network down"));
+    };
+    globalThis.fetch = fetchMock;
+    await expect(ask("test")).rejects.toThrow(LlmError);
+    expect(callCount).toBe(3);  // MAX_ATTEMPTS
+  });
+
+  test("AbortError retried as transient", async () => {
+    let callCount = 0;
+    fetchMock = () => {
+      callCount++;
+      if (callCount < 2) {
+        const abortErr = new Error("aborted");
+        abortErr.name = "AbortError";
+        return Promise.reject(abortErr);
+      }
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            choices: [{ message: { content: "ok" } }],
+            usage: {},
+            model: "test-model",
+          }),
+          { status: 200 },
+        ),
+      );
+    };
+    globalThis.fetch = fetchMock;
+    const result = await ask("test");
+    expect(result.content).toBe("ok");
+    expect(callCount).toBe(2);
+  });
+
   test("does NOT retry on deterministic error (no choices)", async () => {
     let callCount = 0;
     fetchMock = () => {
