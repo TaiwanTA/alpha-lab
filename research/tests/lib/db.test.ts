@@ -169,7 +169,7 @@ describe("signals", () => {
 
   test("insertSignal respects custom importance and tags", async () => {
     const signal = await insertSignal({
-      title: " Fed rate decision imminent",
+      title: "Fed rate decision imminent",
       description: "FOMC meeting tomorrow",
       importance: 5,
       tags: ["macro", "fed"],
@@ -237,22 +237,42 @@ describe("signals", () => {
   });
 
   test("importance CHECK constraint rejects 0", async () => {
-    // expect this to throw
-    try {
-      await insertSignal({ title: "Bad", description: "d", importance: 0 });
-      // If we get here, the constraint didn't fire
-      expect(false).toBe(true);
-    } catch (e) {
-      // expected
-    }
+    await expect(
+      insertSignal({ title: "Bad", description: "d", importance: 0 }),
+    ).rejects.toThrow();
   });
 
   test("importance CHECK constraint rejects 6", async () => {
-    try {
-      await insertSignal({ title: "Bad", description: "d", importance: 6 });
-      expect(false).toBe(true);
-    } catch (e) {
-      // expected
+    await expect(
+      insertSignal({ title: "Bad", description: "d", importance: 6 }),
+    ).rejects.toThrow();
+  });
+
+  test("status CHECK constraint rejects invalid value", async () => {
+    await expect(
+      insertSignal({ title: "Bad", description: "d", status: "nonexistent" }),
+    ).rejects.toThrow();
+  });
+
+  test("insertSignal accepts valid status", async () => {
+    const validStatuses = ["discovered", "tracking", "matured", "faded", "invalid"] as const;
+    for (const status of validStatuses) {
+      const signal = await insertSignal({ title: "T", description: "d", status });
+      expect(signal.status).toBe(status);
     }
+  });
+
+  test("updateSignal rejects invalid importance", async () => {
+    const inserted = await insertSignal({ title: "T", description: "d" });
+    await expect(
+      updateSignal(inserted.id, { importance: 99 as any }),
+    ).rejects.toThrow(/importance/);
+  });
+
+  test("updateSignal rejects NaN importance", async () => {
+    const inserted = await insertSignal({ title: "T", description: "d" });
+    await expect(
+      updateSignal(inserted.id, { importance: NaN }),
+    ).rejects.toThrow(/importance/);
   });
 });

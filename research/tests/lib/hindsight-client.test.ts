@@ -327,3 +327,84 @@ describe("HindsightClient error handling", () => {
     }
   });
 });
+
+describe("HindsightClient URL normalization", () => {
+  test("constructor strips trailing slashes from baseUrl", async () => {
+    let calledUrl = "";
+    fetchMock = mockFetch((url: string) => {
+      calledUrl = url;
+      return Promise.resolve(new Response(JSON.stringify({ banks: [] }), { status: 200 }));
+    });
+    globalThis.fetch = fetchMock;
+
+    const client = new HindsightClient("http://test:8888///");
+    await client.listBanks();
+    expect(calledUrl).toBe("http://test:8888/v1/default/banks");
+  });
+});
+
+describe("HindsightClient.health body validation", () => {
+  test("health returns true when body is non-empty", async () => {
+    fetchMock = mockFetch(() => Promise.resolve(new Response("ok", { status: 200 })));
+    globalThis.fetch = fetchMock;
+    const client = new HindsightClient("http://test:8888");
+    expect(await client.health()).toBe(true);
+  });
+
+  test("health returns false when body is empty", async () => {
+    fetchMock = mockFetch(() => Promise.resolve(new Response("", { status: 200 })));
+    globalThis.fetch = fetchMock;
+    const client = new HindsightClient("http://test:8888");
+    expect(await client.health()).toBe(false);
+  });
+});
+
+describe("HindsightClient request retry", () => {
+  test("request retries on 429", async () => {
+    let callCount = 0;
+    fetchMock = mockFetch(() => {
+      callCount++;
+      if (callCount === 1) {
+        return Promise.resolve(new Response("rate limited", { status: 429 }));
+      }
+      return Promise.resolve(new Response(JSON.stringify({ banks: [] }), { status: 200 }));
+    });
+    globalThis.fetch = fetchMock;
+
+    const client = new HindsightClient("http://test:8888");
+    const banks = await client.listBanks();
+    expect(callCount).toBe(2);
+    expect(banks).toEqual([]);
+  });
+
+  test("request gives up after maxAttempts on 5xx", async () => {
+    let callCount = 0;
+    fetchMock = mockFetch(() => {
+      callCount++;
+      return Promise.resolve(new Response("server error", { status: 500 }));
+    });
+    globalThis.fetch = fetchMock;
+
+    const client = new HindsightClient("http://test:8888");
+    await expect(client.listBanks()).rejects.toThrow();
+    expect(callCount).toBe(3);  // maxAttempts = 3
+  });
+});
+
+describe("HindsightClient response shape robustness", () => {
+  test("listBanks handles malformed response gracefully (returns empty array)", async () => {
+    fetchMock = mockFetch(() => Promise.resolve(new Response(JSON.stringify({ unexpected: true }), { status: 200 })));
+    globalThis.fetch = fetchMock;
+    const client = new HindsightClient("http://test:8888");
+    const banks = await client.listBanks();
+    expect(banks).toEqual([]);
+  });
+
+  test("recall handles null response gracefully", async () => {
+    fetchMock = mockFetch(() => Promise.resolve(new Response("null", { status: 200 })));
+    globalThis.fetch = fetchMock;
+    const client = new HindsightClient("http://test:8888");
+    const results = await client.recall("bank", "query");
+    expect(results).toEqual([]);
+  });
+});

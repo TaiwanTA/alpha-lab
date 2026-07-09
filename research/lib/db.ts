@@ -3,7 +3,7 @@
 //   insertItems 用 ON CONFLICT DO NOTHING,idempotent
 
 import { sql } from "bun";
-import type { RawItem, FetchState, Signal, NewSignal } from "./types.ts";
+import type { RawItem, FetchState, Signal, NewSignal, SignalStatus } from "./types.ts";
 
 export async function initDb(): Promise<void> {
   await sql`SELECT 1`;
@@ -72,6 +72,8 @@ export async function upsertFetchState(state: FetchState): Promise<void> {
 export async function insertSignal(signal: NewSignal): Promise<Signal> {
   // Bun.sql 的 sql({...}) 不會把 JS array 轉成 Postgres array literal,
   // 用 sql.unsafe 手動拼(參考 haveItems 已有做法)
+  const status = signal.status ?? "discovered";
+  validateSignalStatus(status);
   const values = [
     signal.slug === undefined ? "NULL" : signal.slug === null
       ? "NULL"
@@ -79,7 +81,7 @@ export async function insertSignal(signal: NewSignal): Promise<Signal> {
     `'${escapeSqlString(signal.title)}'`,
     `'${escapeSqlString(signal.description)}'`,
     String(signal.importance ?? 3),
-    `'${escapeSqlString(signal.status ?? "discovered")}'`,
+    `'${escapeSqlString(status)}'`,
     `'${pgArrayLiteral(signal.tags ?? [])}'::text[]`,
     `'${pgArrayLiteral(signal.source_items ?? [])}'::text[]`,
   ];
@@ -126,13 +128,23 @@ export async function updateSignalStatus(
   `;
 }
 
-// 用 COALESCE 模式:有給的欄位才更新
+// 用 dynamic SET clause:有給的欄位才更新
 // tags / source_items 是 TEXT[],Bun.sql 不會自動轉 JS array → Postgres array,
 // 要用 array literal 拼進 SQL(參考 haveItems 已有做法)
 export async function updateSignal(
   id: string,
   fields: Partial<NewSignal>,
 ): Promise<void> {
+  if (fields.importance !== undefined) {
+    const n = Number(fields.importance);
+    if (!Number.isFinite(n) || n < 1 || n > 5 || !Number.isInteger(n)) {
+      throw new Error(`importance must be integer in [1, 5], got: ${fields.importance}`);
+    }
+  }
+  if (fields.status !== undefined) {
+    validateSignalStatus(fields.status);
+  }
+
   const setClauses: string[] = [];
 
   if (fields.title !== undefined) {
@@ -167,6 +179,14 @@ export async function updateSignal(
   await sql.unsafe(
     `UPDATE signals SET ${setClauses.join(", ")} WHERE id = '${safeId}'::uuid`,
   );
+}
+
+const VALID_STATUSES = ["discovered", "tracking", "matured", "faded", "invalid"] as const;
+
+function validateSignalStatus(status: string): asserts status is SignalStatus {
+  if (!VALID_STATUSES.includes(status as any)) {
+    throw new Error(`Invalid signal status: ${status}. Must be one of: ${VALID_STATUSES.join(", ")}`);
+  }
 }
 
 function escapeSqlString(s: string): string {
