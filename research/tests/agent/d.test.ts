@@ -24,13 +24,15 @@ function makeFakeDeps(opts: {
   observations?: Array<{ text: string; score?: number }>;
   llmContent?: string;
   preReport?: string | null;
+  preReportDate?: string; // YYYY-MM-DD,默认 2026-07-09
   writeThrows?: Error;
 }): DDependencies {
   // 用 closure 的 writtenReports map 让 writeReport / readReportIfExists 共享 in-memory state
   // 这样 post 测试可以模拟「先前已写过 pre report」的狀態
   const writtenReports = new Map<string, string>();
+  const preDate = opts.preReportDate ?? "2026-07-09"; // Kilo PR #8 SUGGESTION:之前硬编码
   if (opts.preReport !== undefined && opts.preReport !== null) {
-    writtenReports.set("drafts/reports/2026-07-09-pre.md", opts.preReport);
+    writtenReports.set(`drafts/reports/${preDate}-pre.md`, opts.preReport);
   }
 
   return {
@@ -49,6 +51,7 @@ function makeFakeDeps(opts: {
     readReportIfExists: mock(async (path: string) => {
       return writtenReports.get(path) ?? null;
     }),
+    ensureHindsightBank: mock(async () => {}),
   };
 }
 
@@ -197,5 +200,152 @@ describe("D agent generateReport — filename & format", () => {
     const deps = makeFakeDeps({});
     const result = await generateReport("post", deps, new Date("2026-12-31T22:00:00Z"));
     expect(result.reportPath).toMatch(/^drafts\/reports\/\d{4}-\d{2}-\d{2}-post\.md$/);
+  });
+});
+
+describe("D agent generateReport — formatDateET uses America/New_York", () => {
+  test("ET date is used, not UTC (off-by-one edge case)", async () => {
+    // 2026-07-09T04:00 UTC = 2026-07-09T00:00 EDT (midnight ET, still same day but right at boundary)
+    // 2026-07-09T03:00 UTC = 2026-07-08T23:00 EDT (previous day in ET)
+    const deps = makeFakeDeps({});
+    const justAfterMidnightET = new Date("2026-07-09T04:00:00Z");
+    const result1 = await generateReport("pre", deps, justAfterMidnightET);
+    expect(result1.reportPath).toContain("2026-07-09-pre.md");
+
+    const justBeforeMidnightET = new Date("2026-07-09T03:59:00Z");
+    const result2 = await generateReport("pre", deps, justBeforeMidnightET);
+    expect(result2.reportPath).toContain("2026-07-08-pre.md"); // still prev ET day
+  });
+
+  test("formatDateET respects DST (winter = EST UTC-5)", async () => {
+    // 2026-12-15T05:00 UTC = 2026-12-15T00:00 EST (UTC-5)
+    const deps = makeFakeDeps({});
+    const winter = new Date("2026-12-15T05:00:00Z");
+    const result = await generateReport("pre", deps, winter);
+    expect(result.reportPath).toContain("2026-12-15-pre.md");
+
+    // 2026-12-15T04:59 UTC = 2026-12-14T23:59 EST
+    const winterPrevDay = new Date("2026-12-15T04:59:00Z");
+    const r2 = await generateReport("pre", deps, winterPrevDay);
+    expect(r2.reportPath).toContain("2026-12-14-pre.md");
+  });
+});
+
+describe("D agent generateReport — Kilo PR #8 fixes", () => {
+  test("ensureHindsightBank is called once per run", async () => {
+    const deps = makeFakeDeps({ active: [makeSignal()] });
+    await generateReport("pre", deps, new Date("2026-07-09T13:00:00Z"));
+    expect(deps.ensureHindsightBank).toHaveBeenCalledTimes(1);
+  });
+
+  test("signals are sorted by importance DESC before top-10 slice (post mode)", async () => {
+    // 3 active (importance 5,1,3) + 2 matured (importance 4,2) = 5 total
+    // After sort: 5,4,3,2,1 — all included since <10
+    const deps = makeFakeDeps({
+      active: [
+        makeSignal({ id: "a1", importance: 5 }),
+        makeSignal({ id: "a2", importance: 1 }),
+        makeSignal({ id: "a3", importance: 3 }),
+      ],
+      matured: [
+        makeSignal({ id: "m1", importance: 4, status: "matured" }),
+        makeSignal({ id: "m2", importance: 2, status: "matured" }),
+      ],
+    });
+    await generateReport("post", deps, new Date("2026-07-09T22:00:00Z"));
+    const userPrompt = (deps.ask as any).mock.calls[0][0];
+    // Should contain all 5 given they're < 10
+    expect(userPrompt).toContain("[5/5]");
+    expect(userPrompt).toContain("[4/5]");
+    expect(userPrompt).toContain("[3/5]");
+    expect(userPrompt).toContain("[2/5]");
+    expect(userPrompt).toContain("[1/5]");
+  });
+
+  test("top-10 cap takes highest importance signals (over-10 case)", async () => {
+    // 15 signals, importance 1-15
+    const deps = makeFakeDeps({
+      active: Array.from({ length: 15 }, (_, i) =>
+        makeSignal({ id: `sig-${i+1}`, importance: i+1 as 1|2|3|4|5 })
+      ),
+    });
+    await generateReport("pre", deps, new Date("2026-07-09T13:00:00Z"));
+    // Only top 10 should be recalled
+    expect(deps.recallHindsight).toHaveBeenCalledTimes(10);
+  });
+
+  test("recall is parallelized (Promise.all, not sequential)", async () => {
+    const deps = makeFakeDeps({
+      active: Array.from({ length: 5 }, (_, i) =>
+        makeSignal({ id: `sig-${i+1}`, importance: 5, title: `Sig${i+1}` })
+      ),
+    });
+    const callTimestamps: number[] = [];
+    (deps as any).recallHindsight = mock(async () => {
+      callTimestamps.push(Date.now());
+      // 模拟一次 recall 需要 50ms
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      return [{ text: "obs", score: 0.5 }];
+    });
+
+    const start = Date.now();
+    await generateReport("pre", deps, new Date("2026-07-09T13:00:00Z"));
+    const elapsed = Date.now() - start;
+
+    // 5 个 recall * 50ms sequential = 250ms;parallel should be < 100ms
+    expect(elapsed).toBeLessThan(150);
+    expect(callTimestamps).toHaveLength(5);
+    // First 5 calls should all be within a small window (parallel)
+    const callWindow = Math.max(...callTimestamps) - Math.min(...callTimestamps);
+    expect(callWindow).toBeLessThan(30); // all started near-simultaneously
+  });
+
+  test("throws when LLM returns empty content", async () => {
+    const deps = makeFakeDeps({
+      active: [makeSignal()],
+      llmContent: "",
+    });
+    await expect(
+      generateReport("pre", deps, new Date("2026-07-09T13:00:00Z")),
+    ).rejects.toThrow(/empty\/too-short content/);
+    expect(deps.writeReport).not.toHaveBeenCalled();
+  });
+
+  test("throws when LLM returns very short content (<10 chars)", async () => {
+    const deps = makeFakeDeps({
+      active: [makeSignal()],
+      llmContent: "ab", // 2 chars
+    });
+    await expect(
+      generateReport("pre", deps, new Date("2026-07-09T13:00:00Z")),
+    ).rejects.toThrow(/empty\/too-short content/);
+  });
+
+  test("sanitizes signal title with newlines (no markdown breakage in prompt)", async () => {
+    const deps = makeFakeDeps({
+      active: [
+        makeSignal({
+          title: "Multi\nLine\nTitle",
+          description: "Normal description",
+        }),
+      ],
+    });
+    await generateReport("pre", deps, new Date("2026-07-09T13:00:00Z"));
+    const userPrompt = (deps.ask as any).mock.calls[0][0];
+    // Should NOT contain the original newlines from title (sanitized to spaces)
+    expect(userPrompt).not.toContain("Multi\nLine\nTitle");
+    expect(userPrompt).toContain("Multi Line Title");
+  });
+
+  test("sanitizes long signal description (truncated)", async () => {
+    const longDesc = "A".repeat(2000);
+    const deps = makeFakeDeps({
+      active: [makeSignal({ description: longDesc })],
+    });
+    await generateReport("pre", deps, new Date("2026-07-09T13:00:00Z"));
+    const userPrompt = (deps.ask as any).mock.calls[0][0];
+    // Description should be truncated, not the full 2000 chars
+    expect(userPrompt).not.toContain("A".repeat(2000));
+    expect(userPrompt).toContain("A".repeat(1000)); // MAX_DESC_LEN=1000
   });
 });

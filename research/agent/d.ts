@@ -8,12 +8,24 @@
 
 import { ask } from "./lib/llm.ts";
 import type { AskResult } from "./lib/llm.ts";
-import { HindsightClient, HindsightError } from "../lib/hindsight-client.ts";
+import {
+  HindsightClient,
+  HindsightError,
+} from "../lib/hindsight-client.ts";
 import type { Signal } from "../lib/types.ts";
-import { join } from "node:path";
+import { join, dirname } from "node:path";
 import { mkdir, writeFile, readFile } from "node:fs/promises";
 
 const HINDSIGHT_BANK_ID = "alpha-lab";
+const DEFAULT_BANK_MISSION =
+  "Investor signal research — shared observations across agent runs.";
+const REPORTS_DIR = "drafts/reports";
+const MAX_SIGNALS_FOR_RECALL = 10;
+const MAX_OBSERVATIONS_IN_PROMPT = 20;
+const MAX_TITLE_LEN = 200;
+const MAX_DESC_LEN = 1000;
+const MAX_TAG_LEN = 100;
+const MIN_LLM_CONTENT_LEN = 10;
 
 const PRE_SYSTEM_PROMPT = `You are a US pre-market stock report writer for an investor research project.
 
@@ -75,14 +87,27 @@ Format (markdown, follow strictly):
 
 Keep it concise: 250-500 words total. Ground every conclusion in specific signals or observations, no generic market commentary.`;
 
-// 从 date 格式化 YYYY-MM-DD
-// 注:toISOString 是 UTC,ET = UTC-4/5(EST/EDT),差几小时通常还是同一天,
-// 极少跨午夜(MVP 先用 UTC date,够用)
+// 真的美東 timezone conversion(用 Intl.DateTimeFormat 拿 America/New_York 的
+// date parts,handle DST),不再靠 UTC slice(日內跨午夜會錯)
+// Kilo PR #8 Gemini高 + Kilo CRITICAL:之前的 toISOString().slice(0,10) 在美東
+// 凌晨会对应 UTC 的前一天,post-market 会读到昨天的 pre-market report
 function formatDateET(date: Date): string {
-  return date.toISOString().slice(0, 10);
+  const fmt = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/New_York",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
+  // en-CA format = YYYY-MM-DD(刚好我们想要的格式)
+  return fmt.format(date);
 }
 
 // 从 signal + 回忆 组 prompt user content
+function sanitize(s: string, maxLen: number): string {
+  // 砍掉换行(避免破坏 markdown 结构),限制长度避免 LLM context 爆
+  return s.replace(/\s+/g, " ").slice(0, maxLen);
+}
+
 function buildPreMarketPrompt(
   today: Date,
   signals: Signal[],
@@ -90,13 +115,13 @@ function buildPreMarketPrompt(
 ): string {
   const observedText = observations.length === 0
     ? "(no observations recalled)"
-    : observations.slice(0, 20).map((o, i) =>
-      `${i + 1}. ${o.text}${o.score ? ` (score ${o.score.toFixed(2)})` : ""}`
+    : observations.slice(0, MAX_OBSERVATIONS_IN_PROMPT).map((o, i) =>
+      `${i + 1}. ${sanitize(o.text, 500)}${o.score ? ` (score ${o.score.toFixed(2)})` : ""}`
     ).join("\n");
   const signalsText = signals.length === 0
     ? "(no active signals)"
     : signals.map((s) =>
-      `- [${s.importance}/5] ${s.title}: ${s.description} (tags: ${s.tags.join(", ") || "none"})`
+      `- [${s.importance}/5] ${sanitize(s.title, MAX_TITLE_LEN)}: ${sanitize(s.description, MAX_DESC_LEN)} (tags: ${s.tags.map((t) => sanitize(t, MAX_TAG_LEN)).join(", ") || "none"})`
     ).join("\n");
 
   return `Today's date (ET): ${formatDateET(today)}
@@ -121,13 +146,13 @@ function buildPostMarketPrompt(
     : preMarketReport;
   const observedText = observations.length === 0
     ? "(no observations recalled)"
-    : observations.slice(0, 20).map((o, i) =>
-      `${i + 1}. ${o.text}${o.score ? ` (score ${o.score.toFixed(2)})` : ""}`
+    : observations.slice(0, MAX_OBSERVATIONS_IN_PROMPT).map((o, i) =>
+      `${i + 1}. ${sanitize(o.text, 500)}${o.score ? ` (score ${o.score.toFixed(2)})` : ""}`
     ).join("\n");
   const signalsText = signals.length === 0
     ? "(no active signals)"
     : signals.map((s) =>
-      `- [${s.importance}/5] ${s.title}: ${s.description} (tags: ${s.tags.join(", ") || "none"})`
+      `- [${s.importance}/5] ${sanitize(s.title, MAX_TITLE_LEN)}: ${sanitize(s.description, MAX_DESC_LEN)} (tags: ${s.tags.map((t) => sanitize(t, MAX_TAG_LEN)).join(", ") || "none"})`
     ).join("\n");
 
   return `Today's date (ET): ${formatDateET(today)}
@@ -159,6 +184,8 @@ export interface DDependencies {
   }) => Promise<AskResult>;
   writeReport: (path: string, content: string) => Promise<void>;
   readReportIfExists: (path: string) => Promise<string | null>;
+  // Kilo PR #8 WARNING:D 之前没 ensureHindsightBank(若 D 比 C 先跑会炸)
+  ensureHindsightBank: () => Promise<void>;
 }
 
 export type ReportType = "pre" | "post";
@@ -166,7 +193,7 @@ export type ReportType = "pre" | "post";
 export interface ReportResult {
   type: ReportType;
   reportPath: string;
-  reportLength: number; // 字数(len of markdown content)
+  reportLength: number; // markdown 字元數(UTF-16 code units,非實際 word count)
 }
 
 // 主 D agent 函数
@@ -176,22 +203,38 @@ export async function generateReport(
   now: Date = new Date(),
 ): Promise<ReportResult> {
   // 1. 拿 active signals(pre 模式只看 active = discovered + tracking;
-  //    post 模式还加 matured,因为 matured 的一天还可能 relevant)
+  //    post 模式还加 matured)
   const active = await deps.getActiveSignals();
   let signals = active;
   if (type === "post") {
     const matured = await deps.getSignalsByStatus("matured");
     signals = [...active, ...matured];
   }
-  console.log(`[D] ${type} report — ${signals.length} active+relevant signals`);
+  // Kilo PR #8 WARNING:post 模式之前 merge active + matured 之后才 slice(0,10),
+  // 没按 importance 排序。改成:先 sort importance DESC,再取 top 10
+  signals = signals
+    .slice()
+    .sort((a, b) => b.importance - a.importance)
+    .slice(0, MAX_SIGNALS_FOR_RECALL);
+  console.log(`[D] ${type} report — top ${signals.length} signals by importance`);
 
-  // 2. 从 hindsight recall 所有 signal 相关 观察(一次 recall 多一点,跨 signal)
+  // 2. Hindsight bank 确保存在(D 可能比 C 先跑,bank 不存在会让 recall 全失败)
+  //    Kilo PR #8 WARNING:之前完全没 ensureBank
+  await deps.ensureHindsightBank();
+
+  // 3. 从 hindsight recall 所有 signal 相关 观察(一次 recall 多一点,跨 signal)
   //    用每个 signal.title 查 N=5 条,合并去重
+  //    Kilo PR #8 SUGGESTION + Gemini:之前 sequential await 10 次,改成 Promise.all
+  const recallQueries = signals.map((signal) => ({
+    query: signal.title,
+    options: { limit: 5, tags: signal.tags },
+  }));
+  const recallResults = await Promise.all(
+    recallQueries.map((q) => deps.recallHindsight(q.query, q.options)),
+  );
   const allObservations: Array<{ text: string; score?: number }> = [];
   const seenTexts = new Set<string>();
-  for (const signal of signals.slice(0, 10)) {  // top 10 重要 signals 以免 LLM context 爆
-    const q = signal.title;
-    const recalled = await deps.recallHindsight(q, { limit: 5, tags: signal.tags });
+  for (const recalled of recallResults) {
     for (const o of recalled) {
       if (!seenTexts.has(o.text)) {
         seenTexts.add(o.text);
@@ -201,14 +244,14 @@ export async function generateReport(
   }
   console.log(`[D] recalled ${allObservations.length} unique observations across signals`);
 
-  // 3. 取今天 pre-market report(产 post part 才需要,给对照)
+  // 4. 取今天 pre-market report(产 post part 才需要)
   let preMarketReport: string | null = null;
   if (type === "post") {
     const prePath = reportPath("pre", now);
     preMarketReport = await deps.readReportIfExists(prePath);
   }
 
-  // 4. 选 prompt 跟 LLM call
+  // 5. 选 prompt + LLM call
   const systemPrompt = type === "pre" ? PRE_SYSTEM_PROMPT : POST_SYSTEM_PROMPT;
   const userPrompt = type === "pre"
     ? buildPreMarketPrompt(now, signals, allObservations)
@@ -220,8 +263,15 @@ export async function generateReport(
     maxTokens: 3000,
   });
 
-  // 5. 不解析 LLM output 结构,直接写进 markdown(LLM 已 follow format)
+  // 6. 不解析 LLM output 结构,直接写进 markdown(LLM 已 follow format)
   const content = llmResult.content;
+  // Kilo PR #8 SUGGESTION:LLM 回空字串(罕见但可能:text filter / token 0)
+  // 仍会产生 0 byte report 污染。reject。
+  if (content.length < MIN_LLM_CONTENT_LEN) {
+    throw new Error(
+      `LLM returned empty/too-short content (${content.length} chars). Not writing report.`,
+    );
+  }
   const path = reportPath(type, now);
   await deps.writeReport(path, content);
   console.log(`[D] ${type} report written to ${path} (${content.length} chars)`);
@@ -244,6 +294,11 @@ async function getDefaultDeps(): Promise<DDependencies> {
   const hindsight = new HindsightClient(
     process.env.HINDSIGHT_BASE_URL ?? "http://localhost:8888",
   );
+  let bankEnsured = false;
+
+  // 用一個固定 base dir 不靠 process.cwd()(Kilo PR #8 WARNING:cwd 不一致會
+  // silent fallback 看不到 today 的 pre report)
+  const baseDir = process.env.REPORTS_BASE_DIR ?? join(process.cwd(), REPORTS_DIR);
 
   return {
     getActiveSignals,
@@ -251,18 +306,41 @@ async function getDefaultDeps(): Promise<DDependencies> {
     recallHindsight: (query, options) => hindsight.recall(HINDSIGHT_BANK_ID, query, options),
     ask,
     writeReport: async (path, content) => {
-      const fullPath = join(process.cwd(), path);
-      const dir = fullPath.slice(0, fullPath.lastIndexOf("/"));
-      await mkdir(dir, { recursive: true });
+      // path 是相對 REPORTS_DIR 的子路徑(其實只有 'drafts/reports/<name>.md'),
+      // 我們直接 resolve to baseDir
+      const filename = dirname(path) === "." ? path : path.split("/").pop()!;
+      const fullPath = join(baseDir, filename);
+      await mkdir(dirname(fullPath), { recursive: true });
       await writeFile(fullPath, content, "utf-8");
     },
     readReportIfExists: async (path) => {
       try {
-        const fullPath = join(process.cwd(), path);
+        const filename = dirname(path) === "." ? path : path.split("/").pop()!;
+        const fullPath = join(baseDir, filename);
         return await readFile(fullPath, "utf-8");
-      } catch {
-        return null;
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
+        throw err;
       }
+    },
+    ensureHindsightBank: async () => {
+      if (bankEnsured) return;
+      try {
+        await hindsight.getBank(HINDSIGHT_BANK_ID);
+      } catch (err) {
+        // 同 C agent pattern:只在 404 時 createBank
+        if (err instanceof HindsightError && err.status === 404) {
+          await hindsight.createBank({
+            bank_id: HINDSIGHT_BANK_ID,
+            name: "Alpha Lab",
+            mission: DEFAULT_BANK_MISSION,
+          });
+          console.log(`[D] created Hindsight bank "${HINDSIGHT_BANK_ID}"`);
+        } else {
+          throw err;
+        }
+      }
+      bankEnsured = true;
     },
   };
 }
