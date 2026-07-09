@@ -68,17 +68,10 @@ export async function upsertFetchState(state: FetchState): Promise<void> {
 }
 
 // signals 表的 helpers
-//   注意:Bun.sql 不會自動把 JS array 轉成 Postgres array,
-//   ${sql.array(...)} 在 PG TEXT[] column 上會把元素 JSON.stringify 帶雙引號(不對),
-//   所以 array column 直接 inline ARRAY[...]::text[] 構造器
-//   listSignals 的 tags filter 也用同樣 inline 構造器 — 跟 haveItems 的模式一致,
-//   values 來自程式內部(已通過 NewSignal type 檢查),sql.unsafe 安全
-
-function inlineTextArray(arr: string[]): string {
-  if (arr.length === 0) return "ARRAY[]::text[]";
-  const quoted = arr.map((t) => `'${t.replace(/'/g, "''")}'`).join(",");
-  return `ARRAY[${quoted}]::text[]`;
-}
+//   注意:array columns 在 VALUES 用 sql.array(arr, "TEXT") 帶 type hint
+//   (Bun.sql 不帶 hint 會 JSON.stringify 每個元素帶雙引號,不正確)
+//   listSignals 的 tags filter 用 inline ARRAY[...]::text[] 字串拼接 —
+//   跟 haveItems 的 sql.unsafe + escape 模式一致
 
 export async function insertSignal(signal: NewSignal): Promise<string> {
   const rows = await sql<{ id: string }[]>`
@@ -90,47 +83,45 @@ export async function insertSignal(signal: NewSignal): Promise<string> {
       ${signal.description},
       ${signal.importance},
       ${signal.status ?? "discovered"},
-      ${sql.unsafe(inlineTextArray(signal.tags ?? []))}::text[],
-      ${sql.unsafe(inlineTextArray(signal.source_items ?? []))}::text[]
+      ${sql.array(signal.tags ?? [], "TEXT")},
+      ${sql.array(signal.source_items ?? [], "TEXT")}
     )
     ON CONFLICT (id) DO NOTHING
     RETURNING id
   `;
-  return rows[0]!.id;
+  const row = rows[0];
+  if (!row) {
+    // ON CONFLICT 觸發 → RETURNING 空。Production 不會撞 id(server-generated UUID),
+    // 撞了就 throw 讓 caller 知道(可能是 explicit id 重複給了)
+    throw new Error(
+      `insertSignal: id already exists (${signal.id ?? "(generated)"})`,
+    );
+  }
+  return row.id;
 }
 
 export async function insertSignals(signals: NewSignal[]): Promise<number> {
   if (signals.length === 0) return 0;
 
-  // bulk multi-row VALUES:
-  //   * 6 個非 array column bind 為 $1..$6N(id/slug/title/desc/importance/status)
-  //     id 沒帶時 → COALESCE(NULL, gen_random_uuid()) 補上 UUID
-  //   * 2 個 array column inline ARRAY[...]::text[]
-  const valueRows = signals
-    .map((s, i) => {
-      const off = i * 6 + 1;
-      return `(COALESCE($${off}, gen_random_uuid()), $${off + 1}, $${off + 2}, $${off + 3}, $${off + 4}, $${off + 5}, ${inlineTextArray(s.tags ?? [])}, ${inlineTextArray(s.source_items ?? [])})`;
-    })
-    .join(",");
-  const params: unknown[] = [];
-  for (const s of signals) {
-    params.push(
-      s.id ?? null,
-      s.slug ?? null,
-      s.title,
-      s.description,
-      s.importance,
-      s.status ?? "discovered",
-    );
-  }
+  // bulk:用 Bun.sql 原生 ${sql(rows)} + 每 row 的 array column 用 sql.array(arr, "TEXT")
+  //   id 沒帶時 JS 端 crypto.randomUUID() 生成 — ${sql(rows)} 不支援 column DEFAULT,
+  //   所以 id 必須在 JS 端準備好(ON CONFLICT (id) DO STILL work)
+  const rows = signals.map((s) => ({
+    id: s.id ?? crypto.randomUUID(),
+    slug: s.slug ?? null,
+    title: s.title,
+    description: s.description,
+    importance: s.importance,
+    status: s.status ?? "discovered",
+    tags: sql.array(s.tags ?? [], "TEXT"),
+    source_items: sql.array(s.source_items ?? [], "TEXT"),
+  }));
 
-  const result = await sql.unsafe<{ id: string }[]>(
-    `INSERT INTO signals (id, slug, title, description, importance, status, tags, source_items)
-     VALUES ${valueRows}
-     ON CONFLICT (id) DO NOTHING
-     RETURNING id`,
-    params,
-  );
+  const result = await sql<{ id: string }[]>`
+    INSERT INTO signals ${sql(rows)}
+    ON CONFLICT (id) DO NOTHING
+    RETURNING id
+  `;
   return result.length;
 }
 
@@ -173,6 +164,7 @@ export async function listSignals(filter: ListSignalsFilter = {}): Promise<Signa
   if (filter.tags && filter.tags.length > 0) {
     // tags 用 `&&` (any-of):任一給的 tag 出現在 signal.tags 就命中
     // 若要改成 all-of,把 `&&` 換成 `@>`
+    // 用 inline ARRAY[...]::text[] 構造器 — 跟 haveItems 一樣的字串拼接 pattern
     const quoted = filter.tags.map((t) => `'${t.replace(/'/g, "''")}'`).join(",");
     conditions.push(`tags && ARRAY[${quoted}]::text[]`);
   }
