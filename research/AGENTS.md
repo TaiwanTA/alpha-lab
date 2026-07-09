@@ -36,6 +36,7 @@
 - `lib/db.ts` — Postgres 操作
 - `lib/migrator.ts` — migration runner
 - `lib/config.ts` — 讀 `sources.json`
+- `lib/logger.ts` — loglayer singleton + 檔案輪替(daily/YMD/50M/14d)
 - `lib/adapters/x-user-timeline.ts` — X user timeline adapter
 - `migrations/001_*.sql` — schema migrations(append-only,no down)
 - `tests/` — 4 個 test 檔(用 `bun test` 跑)
@@ -45,6 +46,8 @@
 - `X_BEARER_TOKEN` — X API bearer token
 - `RAW_ROOT` — raw 檔案根目錄(預設 `../raw`)
 - `SOURCES_PATH` — sources.json 路徑(預設 `./sources.json`)
+- `LOG_DIR` — log 檔根目錄(預設 `./logs`,啟動時 mkdir -p)
+- `LOG_CONSOLE` — `"false"` 時關閉 console transport,只寫檔(預設 `true`)
 
 ### 跑流程
 ```bash

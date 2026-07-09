@@ -4,7 +4,10 @@
 //   - 5xx 自動 retry(指數 backoff)
 //   - 4xx 直接 throw
 
+import { createLogger } from "./logger.ts";
+
 const BASE = "https://api.x.com/2";
+const log = createLogger("x-client");
 
 export class XApiError extends Error {
   constructor(
@@ -73,7 +76,7 @@ export class XClient {
           ? Math.max(0, parseInt(reset, 10) - Math.floor(Date.now() / 1000))
           : 60;
         const waitMs = (waitSec + 1) * 1000;
-        console.warn(`[X API] rate limited, waiting ${waitMs}ms`);
+        log.withMetadata({ waitMs, path }).warn("rate limited");
         await sleep(waitMs);
         attempt++;
         continue;
@@ -81,7 +84,7 @@ export class XClient {
 
       if (res.status >= 500) {
         const waitMs = 1000 * Math.pow(2, attempt);
-        console.warn(`[X API] server error ${res.status}, retrying in ${waitMs}ms`);
+        log.withMetadata({ status: res.status, waitMs, path }).warn("server error, retrying");
         await sleep(waitMs);
         attempt++;
         continue;

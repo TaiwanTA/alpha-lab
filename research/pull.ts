@@ -14,6 +14,9 @@ import {
 } from "./lib/db.ts";
 import type { SourceConfig, RawItem } from "./lib/types.ts";
 import type { SourceAdapter } from "./lib/source-adapter.ts";
+import { createLogger } from "./lib/logger.ts";
+
+const pullLog = createLogger("A");
 
 // 目前支援的 adapter registry;新來源在這裡加一行
 const ADAPTERS: Record<string, new (xClient: XClient) => SourceAdapter> = {
@@ -36,9 +39,9 @@ async function pullSource(
   const state = await getFetchState(source.type, resolved.id);
   const lastExternalId = state?.last_external_id ?? null;
 
-  console.log(
-    `[${resolved.label}] starting (last_id: ${lastExternalId ?? "none"})`,
-  );
+  pullLog
+    .withMetadata({ source_label: resolved.label, last_id: lastExternalId })
+    .info("starting");
 
   // 2. 抓新 tweets
   const newItems: RawItem[] = [];
@@ -51,7 +54,7 @@ async function pullSource(
   }
 
   if (newItems.length === 0) {
-    console.log(`[${resolved.label}] no new tweets`);
+    pullLog.withMetadata({ source_label: resolved.label }).info("no new tweets");
     await upsertFetchState({
       source_type: source.type,
       source_key: resolved.id,
@@ -73,9 +76,13 @@ async function pullSource(
     );
   }
   const newInserted = await insertItems(newItems);
-  console.log(
-    `[${resolved.label}] fetched ${newItems.length}, inserted ${newInserted} new`,
-  );
+  pullLog
+    .withMetadata({
+      source_label: resolved.label,
+      fetched: newItems.length,
+      inserted: newInserted,
+    })
+    .info("fetched");
 
   // 4. context(parent tweets) — 只在 adapter 支援時跑
   let contextInserted = 0;
@@ -93,9 +100,12 @@ async function pullSource(
         const have = await haveItems(source.type, parentIds);
         const missing = parentIds.filter((id) => !have.has(id));
         if (missing.length > 0) {
-          console.log(
-            `[${resolved.label}] fetching ${missing.length} parent tweets for context`,
-          );
+          pullLog
+            .withMetadata({
+              source_label: resolved.label,
+              parent_count: missing.length,
+            })
+            .info("fetching parent tweets for context");
           // X 的 lookup API 一次最多 100 個 id
           for (let i = 0; i < missing.length; i += 100) {
             const batch = missing.slice(i, i + 100);
@@ -152,15 +162,20 @@ async function main(): Promise<void> {
       totalNew += result.newItems;
       totalContext += result.contextItems;
     } catch (err) {
-      console.error(`[${source.type}:${source.label}] FAILED:`, err);
+      pullLog
+        .withMetadata({ source_type: source.type, source_label: source.label })
+        .withError(err)
+        .error("pull source failed");
     }
   }
 
-  console.log(`[pull] done. ${totalNew} new, ${totalContext} context.`);
+  pullLog
+    .withMetadata({ new_items: totalNew, context_items: totalContext })
+    .info("done");
   process.exit(0);
 }
 
 main().catch((err) => {
-  console.error(err);
+  pullLog.withError(err).error("uncaught error");
   process.exit(1);
 });

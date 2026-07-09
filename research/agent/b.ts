@@ -17,8 +17,10 @@ import {
   insertSignal,
   markItemsProcessed,
 } from "../lib/db.ts";
+import { createLogger } from "../lib/logger.ts";
 
 const MAX_ITEMS_PER_RUN = 50;
+const bLog = createLogger("B");
 
 const SYSTEM_PROMPT = `You are a market signal discovery agent for an investor research project.
 
@@ -201,15 +203,15 @@ export async function discover(deps: BDependencies): Promise<DiscoverResult> {
   // 1. 拿未處理 items
   const items = await deps.getUnprocessedItems(MAX_ITEMS_PER_RUN);
   if (items.length === 0) {
-    console.log("[B] no unprocessed items");
+    bLog.info("no unprocessed items");
     return { itemsProcessed: 0, newSignals: 0 };
   }
 
   // 2. 拿 active signals(避免重複建)
   const active = await deps.getActiveSignals();
-  console.log(
-    `[B] processing ${items.length} items, ${active.length} active signals to avoid duplicates`,
-  );
+  bLog
+    .withMetadata({ items: items.length, active_signals: active.length })
+    .info("processing items");
 
   // 3. 喂 LLM
   const userPrompt = buildUserPrompt(items, active);
@@ -254,10 +256,9 @@ export async function discover(deps: BDependencies): Promise<DiscoverResult> {
     // 無法區分「LLM 給的壞資料」vs「DB 真的出問題」(Kilo PR #6 review CRITICAL + WARNING)
     const validation = validateCandidate(candidate);
     if (!validation.ok) {
-      console.error(
-        `[B] skipping invalid candidate: ${validation.error}`,
-        candidate,
-      );
+      bLog
+        .withMetadata({ reason: validation.error, candidate })
+        .error("skipping invalid candidate");
       continue;
     }
     const valid = validation.value;
@@ -271,9 +272,9 @@ export async function discover(deps: BDependencies): Promise<DiscoverResult> {
       // Kilo WARNING:LLM 可能給出的所有 ids 都是 hallucinated,
       // validItemIds 完全空 → 訊號沒法追溯到任何真實 item,reject
       if (validItemIds.length === 0) {
-        console.error(
-          `[B] skipping signal "${valid.title}": all source_item_ids are unknown (LLM hallucinated)`,
-        );
+        bLog
+          .withMetadata({ title: valid.title, reason: "all source_item_ids unknown" })
+          .error("skipping signal");
         continue;
       }
 
@@ -286,10 +287,10 @@ export async function discover(deps: BDependencies): Promise<DiscoverResult> {
       });
       newSignals++;
     } catch (err) {
-      console.error(
-        `[B] failed to insert signal "${valid.title}":`,
-        err,
-      );
+      bLog
+        .withMetadata({ title: valid.title })
+        .withError(err)
+        .error("failed to insert signal");
       // 一個失敗不失敗整個 run,繼續處理下一個
     }
   }
@@ -306,9 +307,9 @@ export async function discover(deps: BDependencies): Promise<DiscoverResult> {
     await deps.markItemsProcessed(sourceType, ids);
   }
 
-  console.log(
-    `[B] done. items processed: ${items.length}, new signals: ${newSignals}`,
-  );
+  bLog
+    .withMetadata({ items_processed: items.length, new_signals: newSignals })
+    .info("done");
   return { itemsProcessed: items.length, newSignals };
 }
 
@@ -326,16 +327,19 @@ function getDefaultDeps(): BDependencies {
 async function main(): Promise<void> {
   await initDb();
   const result = await discover(getDefaultDeps());
-  console.log(
-    `[B] final: ${result.newSignals} new signals, ${result.itemsProcessed} items processed`,
-  );
+  bLog
+    .withMetadata({
+      new_signals: result.newSignals,
+      items_processed: result.itemsProcessed,
+    })
+    .info("final");
   process.exit(0);
 }
 
 // 只在直接執行(bun run b.ts)時跑 main,被 import 時不跑
 if (import.meta.main) {
   main().catch((err) => {
-    console.error("[B] failed:", err);
+    bLog.withError(err).error("failed");
     process.exit(1);
   });
 }

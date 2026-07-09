@@ -21,8 +21,10 @@ import type { ResearchFinding } from "./lib/types.ts";
 import { sql } from "bun";
 import { join } from "node:path";
 import { mkdir, writeFile } from "node:fs/promises";
+import { createLogger } from "../lib/logger.ts";
 
 const HINDSIGHT_BANK_ID = "alpha-lab";
+const cLog = createLogger("C");
 const DEFAULT_BANK_MISSION =
   "Investor signal research — observations from C agent that should be shared across runs.";
 
@@ -238,13 +240,17 @@ export async function research(
   if (signal === null) {
     throw new Error(`Signal not found: ${signalId}`);
   }
-  console.log(
-    `[C] research starting for signal "${signal.title}" (status=${signal.status})`,
-  );
+  cLog
+    .withMetadata({
+      signal_id: signal.id,
+      title: signal.title,
+      status: signal.status,
+    })
+    .info("research starting");
 
   // 2. 拿 source items(from signal.source_items external_ids)
   const items = await deps.getSourceItems(signal.source_items);
-  console.log(`[C] fetched ${items.length} source items`);
+  cLog.withMetadata({ count: items.length }).info("fetched source items");
 
   // 3. Hindsight bank 確保存在
   await deps.ensureHindsightBank();
@@ -256,7 +262,9 @@ export async function research(
     limit: 10,
     tags: signal.tags,
   });
-  console.log(`[C] recalled ${prior.length} prior observations from Hindsight`);
+  cLog
+    .withMetadata({ count: prior.length })
+    .info("recalled prior observations from Hindsight");
 
   // 5. 喂 LLM
   const userPrompt = buildUserPrompt(signal, items, prior);
@@ -297,7 +305,9 @@ export async function research(
   for (const rawObs of obsField) {
     const v = validateFinding(rawObs);
     if (!v.ok) {
-      console.error(`[C] skipping invalid observation: ${v.error}`, rawObs);
+      cLog
+        .withMetadata({ reason: v.error, observation: rawObs })
+        .error("skipping invalid observation");
       continue;
     }
     // Kilo PR #7 CRITICAL:document_id 在 run 內要唯一,
@@ -322,12 +332,16 @@ export async function research(
       validFindings.push(v.value);
     } catch (err) {
       failed++;
-      console.error(`[C] failed to retain observation:`, err);
+      cLog.withError(err).error("failed to retain observation");
     }
   }
-  console.log(
-    `[C] retained ${retained}/${obsField.length} observations into Hindsight (${failed} failed)`,
-  );
+  cLog
+    .withMetadata({
+      retained,
+      total: obsField.length,
+      failed,
+    })
+    .info("retained observations into Hindsight");
 
   // 8. 寫 markdown report draft
   // Kilo SUGGESTION:相近日的 signal 可能撞 slug → 附加 signal.id 前 8 碼保唯一
@@ -342,12 +356,14 @@ export async function research(
     validFindings,
   );
   await deps.writeReport(reportPath, reportContent);
-  console.log(`[C] report written to ${reportPath}`);
+  cLog.withMetadata({ path: reportPath }).info("report written");
 
   // 9. 更新 signal status → tracking(如果還沒是)
   if (signal.status === "discovered") {
     await deps.updateSignalStatus(signal.id, "tracking");
-    console.log(`[C] signal status: discovered → tracking`);
+    cLog
+      .withMetadata({ signal_id: signal.id, from: "discovered", to: "tracking" })
+      .info("signal status updated");
   }
 
   return {
@@ -457,7 +473,9 @@ async function getDefaultDeps(): Promise<CDependencies> {
             name: "Alpha Lab",
             mission: DEFAULT_BANK_MISSION,
           });
-          console.log(`[C] created Hindsight bank "${HINDSIGHT_BANK_ID}"`);
+          cLog
+            .withMetadata({ bank_id: HINDSIGHT_BANK_ID })
+            .info("created Hindsight bank");
         } else {
           // 5xx / 網路錯:rethrow,不誤建 bank
           throw err;
@@ -478,23 +496,26 @@ async function getDefaultDeps(): Promise<CDependencies> {
 
 async function main(signalId: string): Promise<void> {
   if (!signalId) {
-    console.error("Usage: bun run c.ts <signalId>");
+    cLog.error("Usage: bun run c.ts <signalId>");
     process.exit(1);
   }
   const { initDb } = await import("../lib/db.ts");
   await initDb();
   const deps = await getDefaultDeps();
   const result = await research(signalId, deps);
-  console.log(
-    `[C] final: ${result.observationsRetained} observations retained, report at ${result.reportPath}`,
-  );
+  cLog
+    .withMetadata({
+      observations_retained: result.observationsRetained,
+      path: result.reportPath,
+    })
+    .info("final");
   process.exit(0);
 }
 
 if (import.meta.main) {
   const signalId = process.argv[2] ?? "";
   main(signalId).catch((err) => {
-    console.error("[C] failed:", err);
+    cLog.withError(err).error("failed");
     process.exit(1);
   });
 }
