@@ -3,7 +3,7 @@
 //   insertItems 用 ON CONFLICT DO NOTHING,idempotent
 
 import { sql } from "bun";
-import type { RawItem, FetchState, Signal, NewSignal } from "./types.ts";
+import type { RawItem, FetchState, Signal, NewSignal, SignalStatus } from "./types.ts";
 
 export async function initDb(): Promise<void> {
   await sql`SELECT 1`;
@@ -72,6 +72,8 @@ export async function upsertFetchState(state: FetchState): Promise<void> {
 export async function insertSignal(signal: NewSignal): Promise<Signal> {
   // Bun.sql 的 sql({...}) 不會把 JS array 轉成 Postgres array literal,
   // 用 sql.unsafe 手動拼(參考 haveItems 已有做法)
+  const status = signal.status ?? "discovered";
+  validateSignalStatus(status);
   const values = [
     signal.slug === undefined ? "NULL" : signal.slug === null
       ? "NULL"
@@ -79,7 +81,7 @@ export async function insertSignal(signal: NewSignal): Promise<Signal> {
     `'${escapeSqlString(signal.title)}'`,
     `'${escapeSqlString(signal.description)}'`,
     String(signal.importance ?? 3),
-    `'${escapeSqlString(signal.status ?? "discovered")}'`,
+    `'${escapeSqlString(status)}'`,
     `'${pgArrayLiteral(signal.tags ?? [])}'::text[]`,
     `'${pgArrayLiteral(signal.source_items ?? [])}'::text[]`,
   ];
@@ -119,6 +121,7 @@ export async function updateSignalStatus(
   id: string,
   status: string,
 ): Promise<void> {
+  validateSignalStatus(status);
   await sql`
     UPDATE signals
     SET status = ${status}, updated_at = now()
@@ -126,13 +129,23 @@ export async function updateSignalStatus(
   `;
 }
 
-// 用 COALESCE 模式:有給的欄位才更新
+// 用 dynamic SET clause:有給的欄位才更新
 // tags / source_items 是 TEXT[],Bun.sql 不會自動轉 JS array → Postgres array,
 // 要用 array literal 拼進 SQL(參考 haveItems 已有做法)
 export async function updateSignal(
   id: string,
   fields: Partial<NewSignal>,
 ): Promise<void> {
+  if (fields.importance !== undefined) {
+    const n = Number(fields.importance);
+    if (!Number.isFinite(n) || n < 1 || n > 5 || !Number.isInteger(n)) {
+      throw new Error(`importance must be integer in [1, 5], got: ${fields.importance}`);
+    }
+  }
+  if (fields.status !== undefined) {
+    validateSignalStatus(fields.status);
+  }
+
   const setClauses: string[] = [];
 
   if (fields.title !== undefined) {
@@ -169,11 +182,30 @@ export async function updateSignal(
   );
 }
 
+
 function escapeSqlString(s: string): string {
   return s.replace(/'/g, "''");
 }
 
+// Postgres array literal: {"a","b"} (元素包雙引號)
+// 嚴格 escape 順序: 先 backslash → 再雙引號 → 再大括號(這三個是 PG array literal
+// 保留字元,若不 escape 會破壞 literal 結構 — Gemini 在 PR #5 review 標 critical)
 function pgArrayLiteral(arr: string[]): string {
-  // Postgres array literal:{"a","b"}  — 元素內的雙引號要 escape
-  return `{${arr.map((t) => `"${t.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`).join(",")}}`;
+  return `{${arr
+    .map((t) =>
+      `"${t
+        .replace(/\\/g, "\\\\")
+        .replace(/"/g, '\\"')
+        .replace(/\{/g, "\\{")
+        .replace(/\}/g, "\\}")}"`,
+    )
+    .join(",")}}`;
+}
+
+const VALID_STATUSES = ["discovered", "tracking", "matured", "faded", "invalid"] as const;
+
+function validateSignalStatus(status: string): asserts status is SignalStatus {
+  if (!VALID_STATUSES.includes(status as any)) {
+    throw new Error(`Invalid signal status: ${status}. Must be one of: ${VALID_STATUSES.join(", ")}`);
+  }
 }

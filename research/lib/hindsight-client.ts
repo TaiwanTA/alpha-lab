@@ -4,6 +4,9 @@
 //   - 如果 future 需要更多 endpoint,再考虑换 SDK
 
 const DEFAULT_BASE_URL = "http://localhost:8888";
+const REQUEST_TIMEOUT_MS = 30_000; // 用於 request() 的 AbortController
+const HEALTH_TIMEOUT_MS = 5_000;    // health() 用較短 timeout,失敗快速 fallback
+const MAX_ATTEMPTS = 3;
 
 export class HindsightError extends Error {
   constructor(
@@ -14,11 +17,17 @@ export class HindsightError extends Error {
   }
 }
 
+export interface HindsightDisposition {
+  skepticism: number;
+  literalism: number;
+  empathy: number;
+}
+
 export interface HindsightBank {
   bank_id: string;
   name: string;
   mission: string;
-  disposition?: { skepticism: number; literalism: number; empathy: number };
+  disposition?: HindsightDisposition;
   created_at?: string;
   updated_at?: string;
   fact_count?: number;
@@ -56,14 +65,27 @@ export interface ReflectResponse {
 }
 
 export class HindsightClient {
-  constructor(
-    private readonly baseUrl: string = DEFAULT_BASE_URL,
-  ) {}
+  private readonly baseUrl: string;
+
+  constructor(baseUrl: string = DEFAULT_BASE_URL) {
+    // 防止 baseUrl 結尾多 /,跟 path 開頭的 / 拼成 //
+    this.baseUrl = baseUrl.replace(/\/+$/, "");
+  }
 
   async health(): Promise<boolean> {
     try {
-      const res = await fetch(`${this.baseUrl}/health`);
-      return res.ok;
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), HEALTH_TIMEOUT_MS);
+      let res: Response;
+      try {
+        res = await fetch(`${this.baseUrl}/health`, { signal: controller.signal });
+      } finally {
+        clearTimeout(timeout);
+      }
+      if (!res.ok) return false;
+      const text = await res.text();
+      // Hindsight 的 /health 通常回 "ok" 或 JSON,不空就視為 healthy
+      return text.length > 0;
     } catch {
       return false;
     }
@@ -71,11 +93,11 @@ export class HindsightClient {
 
   async listBanks(): Promise<HindsightBank[]> {
     const res = await this.request("GET", "/v1/default/banks");
-    const data = (await res.json()) as unknown;
-    // API 可能回 array 或 { banks: [...] }
+    const data: unknown = await res.json();
     if (Array.isArray(data)) return data as HindsightBank[];
     if (data && typeof data === "object" && "banks" in data) {
-      return ((data as { banks: HindsightBank[] }).banks ?? []) as HindsightBank[];
+      const banks = (data as { banks: unknown }).banks;
+      if (Array.isArray(banks)) return banks as HindsightBank[];
     }
     return [];
   }
@@ -84,7 +106,7 @@ export class HindsightClient {
     bank_id: string;
     name: string;
     mission: string;
-    disposition?: { skepticism: number; literalism: number; empathy: number };
+    disposition?: HindsightDisposition;
   }): Promise<HindsightBank> {
     const res = await this.request("POST", "/v1/default/banks", params);
     return (await res.json()) as HindsightBank;
@@ -128,12 +150,12 @@ export class HindsightClient {
         ...(options?.tags ? { tags: options.tags } : {}),
       },
     );
-    const data = (await res.json()) as unknown;
+    const data: unknown = await res.json();
     if (Array.isArray(data)) return data as RecallResult[];
     if (data && typeof data === "object") {
-      const obj = data as { results?: RecallResult[]; memories?: RecallResult[] };
-      if (obj.results) return obj.results;
-      if (obj.memories) return obj.memories;
+      const obj = data as Record<string, unknown>;
+      const results = obj.results ?? obj.memories;
+      if (Array.isArray(results)) return results as RecallResult[];
     }
     return [];
   }
@@ -159,17 +181,61 @@ export class HindsightClient {
     path: string,
     body?: unknown,
   ): Promise<Response> {
-    const res = await fetch(`${this.baseUrl}${path}`, {
-      method,
-      headers: body ? { "Content-Type": "application/json" } : {},
-      body: body !== undefined ? JSON.stringify(body) : undefined,
-    });
+    let attempt = 0;
 
-    if (!res.ok) {
-      const text = await res.text();
-      throw new HindsightError(res.status, text);
+    while (attempt < MAX_ATTEMPTS) {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+      try {
+        const headers: Record<string, string> = {};
+        if (body !== undefined && body !== null) {
+          headers["Content-Type"] = "application/json";
+        }
+        const res = await fetch(`${this.baseUrl}${path}`, {
+          method,
+          headers,
+          body: body !== undefined && body !== null
+            ? JSON.stringify(body)
+            : undefined,
+          signal: controller.signal,
+        });
+        clearTimeout(timeout);
+
+        if (res.status === 408 || res.status === 429 || res.status >= 500) {
+          // Drain body 防止 connection leak(Kilo PR #5 review suggestion)
+          await res.body?.cancel().catch(() => {});
+          const waitMs = attempt >= MAX_ATTEMPTS - 1
+            ? 0
+            : 1000 * Math.pow(2, attempt);
+          await sleep(waitMs);
+          attempt++;
+          continue;
+        }
+
+        if (!res.ok) {
+          const text = await res.text();
+          throw new HindsightError(res.status, text);
+        }
+
+        return res;
+      } catch (err) {
+        clearTimeout(timeout);
+        // 網路錯誤或 abort 也 retry
+        if (err instanceof HindsightError) throw err;
+        if (attempt >= MAX_ATTEMPTS - 1) throw err;
+        const waitMs = 1000 * Math.pow(2, attempt);
+        await sleep(waitMs);
+        attempt++;
+      }
     }
 
-    return res;
+    throw new HindsightError(
+      599, // 自訂 code:「Hindsight 未指定 error,所有 retry 用盡」
+      `Hindsight request failed after ${MAX_ATTEMPTS} attempts: ${path}`,
+    );
   }
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }

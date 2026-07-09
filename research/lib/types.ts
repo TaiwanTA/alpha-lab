@@ -34,6 +34,9 @@ export interface SourcesFile {
   sources: SourceConfig[];
 }
 
+// Signal 的合法 status,對應 DB CHECK constraint(migration 003)
+export type SignalStatus = "discovered" | "tracking" | "matured" | "faded" | "invalid";
+
 // Signal:市場訊號實體(B agent 建立,C agent 追蹤,D agent 引用)
 export interface Signal {
   id: string;
@@ -41,7 +44,7 @@ export interface Signal {
   title: string;
   description: string;
   importance: number;          // 1-5
-  status: string;              // discovered / tracking / matured / faded / invalid
+  status: SignalStatus;        // discovered / tracking / matured / faded / invalid
   tags: string[];
   source_items: string[];
   created_at: Date;
@@ -54,7 +57,7 @@ export interface NewSignal {
   title: string;
   description: string;
   importance?: number;         // 預設 3
-  status?: string;             // 預設 'discovered'
+  status?: string;             // 預設 'discovered'(由 db.ts 用 validateSignalStatus 收斂)
   tags?: string[];
   source_items?: string[];
 }
