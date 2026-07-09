@@ -132,6 +132,42 @@ describe("XClient.getUserTimeline", () => {
     const page = await client.getUserTimeline("u1");
     expect(page.nextToken).toBeNull();
   });
+
+  test("startTime is sent as start_time parameter", async () => {
+    fetchMock = mockFetch(() =>
+      new Response(
+        JSON.stringify({
+          data: [],
+          includes: { users: [] },
+          meta: {},
+        }),
+        { status: 200 },
+      ),
+    );
+    globalThis.fetch = fetchMock;
+
+    const client = new XClient("token");
+    const startTime = new Date("2026-07-06T00:00:00Z");
+    await client.getUserTimeline("u1", undefined, startTime);
+
+    const calledUrl = fetchMock.mock.calls[0]!;
+    expect(calledUrl).toContain("start_time=2026-07-06T00%3A00%3A00Z");
+  });
+
+  test("startTime is not sent when undefined", async () => {
+    fetchMock = mockFetch(() =>
+      new Response(
+        JSON.stringify({ data: [], includes: { users: [] }, meta: {} }),
+        { status: 200 },
+      ),
+    );
+    globalThis.fetch = fetchMock;
+
+    const client = new XClient("token");
+    await client.getUserTimeline("u1");
+
+    expect(fetchMock.mock.calls[0]).not.toContain("start_time");
+  });
 });
 
 describe("XClient.getTweetsByIds", () => {

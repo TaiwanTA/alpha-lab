@@ -108,6 +108,7 @@ export class XClient {
   async getUserTimeline(
     userId: string,
     paginationToken?: string,
+    startTime?: Date,
   ): Promise<TimelinePage> {
     const params: Record<string, string> = {
       max_results: "100",
@@ -116,6 +117,10 @@ export class XClient {
       expansions: "author_id",
     };
     if (paginationToken) params.pagination_token = paginationToken;
+    if (startTime) {
+      // X API v2 要 ISO 8601,且拒絕毫秒/奈秒,只接受秒精度
+      params.start_time = startTime.toISOString().split(".")[0] + "Z";
+    }
 
     const res = await this.request<{
       data: XApiTweet[];

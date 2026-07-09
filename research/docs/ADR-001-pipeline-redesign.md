@@ -22,7 +22,8 @@
 - **任務**: 從 X user timeline 同步推文進 `items` 表
 - **頻率**: 現有 pipeline(cron 控,預設每 6 小時)
 - **跨段價值**: 整個系統只此一處打 X timeline API,**避免 B/C/D 各自重複查 X search 浪費成本**
-- **現況**: ✅ 已上線,Bill Ackman 一個 source,~1093 條 items
+- **首跑邊界**: `initial_backfill_days` 參數(預設 3 天)控制首跑往回拉的時間範圍。**不設此值的話首跑沒 lastExternalId 可做邊界,會一次撞到 max_tweets_per_run 上限把幾個月歷史推文都拉下來**
+- **現況**: ✅ 已上線,Bill Ackman 一個 source,首跑後 ~43 條(3 天)
 
 ### B — 訊號發現
 - **任務**: 從最近的新 items 中找出「值得專注的市場訊號」,建立訊號實體

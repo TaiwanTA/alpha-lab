@@ -6,7 +6,8 @@
       "config": {
         "username": "BillAckman",
         "fetch_parent_context": true,
-        "max_tweets_per_run": 1000
+        "max_tweets_per_run": 1000,
+        "initial_backfill_days": 3
       }
     }
   ]

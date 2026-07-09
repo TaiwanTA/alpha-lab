@@ -10,6 +10,11 @@ interface XUserTimelineConfig {
   username: string;
   fetch_parent_context?: boolean;
   max_tweets_per_run?: number;
+  /** 首跑(lastExternalId 為 null 時)往回拉幾天的推文。
+   *  之後增量跑不用,用 lastExternalId 作為邊界即可。
+   *  預設 3 天。預測性系統中,過去資料價值低,不需要回填太多。
+   */
+  initial_backfill_days?: number;
 }
 
 // 從 referenced_tweets 抓出 reply 的 parent(replied_to type)的 id
@@ -41,12 +46,24 @@ export class XUserTimelineAdapter implements SourceAdapter {
   ): AsyncIterable<RawItem> {
     const cfg = config as unknown as XUserTimelineConfig;
     const maxTweets = cfg.max_tweets_per_run ?? 1000;
+    const backfillDays = cfg.initial_backfill_days ?? 3;
+
+    // 首跑無邊界:用 start_time 限制往回拉,避免一次拉進幾個月的歷史垃圾
+    // 增量跑:不需要 start_time,用 lastExternalId 邊界就夠
+    const startTime: Date | undefined =
+      lastExternalId === null
+        ? new Date(Date.now() - backfillDays * 24 * 60 * 60 * 1000)
+        : undefined;
 
     let nextToken: string | undefined;
     let yielded = 0;
 
     while (yielded < maxTweets) {
-      const page = await this.xClient.getUserTimeline(sourceKey, nextToken);
+      const page = await this.xClient.getUserTimeline(
+        sourceKey,
+        nextToken,
+        startTime,
+      );
       for (const tweet of page.tweets) {
         // 遇到上次處理過的 id 就停(包含等於,所以會 dedup 上次的最後一筆)
         if (lastExternalId && tweet.id === lastExternalId) return;

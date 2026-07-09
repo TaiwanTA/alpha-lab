@@ -22,22 +22,29 @@ function makeReplyTweet(parentId: string, overrides: Partial<XTweetWithAuthor> =
   });
 }
 
+// 把 fake client 改成記下被呼叫的最後一次 startTime,讓 test 驗證下發
 function makeFakeClient(
   tweets: XTweetWithAuthor[] = [],
   byIds: XTweetWithAuthor[] = [],
-): XClient {
-  return {
+): XClient & { lastStartTime: Date | undefined } {
+  let lastStartTime: Date | undefined;
+  const client = {
     resolveUsername: async (username: string) => ({
       id: "user-1",
       username,
       name: "Bill Ackman",
     }),
-    getUserTimeline: async () => ({
-      tweets,
-      nextToken: null,
-    }),
+    getUserTimeline: async (_userId: string, _paginationToken?: string, startTime?: Date) => {
+      lastStartTime = startTime;
+      return { tweets, nextToken: null };
+    },
     getTweetsByIds: async (ids: string[]) => byIds.filter((t) => ids.includes(t.id)),
-  } as unknown as XClient;
+  };
+  // 用 getter 把 lastStartTime 暴露出來
+  Object.defineProperty(client, "lastStartTime", {
+    get: () => lastStartTime,
+  });
+  return client as unknown as XClient & { lastStartTime: Date | undefined };
 }
 
 describe("XUserTimelineAdapter.resolve", () => {
@@ -151,6 +158,50 @@ describe("XUserTimelineAdapter.fetchNew", () => {
       items.push(item);
     }
     expect(items[0].source_label).toBe("@elonmusk");
+  });
+
+  test("first run (lastExternalId is null) passes startTime to X API", async () => {
+    const tweets = [makeTweet({ id: "1" })];
+    const fake = makeFakeClient(tweets);
+    const adapter = new XUserTimelineAdapter(fake);
+    for await (const _ of adapter.fetchNew({}, "user-1", null)) {
+      // drain
+    }
+    expect(fake.lastStartTime).toBeDefined();
+    // startTime should be ~3 days ago (default), tolerance ±5min for test runtime
+    const expectedMin = Date.now() - 3 * 24 * 60 * 60 * 1000 - 5 * 60 * 1000;
+    const expectedMax = Date.now() - 3 * 24 * 60 * 60 * 1000 + 5 * 60 * 1000;
+    const startTimeMs = fake.lastStartTime!.getTime();
+    expect(startTimeMs).toBeGreaterThan(expectedMin);
+    expect(startTimeMs).toBeLessThan(expectedMax);
+  });
+
+  test("incremental run (lastExternalId is set) does NOT pass startTime", async () => {
+    const tweets = [makeTweet({ id: "10" })];
+    const fake = makeFakeClient(tweets);
+    const adapter = new XUserTimelineAdapter(fake);
+    for await (const _ of adapter.fetchNew({}, "user-1", "9")) {
+      // drain
+    }
+    expect(fake.lastStartTime).toBeUndefined();
+  });
+
+  test("custom initial_backfill_days is respected on first run", async () => {
+    const tweets = [makeTweet({ id: "1" })];
+    const fake = makeFakeClient(tweets);
+    const adapter = new XUserTimelineAdapter(fake);
+    for await (const _ of adapter.fetchNew(
+      { initial_backfill_days: 7 },
+      "user-1",
+      null,
+    )) {
+      // drain
+    }
+    const expectedMin = Date.now() - 7 * 24 * 60 * 60 * 1000 - 5 * 60 * 1000;
+    const expectedMax = Date.now() - 7 * 24 * 60 * 60 * 1000 + 5 * 60 * 1000;
+    const startTimeMs = fake.lastStartTime!.getTime();
+    expect(startTimeMs).toBeGreaterThan(expectedMin);
+    expect(startTimeMs).toBeLessThan(expectedMax);
   });
 });
 
