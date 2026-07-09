@@ -215,7 +215,7 @@ export async function publish(
         log
           .withMetadata({
             branch,
-            spawnError: pushResult.spawnError,
+            signalError: pushResult.signalError,
           })
           .warn(
             "git push process killed (likely OOM / CI timeout) — local commit preserved. " +
@@ -263,9 +263,13 @@ interface GitResult {
   ok: boolean;
   stdout: string;
   stderr: string;
-  spawnError?: string | null;  // spawn 失敗原因(no binary / 沒權限 / OOM kill / signal 殺掉 等)
-  // 區分 ENOENT-style failure(git 不存在/沒權限)vs signal kill(被外部殺掉)— 訊息應不同
-  // (Kilo PR #11 iter 4:之前把 signal-kill 也當 ENOENT 提示用戶「git missing」誤導)
+  // 兩種 spawn-time failure 細節:
+  //   spawnError — ENOENT / 沒權限 等 spawn 階段就失敗的訊息
+  //   signalError — process 被 external signal(SIGTERM/SIGKILL)殺掉時的訊息
+  // iter 4 註釋:之前 signal-kill 也塞進 spawnError 欄位,與該欄位語意(spawn 失敗)不符,
+  // 已拆開(Kilo PR #11 iter 5:metadata key 對齊實際成因)
+  spawnError?: string | null;
+  signalError?: string | null;
   failureKind?: "spawn-error" | "signal-kill" | "non-zero-exit";
 }
 
@@ -295,6 +299,7 @@ function runGit(
       stdout: "",
       stderr: msg,
       spawnError: msg,
+      signalError: null,
       failureKind: "spawn-error",
     };
   }
@@ -309,7 +314,8 @@ function runGit(
       ok: false,
       stdout: "",
       stderr: msg,
-      spawnError: msg,
+      spawnError: null,
+      signalError: msg,
       failureKind: "signal-kill",
     };
   }
@@ -325,6 +331,7 @@ function runGit(
     stdout: stdout.trim(),
     stderr: stderr.trim(),
     spawnError: null,
+    signalError: null,
     failureKind: result.status === 0 ? undefined : "non-zero-exit",
   };
 }
