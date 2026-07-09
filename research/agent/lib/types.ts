@@ -4,7 +4,7 @@
 export interface SignalCandidate {
   title: string;
   description: string;
-  importance: number;  // 1-5
+  importance: 1 | 2 | 3 | 4 | 5;
   tags: string[];
   source_item_ids: string[];
 }

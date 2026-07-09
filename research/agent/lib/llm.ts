@@ -3,11 +3,14 @@
 //   OpenRouter API: https://openrouter.ai/api/v1/chat/completions
 
 const DEFAULT_BASE_URL = "https://openrouter.ai/api/v1";
-const DEFAULT_MODEL = "minimax/MiniMax-M3";
+const DEFAULT_MODEL = "minimax/minimax-m3";
+const DEFAULT_LLM_TIMEOUT_MS = 60_000;
+const MAX_ATTEMPTS = 3;
 
 export class LlmError extends Error {
   constructor(public readonly status: number, public readonly body: string) {
     super(`LLM API error ${status}: ${body.slice(0, 300)}`);
+    this.name = "LlmError";
   }
 }
 
@@ -27,6 +30,8 @@ export interface AskOptions {
   maxTokens?: number;
   /** 回傳 JSON 格式(設定後 response_format = json_object) */
   json?: boolean;
+  /** 逾時(ms),預設 60000 */
+  timeout?: number;
 }
 
 export interface AskResult {
@@ -57,9 +62,13 @@ export async function askMessages(
   messages: LlmMessage[],
   options?: AskOptions,
 ): Promise<AskResult> {
-  const baseUrl = process.env.LLM_BASE_URL ?? DEFAULT_BASE_URL;
+  const baseUrl = (process.env.LLM_BASE_URL ?? DEFAULT_BASE_URL).replace(
+    /\/+$/,
+    "",
+  );
   const apiKey = process.env.LLM_API_KEY;
   const model = options?.model ?? process.env.LLM_MODEL ?? DEFAULT_MODEL;
+  const timeoutMs = options?.timeout ?? DEFAULT_LLM_TIMEOUT_MS;
 
   if (!apiKey) {
     throw new Error("LLM_API_KEY is required (set in .env)");
@@ -70,48 +79,84 @@ export async function askMessages(
     messages,
     temperature: options?.temperature ?? 0.7,
   };
-  if (options?.maxTokens) {
+  if (options?.maxTokens !== undefined) {
     body.max_tokens = options.maxTokens;
   }
   if (options?.json) {
     body.response_format = { type: "json_object" };
   }
 
-  const res = await fetch(`${baseUrl}/chat/completions`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(body),
-  });
+  let attempt = 0;
+  while (attempt < MAX_ATTEMPTS) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const res = await fetch(`${baseUrl}/chat/completions`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      });
 
-  if (!res.ok) {
-    const text = await res.text();
-    throw new LlmError(res.status, text);
+      if (
+        res.status === 408 ||
+        res.status === 429 ||
+        res.status >= 500
+      ) {
+        const text = await res.text();
+        await res.body?.cancel();
+        await sleep(1000 * Math.pow(2, attempt));
+        attempt++;
+        continue;
+      }
+
+      if (!res.ok) {
+        const text = await res.text();
+        throw new LlmError(res.status, text);
+      }
+
+      const data = (await res.json()) as {
+        choices?: Array<{ message?: { content?: string } }>;
+        usage?: {
+          prompt_tokens?: number;
+          completion_tokens?: number;
+          total_tokens?: number;
+        };
+        model?: string;
+      };
+      const choice = data.choices?.[0];
+      if (!choice) {
+        throw new Error("LLM API returned no choices");
+      }
+
+      const content = choice.message?.content;
+      if (content === undefined || content === null) {
+        throw new Error("LLM API returned choice without content");
+      }
+
+      return {
+        content,
+        usage: {
+          promptTokens: data.usage?.prompt_tokens ?? 0,
+          completionTokens: data.usage?.completion_tokens ?? 0,
+          totalTokens: data.usage?.total_tokens ?? 0,
+        },
+        model: data.model ?? model,
+      };
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
-  const data = (await res.json()) as {
-    choices?: Array<{ message?: { content?: string } }>;
-    usage?: {
-      prompt_tokens?: number;
-      completion_tokens?: number;
-      total_tokens?: number;
-    };
-    model?: string;
-  };
-  const choice = data.choices?.[0];
-  if (!choice) {
-    throw new Error("LLM API returned no choices");
-  }
+  throw new LlmError(
+    599,
+    `LLM request failed after ${MAX_ATTEMPTS} attempts`,
+  );
+}
 
-  return {
-    content: choice.message?.content ?? "",
-    usage: {
-      promptTokens: data.usage?.prompt_tokens ?? 0,
-      completionTokens: data.usage?.completion_tokens ?? 0,
-      totalTokens: data.usage?.total_tokens ?? 0,
-    },
-    model: data.model ?? model,
-  };
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }

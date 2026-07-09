@@ -5,15 +5,18 @@ const originalFetch = globalThis.fetch;
 let fetchMock: any;
 
 function mockFetch(status: number, body: unknown) {
-  const fn = () =>
-    Promise.resolve(
+  const calls: any[] = [];
+  const fn: any = (url: string, opts: any) => {
+    calls.push({ url, opts });
+    return Promise.resolve(
       new Response(JSON.stringify(body), {
         status,
         headers: { "Content-Type": "application/json" },
       }),
     );
-  (fn as any).mock = { calls: [] as any[] };
-  return fn as any;
+  };
+  fn.mock = { calls };
+  return fn;
 }
 
 beforeEach(() => {
@@ -31,6 +34,7 @@ afterEach(() => {
   globalThis.fetch = originalFetch;
   delete process.env.LLM_API_KEY;
   delete process.env.LLM_MODEL;
+  delete process.env.LLM_BASE_URL;
 });
 
 describe("ask", () => {
@@ -164,7 +168,21 @@ describe("ask", () => {
 
     await ask("test");
     expect(calledUrl).toBe("https://custom.api.com/v1/chat/completions");
-    delete process.env.LLM_BASE_URL;
+  });
+
+  test("LlmError carries status and body", async () => {
+    fetchMock = () =>
+      Promise.resolve(new Response("Bad request", { status: 400 }));
+    globalThis.fetch = fetchMock;
+    let err: unknown;
+    try {
+      await ask("test");
+    } catch (e) {
+      err = e;
+    }
+    expect(err).toBeInstanceOf(LlmError);
+    expect((err as LlmError).status).toBe(400);
+    expect((err as LlmError).body).toBe("Bad request");
   });
 });
 
