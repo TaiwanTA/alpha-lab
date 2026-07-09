@@ -398,8 +398,26 @@ describe("HindsightClient request retry", () => {
     globalThis.fetch = fetchMock;
 
     const client = new HindsightClient("http://test:8888");
-    await expect(client.listBanks()).rejects.toThrow();
+    await expect(client.listBanks()).rejects.toThrow(HindsightError);
     expect(callCount).toBe(3);  // maxAttempts = 3
+  });
+
+  test("request retries on 408 Request Timeout", async () => {
+    let callCount = 0;
+    fetchMock = mockFetch(() => {
+      callCount++;
+      if (callCount === 1) {
+        return Promise.resolve(new Response("timeout", { status: 408 }));
+      }
+      return Promise.resolve(
+        new Response(JSON.stringify({ banks: [] }), { status: 200 }),
+      );
+    });
+    globalThis.fetch = fetchMock;
+
+    const client = new HindsightClient("http://test:8888");
+    await client.listBanks();
+    expect(callCount).toBe(2);
   });
 });
 

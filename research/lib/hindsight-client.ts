@@ -201,7 +201,7 @@ export class HindsightClient {
         });
         clearTimeout(timeout);
 
-        if (res.status === 429 || res.status >= 500) {
+        if (res.status === 408 || res.status === 429 || res.status >= 500) {
           // Drain body 防止 connection leak(Kilo PR #5 review suggestion)
           await res.body?.cancel().catch(() => {});
           const waitMs = attempt >= MAX_ATTEMPTS - 1
@@ -229,7 +229,10 @@ export class HindsightClient {
       }
     }
 
-    throw new Error(`Hindsight request failed after ${MAX_ATTEMPTS} attempts: ${path}`);
+    throw new HindsightError(
+      599, // 自訂 code:「Hindsight 未指定 error,所有 retry 用盡」
+      `Hindsight request failed after ${MAX_ATTEMPTS} attempts: ${path}`,
+    );
   }
 }
 
