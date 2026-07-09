@@ -214,3 +214,147 @@ describe("B agent discover — error handling", () => {
     await expect(discover(deps)).rejects.toThrow(/'signals' array/);
   });
 });
+
+describe("B agent discover — candidate validation", () => {
+  test("skips candidate with missing title", async () => {
+    const items = [makeItem("tw1")];
+    const deps = makeFakeDeps({
+      items,
+      llmContent: JSON.stringify({
+        signals: [{
+          description: "d",
+          importance: 3,
+          tags: [],
+          source_item_ids: ["tw1"],
+        }],
+      }),
+    });
+
+    const result = await discover(deps);
+    expect(result.newSignals).toBe(0);
+    expect(deps.insertSignal).not.toHaveBeenCalled();
+    // Items still marked processed
+    expect(deps.markItemsProcessed).toHaveBeenCalledTimes(1);
+  });
+
+  test("skips candidate with importance out of range", async () => {
+    const items = [makeItem("tw1")];
+    const deps = makeFakeDeps({
+      items,
+      llmContent: JSON.stringify({
+        signals: [{
+          title: "Bad importance",
+          description: "d",
+          importance: 99,
+          tags: [],
+          source_item_ids: ["tw1"],
+        }],
+      }),
+    });
+
+    const result = await discover(deps);
+    expect(result.newSignals).toBe(0);
+    expect(deps.insertSignal).not.toHaveBeenCalled();
+  });
+
+  test("skips candidate with importance as string 'high'", async () => {
+    const items = [makeItem("tw1")];
+    const deps = makeFakeDeps({
+      items,
+      llmContent: JSON.stringify({
+        signals: [{
+          title: "Bad importance string",
+          description: "d",
+          importance: "high",
+          tags: [],
+          source_item_ids: ["tw1"],
+        }],
+      }),
+    });
+
+    const result = await discover(deps);
+    expect(result.newSignals).toBe(0);
+    expect(deps.insertSignal).not.toHaveBeenCalled();
+  });
+
+  test("accepts importance as numeric string (e.g. '4')", async () => {
+    const items = [makeItem("tw1")];
+    const deps = makeFakeDeps({
+      items,
+      llmContent: JSON.stringify({
+        signals: [{
+          title: "String importance",
+          description: "d",
+          importance: "4",
+          tags: [],
+          source_item_ids: ["tw1"],
+        }],
+      }),
+    });
+
+    const result = await discover(deps);
+    expect(result.newSignals).toBe(1);
+    const inserted = (deps.insertSignal as any).mock.calls[0][0];
+    expect(inserted.importance).toBe(4);
+  });
+
+  test("skips candidate with non-string tags", async () => {
+    const items = [makeItem("tw1")];
+    const deps = makeFakeDeps({
+      items,
+      llmContent: JSON.stringify({
+        signals: [{
+          title: "Bad tags",
+          description: "d",
+          importance: 3,
+          tags: ["ok", 123, "also-ok"],
+          source_item_ids: ["tw1"],
+        }],
+      }),
+    });
+
+    const result = await discover(deps);
+    expect(result.newSignals).toBe(0);
+    expect(deps.insertSignal).not.toHaveBeenCalled();
+  });
+
+  test("skips candidate that is null", async () => {
+    const items = [makeItem("tw1")];
+    const deps = makeFakeDeps({
+      items,
+      llmContent: JSON.stringify({
+        signals: [null, {
+          title: "Valid",
+          description: "d",
+          importance: 3,
+          tags: [],
+          source_item_ids: ["tw1"],
+        }],
+      }),
+    });
+
+    const result = await discover(deps);
+    // null skipped, valid one inserted
+    expect(result.newSignals).toBe(1);
+  });
+
+  test("throws when LLM returns null root", async () => {
+    const items = [makeItem("tw1")];
+    const deps = makeFakeDeps({
+      items,
+      llmContent: "null",
+    });
+
+    await expect(discover(deps)).rejects.toThrow(/not an object/);
+  });
+
+  test("throws when LLM returns string root", async () => {
+    const items = [makeItem("tw1")];
+    const deps = makeFakeDeps({
+      items,
+      llmContent: '"hello"',
+    });
+
+    await expect(discover(deps)).rejects.toThrow(/not an object/);
+  });
+});

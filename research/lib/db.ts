@@ -211,17 +211,23 @@ export async function getUnprocessedItems(limit: number = 50): Promise<ItemRow[]
 
 // 標記 items 已處理(在 B agent 處理完後調用,不管有沒有建 signals)
 // 用 IN + sql.unsafe pattern(因為 ids 是 string array,見 AGENTS.md 踩雷段)
+// Kilo PR #6 SUGGESTION:batches of 1000 避免單一 SQL statement 太長
+const MARK_BATCH_SIZE = 1000;
+
 export async function markItemsProcessed(
   sourceType: string,
   externalIds: string[],
 ): Promise<void> {
   if (externalIds.length === 0) return;
-  const idList = externalIds.map((id) => `'${escapeSqlString(id)}'`).join(",");
-  await sql`
-    UPDATE items
-    SET processed_at = now()
-    WHERE source_type = ${sourceType} AND external_id IN (${sql.unsafe(idList)})
-  `;
+  for (let i = 0; i < externalIds.length; i += MARK_BATCH_SIZE) {
+    const batch = externalIds.slice(i, i + MARK_BATCH_SIZE);
+    const idList = batch.map((id) => `'${escapeSqlString(id)}'`).join(",");
+    await sql`
+      UPDATE items
+      SET processed_at = now()
+      WHERE source_type = ${sourceType} AND external_id IN (${sql.unsafe(idList)})
+    `;
+  }
 }
 
 // Postgres array literal: {"a","b"} (元素包雙引號)

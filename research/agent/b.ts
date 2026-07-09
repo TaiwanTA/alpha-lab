@@ -9,7 +9,6 @@
 
 import { ask } from "./lib/llm.ts";
 import type { AskResult } from "./lib/llm.ts";
-import type { SignalCandidate } from "./lib/types.ts";
 import type { ItemRow, Signal } from "../lib/types.ts";
 import {
   initDb,
@@ -56,10 +55,6 @@ Output strictly this JSON shape (no markdown, no explanation outside JSON):
 }
 
 If no new signals worth tracking, output: {"signals": []}`;
-
-interface LlmSignalResponse {
-  signals: SignalCandidate[];
-}
 
 // B agent 用到的所有外部依賴,集中定義方便測試注入
 export interface BDependencies {
@@ -109,6 +104,81 @@ ${itemList}
 Respond with JSON only.`;
 }
 
+// 驗證 LLM 回傳的 candidate 是否合法
+// 用 explicit validation 而不是直接 cast,讓壞資料被識別 + skip 而不是變成
+// insertSignal 失敗被 try/catch 吞掉(Kilo PR #6 CRITICAL/WARNING)
+interface ValidatedCandidate {
+  title: string;
+  description: string;
+  importance: 1 | 2 | 3 | 4 | 5;
+  tags: string[];
+  source_item_ids: string[];
+}
+
+function validateCandidate(raw: unknown):
+  | { ok: true; value: ValidatedCandidate }
+  | { ok: false; error: string } {
+  if (raw === null || typeof raw !== "object") {
+    return { ok: false, error: "candidate is not an object" };
+  }
+  const c = raw as Record<string, unknown>;
+
+  if (typeof c.title !== "string" || c.title.length === 0) {
+    return { ok: false, error: `invalid title: ${typeof c.title}` };
+  }
+  if (c.title.length > 80) {
+    return { ok: false, error: `title too long (${c.title.length} > 80)` };
+  }
+  if (typeof c.description !== "string" || c.description.length === 0) {
+    return { ok: false, error: `invalid description: ${typeof c.description}` };
+  }
+  // importance 必須是 integer 1-5,接受 number 或 string-numeric(LLM 可能回 "4")
+  const importanceNum = typeof c.importance === "string"
+    ? Number(c.importance)
+    : c.importance;
+  if (
+    typeof importanceNum !== "number" ||
+    !Number.isInteger(importanceNum) ||
+    importanceNum < 1 ||
+    importanceNum > 5
+  ) {
+    return {
+      ok: false,
+      error: `importance must be integer 1-5, got: ${JSON.stringify(c.importance)}`,
+    };
+  }
+  // tags 必須是 string array(Kilo WARNING:非 string 元素會破壞 pgArrayLiteral)
+  if (!Array.isArray(c.tags)) {
+    return { ok: false, error: `tags is not array: ${typeof c.tags}` };
+  }
+  const validTags = c.tags.every((t) => typeof t === "string");
+  if (!validTags) {
+    return { ok: false, error: "tags contains non-string element" };
+  }
+  // source_item_ids 必須是 string array
+  if (!Array.isArray(c.source_item_ids)) {
+    return {
+      ok: false,
+      error: `source_item_ids is not array: ${typeof c.source_item_ids}`,
+    };
+  }
+  const validSourceIds = c.source_item_ids.every((t) => typeof t === "string");
+  if (!validSourceIds) {
+    return { ok: false, error: "source_item_ids contains non-string element" };
+  }
+
+  return {
+    ok: true,
+    value: {
+      title: c.title,
+      description: c.description,
+      importance: importanceNum as 1 | 2 | 3 | 4 | 5,
+      tags: c.tags as string[],
+      source_item_ids: c.source_item_ids as string[],
+    },
+  };
+}
+
 // 主要 B agent 函式
 // 接受 deps injection,讓測試可以注入 mock
 export async function discover(deps: BDependencies): Promise<DiscoverResult> {
@@ -135,16 +205,23 @@ export async function discover(deps: BDependencies): Promise<DiscoverResult> {
   });
 
   // 4. 解析 LLM 輸出
-  let parsed: LlmSignalResponse;
+  let parsed: unknown;
   try {
-    parsed = JSON.parse(llmResult.content) as LlmSignalResponse;
+    parsed = JSON.parse(llmResult.content);
   } catch (err) {
     throw new Error(
       `LLM did not return valid JSON: ${err instanceof Error ? err.message : err}. Content first 300 chars: ${llmResult.content.slice(0, 300)}`,
     );
   }
 
-  if (!parsed.signals || !Array.isArray(parsed.signals)) {
+  // 防呆:LLM 可能回 null / 非 object / 缺 signals key(Kilo PR #6 review SUGGESTION)
+  if (parsed === null || typeof parsed !== "object") {
+    throw new Error(
+      `LLM JSON root is not an object. Content first 300 chars: ${llmResult.content.slice(0, 300)}`,
+    );
+  }
+  const signalsField = (parsed as Record<string, unknown>).signals;
+  if (!Array.isArray(signalsField)) {
     throw new Error(
       `LLM JSON missing 'signals' array. Content first 300 chars: ${llmResult.content.slice(0, 300)}`,
     );
@@ -155,24 +232,37 @@ export async function discover(deps: BDependencies): Promise<DiscoverResult> {
 
   // 5. 存進 signals 表
   let newSignals = 0;
-  for (const candidate of parsed.signals) {
+  for (const candidate of signalsField) {
+    // 個別 candidate 也驗證:LLM 可能回缺欄位 / 型別錯 / importance 超出 1-5
+    // 不驗的話這些壞資料會變成 insertSignal 失敗,被下方 catch 吞掉,
+    // 無法區分「LLM 給的壞資料」vs「DB 真的出問題」(Kilo PR #6 review CRITICAL + WARNING)
+    const validation = validateCandidate(candidate);
+    if (!validation.ok) {
+      console.error(
+        `[B] skipping invalid candidate: ${validation.error}`,
+        candidate,
+      );
+      continue;
+    }
+    const valid = validation.value;
+
     try {
       // 過濾掉 LLM 瞎編的 source_item_ids(只保留我們拿到的 items 的 ids)
-      const validItemIds = candidate.source_item_ids.filter((id) =>
+      const validItemIds = valid.source_item_ids.filter((id) =>
         knownIds.has(id),
       );
 
       await deps.insertSignal({
-        title: candidate.title,
-        description: candidate.description,
-        importance: candidate.importance,
-        tags: candidate.tags,
+        title: valid.title,
+        description: valid.description,
+        importance: valid.importance,
+        tags: valid.tags,
         source_items: validItemIds,
       });
       newSignals++;
     } catch (err) {
       console.error(
-        `[B] failed to insert signal "${candidate.title}":`,
+        `[B] failed to insert signal "${valid.title}":`,
         err,
       );
       // 一個失敗不失敗整個 run,繼續處理下一個
