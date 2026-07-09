@@ -15,8 +15,10 @@ import {
 import type { Signal } from "../lib/types.ts";
 import { join, dirname } from "node:path";
 import { mkdir, writeFile, readFile } from "node:fs/promises";
+import { createLogger } from "../lib/logger.ts";
 
 const HINDSIGHT_BANK_ID = "alpha-lab";
+const dLog = createLogger("D");
 const DEFAULT_BANK_MISSION =
   "Investor signal research — shared observations across agent runs.";
 const REPORTS_DIR = "drafts/reports";
@@ -220,7 +222,9 @@ export async function generateReport(
       b.created_at.getTime() - a.created_at.getTime()
     )
     .slice(0, MAX_SIGNALS_FOR_RECALL);
-  console.log(`[D] ${type} report — top ${signals.length} signals by importance`);
+  dLog
+    .withMetadata({ type, signal_count: signals.length })
+    .info("report start");
 
   // 2. Hindsight bank 确保存在(D 可能比 C 先跑,bank 不存在会让 recall 全失败)
   //    Kilo PR #8 WARNING:之前完全没 ensureBank
@@ -246,7 +250,9 @@ export async function generateReport(
       }
     }
   }
-  console.log(`[D] recalled ${allObservations.length} unique observations across signals`);
+  dLog
+    .withMetadata({ count: allObservations.length })
+    .info("recalled observations");
 
   // 4. 取今天 pre-market report(产 post part 才需要)
   let preMarketReport: string | null = null;
@@ -278,7 +284,9 @@ export async function generateReport(
   }
   const path = reportPath(type, now);
   await deps.writeReport(path, content);
-  console.log(`[D] ${type} report written to ${path} (${content.length} chars)`);
+  dLog
+    .withMetadata({ type, path, chars: content.length })
+    .info("report written");
 
   return {
     type,
@@ -339,7 +347,9 @@ async function getDefaultDeps(): Promise<DDependencies> {
             name: "Alpha Lab",
             mission: DEFAULT_BANK_MISSION,
           });
-          console.log(`[D] created Hindsight bank "${HINDSIGHT_BANK_ID}"`);
+          dLog
+            .withMetadata({ bank_id: HINDSIGHT_BANK_ID })
+            .info("created Hindsight bank");
         } else {
           throw err;
         }
@@ -357,23 +367,27 @@ async function main(args: string[]): Promise<void> {
     else if (arg === "--type=post") type = "post";
   }
   if (type === null) {
-    console.error("Usage: bun run d.ts --type=pre");
-    console.error("       bun run d.ts --type=post");
+    dLog.error("Usage: bun run d.ts --type=pre");
+    dLog.error("       bun run d.ts --type=post");
     process.exit(1);
   }
 
   const deps = await getDefaultDeps();
   const result = await generateReport(type, deps);
-  console.log(
-    `[D] final: ${result.type} report at ${result.reportPath} (${result.reportLength} chars)`,
-  );
+  dLog
+    .withMetadata({
+      type: result.type,
+      path: result.reportPath,
+      chars: result.reportLength,
+    })
+    .info("final");
   process.exit(0);
 }
 
 // 只在直接执行(bun run d.ts)时跑 main,被 import 时不跑
 if (import.meta.main) {
   main(process.argv.slice(2)).catch((err) => {
-    console.error("[D] failed:", err);
+    dLog.withError(err).error("failed");
     process.exit(1);
   });
 }

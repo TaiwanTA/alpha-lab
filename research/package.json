@@ -12,5 +12,10 @@
   "devDependencies": {
     "@types/bun": "latest",
     "typescript": "^5.7.0"
+  },
+  "dependencies": {
+    "@loglayer/transport-log-file-rotation": "^3.2.0",
+    "loglayer": "^9.3.0",
+    "serialize-error": "^13.0.1"
   }
 }

@@ -7,8 +7,10 @@
 import { sql } from "bun";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { createLogger } from "./logger.ts";
 
 const MIGRATION_PATTERN = /^(\d+)_(.+)\.sql$/;
+const log = createLogger("migrator");
 
 export async function runMigrations(
   migrationsDir: string,
@@ -37,7 +39,7 @@ export async function runMigrations(
   for (const f of files) {
     const match = f.match(MIGRATION_PATTERN);
     if (!match) {
-      console.warn(`[migrator] skip ${f} (does not match naming convention)`);
+      log.withMetadata({ file: f, reason: "naming convention" }).warn("skip migration file");
       continue;
     }
     const version = parseInt(match[1]!, 10);
@@ -49,7 +51,7 @@ export async function runMigrations(
     }
 
     const content = readFileSync(join(migrationsDir, f), "utf-8");
-    console.log(`[migrator] applying ${version}_${name}`);
+    log.withMetadata({ version, name }).info("applying migration");
     // 用 unsafe 跑整個 .sql 檔(裡面可能有多個 statement)
     await sql.unsafe(content);
     await sql`INSERT INTO schema_migrations (version, name) VALUES (${version}, ${name})`;
