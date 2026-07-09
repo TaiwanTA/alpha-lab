@@ -282,4 +282,15 @@ describe("signals", () => {
       updateSignal(inserted.id, { importance: NaN }),
     ).rejects.toThrow(/importance/);
   });
+
+  test("updateSignal stores tags with special chars (backslash, quote, brace)", async () => {
+    const inserted = await insertSignal({ title: "T", description: "d" });
+    const trickyTags = [`has"quote`, `back\\slash`, `has{brace}`];
+    await updateSignal(inserted.id, { tags: trickyTags });
+    const got = await getSignalById(inserted.id);
+    expect(got!.tags).toHaveLength(3);
+    expect(got!.tags).toContain(`has"quote`);
+    expect(got!.tags).toContain(`back\\slash`);
+    expect(got!.tags).toContain(`has{brace}`);
+  });
 });

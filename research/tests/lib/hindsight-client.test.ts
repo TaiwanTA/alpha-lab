@@ -357,6 +357,18 @@ describe("HindsightClient.health body validation", () => {
     const client = new HindsightClient("http://test:8888");
     expect(await client.health()).toBe(false);
   });
+
+  test("health passes AbortSignal to fetch (timeout capable)", async () => {
+    let receivedOpts: any;
+    fetchMock = (_url: string, opts: any) => {
+      receivedOpts = opts;
+      return Promise.resolve(new Response("ok", { status: 200 }));
+    };
+    globalThis.fetch = fetchMock;
+    const client = new HindsightClient("http://test:8888");
+    expect(await client.health()).toBe(true);
+    expect(receivedOpts.signal).toBeInstanceOf(AbortSignal);
+  });
 });
 
 describe("HindsightClient request retry", () => {

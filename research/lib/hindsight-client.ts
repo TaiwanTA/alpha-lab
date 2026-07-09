@@ -4,6 +4,9 @@
 //   - 如果 future 需要更多 endpoint,再考虑换 SDK
 
 const DEFAULT_BASE_URL = "http://localhost:8888";
+const REQUEST_TIMEOUT_MS = 30_000; // 用於 request() 的 AbortController
+const HEALTH_TIMEOUT_MS = 5_000;    // health() 用較短 timeout,失敗快速 fallback
+const MAX_ATTEMPTS = 3;
 
 export class HindsightError extends Error {
   constructor(
@@ -71,7 +74,14 @@ export class HindsightClient {
 
   async health(): Promise<boolean> {
     try {
-      const res = await fetch(`${this.baseUrl}/health`);
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), HEALTH_TIMEOUT_MS);
+      let res: Response;
+      try {
+        res = await fetch(`${this.baseUrl}/health`, { signal: controller.signal });
+      } finally {
+        clearTimeout(timeout);
+      }
       if (!res.ok) return false;
       const text = await res.text();
       // Hindsight 的 /health 通常回 "ok" 或 JSON,不空就視為 healthy
@@ -172,11 +182,10 @@ export class HindsightClient {
     body?: unknown,
   ): Promise<Response> {
     let attempt = 0;
-    const maxAttempts = 3;
 
-    while (attempt < maxAttempts) {
+    while (attempt < MAX_ATTEMPTS) {
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 30_000);
+      const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
       try {
         const headers: Record<string, string> = {};
         if (body !== undefined && body !== null) {
@@ -193,7 +202,9 @@ export class HindsightClient {
         clearTimeout(timeout);
 
         if (res.status === 429 || res.status >= 500) {
-          const waitMs = attempt >= maxAttempts - 1
+          // Drain body 防止 connection leak(Kilo PR #5 review suggestion)
+          await res.body?.cancel().catch(() => {});
+          const waitMs = attempt >= MAX_ATTEMPTS - 1
             ? 0
             : 1000 * Math.pow(2, attempt);
           await sleep(waitMs);
@@ -211,14 +222,14 @@ export class HindsightClient {
         clearTimeout(timeout);
         // 網路錯誤或 abort 也 retry
         if (err instanceof HindsightError) throw err;
-        if (attempt >= maxAttempts - 1) throw err;
+        if (attempt >= MAX_ATTEMPTS - 1) throw err;
         const waitMs = 1000 * Math.pow(2, attempt);
         await sleep(waitMs);
         attempt++;
       }
     }
 
-    throw new Error(`Hindsight request failed after ${maxAttempts} attempts: ${path}`);
+    throw new Error(`Hindsight request failed after ${MAX_ATTEMPTS} attempts: ${path}`);
   }
 }
 

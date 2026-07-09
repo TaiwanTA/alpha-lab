@@ -182,19 +182,30 @@ export async function updateSignal(
   );
 }
 
+
+function escapeSqlString(s: string): string {
+  return s.replace(/'/g, "''");
+}
+
+// Postgres array literal: {"a","b"} (元素包雙引號)
+// 嚴格 escape 順序: 先 backslash → 再雙引號 → 再大括號(這三個是 PG array literal
+// 保留字元,若不 escape 會破壞 literal 結構 — Gemini 在 PR #5 review 標 critical)
+function pgArrayLiteral(arr: string[]): string {
+  return `{${arr
+    .map((t) =>
+      `"${t
+        .replace(/\\/g, "\\\\")
+        .replace(/"/g, '\\"')
+        .replace(/\{/g, "\\{")
+        .replace(/\}/g, "\\}")}"`,
+    )
+    .join(",")}}`;
+}
+
 const VALID_STATUSES = ["discovered", "tracking", "matured", "faded", "invalid"] as const;
 
 function validateSignalStatus(status: string): asserts status is SignalStatus {
   if (!VALID_STATUSES.includes(status as any)) {
     throw new Error(`Invalid signal status: ${status}. Must be one of: ${VALID_STATUSES.join(", ")}`);
   }
-}
-
-function escapeSqlString(s: string): string {
-  return s.replace(/'/g, "''");
-}
-
-function pgArrayLiteral(arr: string[]): string {
-  // Postgres array literal:{"a","b"}  — 元素內的雙引號要 escape
-  return `{${arr.map((t) => `"${t.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`).join(",")}}`;
 }
