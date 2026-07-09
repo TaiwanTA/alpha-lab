@@ -6,7 +6,7 @@
 ## 已達成決定
 - 資料儲存:Postgres(在 Docker),`items` 表統一儲存所有來源
 - Schema:`items(source_type, source_label, external_id, external_parent, created_at, fetched_at, context)`
-- 排程:Dagu(之後加,Phase 3)
+- 排程:Vercel Workflow(`use workflow`,用 Postgres World)+ systemd timer 做 cron 觸發(之後加,Phase 3)
 - Raw 儲存:JSONL 檔案,`raw/<source_type>/<source_label>/<YYYY-MM>/<YYYY-MM-DD>.jsonl`
 - 投資人清單延後到 Phase 4
 
@@ -62,7 +62,7 @@ bun run typecheck
 3. 在 `sources.json` 加 config
 
 ## 為什麼用這些工具
-- **Dagu(Phase 3)** — 不用 crontab 是因為要 retry/depends/UI;不用 Airflow 是因為它要 DB + Python runtime,單 VM 過重
+- **Vercel Workflow(Phase 3)** — 不是 orchestrator,是 in-process TS SDK;比 Dagu(YAML + 外部 binary)更合我們 Bun + TS stack;Postgres World 可共用 alpha-lab 的 Postgres instance;cron 觸發用 systemd timer,夠用
 - **自寫 migrator** — `Bun.sql` 直接 raw SQL 的哲學下,drizzle/prisma/kysely 會引入 ORM 概念衝突
 - **`source_label` per-item** — 同一個 source 拉回來的 items 中,parent tweet 屬於原作者,`@elonmusk` 的 tweet 進我們 DB 的 `source_label` 是 `@elonmusk`,不是監控對象的 label
 
@@ -80,8 +80,8 @@ bun run typecheck
 
 ## 不做的事
 - LLM 分析(留給外部 agent)
-- 排程(Phase 3 會用 Dagu 包)
-- 自動 retry 整個 pipeline(用 Dagu 的 retry 機制)
+- 排程(Phase 3 會用 Vercel Workflow 包,systemd timer 觸發)
+- 自動 retry 整個 pipeline(用 Workflow 的 retry 機制)
 - migration 的 down(不做,見上方決策)
 
 ## 後續規劃
