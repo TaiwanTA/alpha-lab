@@ -227,6 +227,13 @@ describe("signals", () => {
     expect(got!.updated_at.getTime()).toBeGreaterThan(originalUpdatedAt.getTime());
   });
 
+  test("updateSignalStatus rejects invalid status", async () => {
+    const inserted = await insertSignal({ title: "S2", description: "d" });
+    await expect(
+      updateSignalStatus(inserted.id, "nonexistent" as any),
+    ).rejects.toThrow(/Invalid signal status/);
+  });
+
   test("updateSignal changes arbitrary fields", async () => {
     const inserted = await insertSignal({ title: "Old", description: "old desc", importance: 2 });
     await updateSignal(inserted.id, { title: "New", importance: 5 });

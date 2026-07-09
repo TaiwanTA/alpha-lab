@@ -121,6 +121,7 @@ export async function updateSignalStatus(
   id: string,
   status: string,
 ): Promise<void> {
+  validateSignalStatus(status);
   await sql`
     UPDATE signals
     SET status = ${status}, updated_at = now()
