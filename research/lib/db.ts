@@ -187,9 +187,12 @@ export async function updateSignalStatus(
   id: string,
   status: SignalStatus,
 ): Promise<void> {
-  await sql`
+  const result = await sql`
     UPDATE signals
     SET status = ${status}, updated_at = now()
     WHERE id = ${id}
   `;
+  if (result.count === 0) {
+    console.warn(`updateSignalStatus: no signal with id ${id}`);
+  }
 }
