@@ -1,0 +1,15 @@
+# alpha-lab B workflow trigger timer — 每小時一次
+# OnCalendar=`*-*-* *:00:00` 對應 hourly sharp
+#
+# spec 沒有為 C 開 timer — C 由 B workflow 跑完後自動對每個新 signal 起 run
+
+[Unit]
+Description=alpha-lab B workflow trigger timer (every hour)
+
+[Timer]
+OnCalendar=*-*-* *:00:00
+Persistent=true
+Unit=alpha-lab-b.service
+
+[Install]
+WantedBy=timers.target

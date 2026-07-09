@@ -27,19 +27,109 @@
 ### 入口
 - `pull.ts` — 主程式:讀 `sources.json`,跑各個 source 的 pull
 - `migrate.ts` — 跑 DB migrations
+- `workflow-server.ts` — Vercel Workflow HTTP server(Bun.serve + workflow runtime)
+  - listen on `WORKFLOW_SERVER_PORT`(預設 8090),expose `POST /a /b /c/:signalId /d/:type` + `GET /run/:runId` + `GET /health`
+  - 後台 `getWorld().start?.()` 起 graphile-worker listener
+  - Bun plugin 做 client mode SWC transform(`bunfig.toml` preload `scripts/workflow-plugin.ts`)
+- `scripts/workflow-build.mjs` — Node 跑 SDK `StandaloneBuilder`,產出 `.well-known/workflow/v1/{flow,step,webhook}.js`(順便補 `module.exports.default`)
+- `scripts/workflow-plugin.ts` — Bun plugin,給含 `"use workflow"` / `"use step"` directives 的 .ts/.tsx 檔加 `.workflowId` / `.stepId`
+
+### Workflow source(durable workflow + step 函式)
+- `workflow/a.ts` — `aWorkflow()` (run X pull,inline 自 `pull.ts` 業務邏輯不 import pull)
+- `workflow/b.ts` — `bWorkflow()` orchestrate `discoverStep()` + 對每個新 signal 自動 trigger `cWorkflow`(回傳 `newSignalIds`)
+- `workflow/c.ts` — `cWorkflow(signalId)`,內部 step `researchStep(signalId)` 跑 research + retain + 寫 report
+- `workflow/d.ts` — `dWorkflow(type: "pre" | "post")`,內部 step `generateReportStep(type)` 跑 report generation
+
+> 為什麼 workflow/*.ts 業務邏輯是 inline 而非 import agent/*:
+> workflow SDK 的 `workflow-node-module-error` esbuild plugin 在 step.js bundle 內會 trace `lib/logger.ts`(透過 `lib/x-client.ts` 等)看到 `node:fs` / `node:os` / `node:path` 就報"not allowed in workflow function"。agent/* 都 module-level `const log = createLogger(...)` 拉 logger,→ workflow bundle 報錯。spec 範例的 import 模式理論上應該 work,但實際不可行,所以 `workflow/*.ts` 把 discover / research / generateReport 業務邏輯完整 inline,並用 `console.log` 替代 logger module-level side effect。
+> agent/* CLI path 仍然 100% work(`bun run b.ts` etc. 仍走原本 import logger 邏輯),沒有變動。
 
 ### 結構
-- `lib/types.ts` — 共用型別(`RawItem`、`FetchState`、`SourceConfig`)
+- `lib/types.ts` — 共用型別(`RawItem`、`FetchState`、`SourceConfig`、`Signal`、`ItemRow`、`NewSignal`、`SignalStatus`)
 - `lib/source-adapter.ts` — `SourceAdapter` 介面
 - `lib/x-client.ts` — X API v2 client(含 429 / 5xx retry)
 - `lib/raw-writer.ts` — JSONL append writer
-- `lib/db.ts` — Postgres 操作
+- `lib/db.ts` — Postgres 操作(含 `insertSignal` returns `Signal`,供 B 拿 id)
+- `lib/hindsight-client.ts` — Hindsight REST API client(C / D agent 用)
 - `lib/migrator.ts` — migration runner
 - `lib/config.ts` — 讀 `sources.json`
 - `lib/logger.ts` — loglayer singleton + 檔案輪替(daily/YMD/50M/14d)
 - `lib/adapters/x-user-timeline.ts` — X user timeline adapter
-- `migrations/001_*.sql` — schema migrations(append-only,no down)
-- `tests/` — 4 個 test 檔(用 `bun test` 跑)
+- `agent/lib/llm.ts` — LLM(OpenRouter)呼叫 wrapper
+- `agent/lib/types.ts` — LLM 共用型別
+- `agent/b.ts` — B agent(訊號發現):`discover(deps)`
+- `agent/c.ts` — C agent(per-signal 研究):`research(signalId, deps)`
+- `agent/d.ts` — D agent(盤前/盤後報告):`generateReport(type, deps)`
+- `migrations/*.sql` — schema migrations(append-only,no down)
+- `tests/` — bun test 跑的測試(`tests/agent/`,`tests/lib/`,`tests/workflow/`)
+
+### 環境變數(在 `.env`)
+- `DATABASE_URL` — Postgres 連線字串
+- `WORKFLOW_POSTGRES_URL` — workflow runtime 用的 Postgres(`@workflow/world-postgres` 也走同一個 DB;務必跟 `DATABASE_URL` 同值)
+- `X_BEARER_TOKEN` — X API bearer token
+- `RAW_ROOT` — raw 檔案根目錄(預設 `../raw`)
+- `SOURCES_PATH` — sources.json 路徑(預設 `./sources.json`)
+- `LOG_DIR` — log 檔根目錄(預設 `./logs`,啟動時 mkdir -p)
+- `LOG_CONSOLE` — `"false"` 時關閉 console transport,只寫檔(預設 `true`)
+- `WORKFLOW_SERVER_PORT` — workflow HTTP server listen port(預設 `8090`)
+- `WORKFLOW_LOCAL_BASE_URL` — workflow SDK background worker call back 給 server 的 base URL(預設 `http://127.0.0.1:8090`)
+- `WORKFLOW_TARGET_WORLD` — world target(固定 `"@workflow/world-postgres"`)
+- `HINDSIGHT_BASE_URL` — Hindsight container URL(VM 上跑)
+- `LLM_*` — LLM provider config(API key、model、base URL)
+
+### 跑流程
+```bash
+docker compose up -d
+bun run migrate
+cp .env.example .env   # 編輯填值,chmod 600
+bun run pull
+bun test
+bun run typecheck
+
+# ---- workflow ----
+# 一次性:建 workflow schema(跟 alpha-lab schema 分開,
+# Postgres world 自己管):在 .env 設定 WORKFLOW_POSTGRES_URL 後跑
+bun run workflow:setup        # = bunx --package=@workflow/world-postgres bootstrap
+
+# build workflow/{a,b,c,d}.ts → .well-known/workflow/v1/{flow,step,webhook}.js
+# (server 啟動前必跑,否則 step / flow route 404)
+bun run workflow:build      # = node scripts/workflow-build.mjs
+
+# 起 server(bunfig.toml 自動載 scripts/workflow-plugin.ts 給含 "use workflow" 的 .ts 加 workflowId)
+bun run workflow-server      # = bun run workflow-server.ts
+
+# 觸發 workflow 跑(bash):
+curl -X POST http://127.0.0.1:8090/a     # A — pull 一次 X timeline
+curl -X POST http://127.0.0.1:8090/b     # B — 訊號發現(自動 trigger C per new signal)
+curl -X POST http://127.0.0.1:8090/d/pre # D — 盤前報告
+curl -X POST http://127.0.0.1:8090/d/post # D — 盤後報告
+curl -X POST http://127.0.0.1:8090/c/<signal-uuid>  # C — 單 signal 研究(通常不手動)
+curl http://127.0.0.1:8090/run/<runId>   # 查 workflow run 狀態
+```
+
+### Deploy(VM 上 systemd 接管排程)
+```bash
+# 一次性:複製 unit 檔,啟 service + timers
+sudo cp deploy/systemd/alpha-lab-*.service deploy/systemd/alpha-lab-*.timer \
+        /etc/systemd/system/
+
+sudo systemctl daemon-reload
+sudo systemctl enable --now alpha-lab-workflow.service  # long-running HTTP server
+sudo systemctl enable --now alpha-lab-a.timer             # 6h
+sudo systemctl enable --now alpha-lab-b.timer             # 1h
+sudo systemctl enable --now alpha-lab-d-pre.timer         # Mon-Fri 09:00 ET
+sudo systemctl enable --now alpha-lab-d-post.timer        # Mon-Fri 16:30 ET
+
+# 驗證
+sudo systemctl status alpha-lab-workflow.service
+journalctl -u alpha-lab-workflow -f        # 看 server stdout / stderr
+systemctl list-timers alpha-lab-*           # 確認 4 個 timer 都 next-time 排好
+```
+
+### 新增資料來源
+1. 在 `lib/adapters/` 新增 `<source>.ts`,實作 `SourceAdapter` 介面
+2. 在 `pull.ts` 的 `ADAPTERS` map 註冊
+3. 在 `sources.json` 加 config
 
 ### 環境變數(在 `.env`)
 - `DATABASE_URL` — Postgres 連線字串

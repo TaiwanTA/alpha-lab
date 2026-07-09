@@ -1,0 +1,21 @@
+# Bun config — 載 workflow SWC client-mode transform plugin
+#
+# workflow-plugin.ts 對含 "use workflow" / "use step" directives 的 .ts 檔做
+# client mode transform(透過 @workflow/swc-plugin WASM binary)。
+#
+# 為什麼需要 plugin:Vercel Workflow SDK 仰賴 function-level metadata(如
+# `workflowFn.workflowId`),在 production 環境是 build pipeline (SWC + esbuild)
+# 加上去的。Bun 內建 SWC 不支援外部 WASM SWC plugins,所以我們用 Bun plugin API 在
+# file load 時 transform,讓 `start(myWorkflow)` 能正確找到 workflowId。
+#
+# 兩段 preload:
+#   - top-level `preload` 對 `bun <script>` 與 `bun run` 都生效
+#   - `[test] preload` 對 `bun test` 生效(Bun 兩個 context 獨立載入 configs)
+#   plugin 在 test 環境也該跑,讓 tests/workflow/*.test.ts 能 assert
+#   workflowId 已由 client mode plugin 加上去。
+
+preload = ["./scripts/workflow-plugin.ts"]
+
+[test]
+preload = ["./scripts/workflow-plugin.ts"]
+

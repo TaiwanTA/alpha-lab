@@ -1,0 +1,21 @@
+# alpha-lab A workflow trigger — 每 6 小時跑一次 X timeline pull
+#
+# OnCalendar=`*-*-* 00/6:00:00` 對應 00:00 / 06:00 / 12:00 / 18:00 UTC
+# (timer 用 server 本地 time,在 VM 用 UTC,實際盤面 cross midnight 的話要
+# 改成 Timezone=America/New_York 跟 hour spec — spec 沒指定 A 的 timezone,
+# 這裡沿用 server 本地。)
+
+[Unit]
+Description=alpha-lab trigger A workflow (X pull, every 6h)
+After=network-online.target alpha-lab-workflow.service
+
+[Service]
+Type=oneshot
+User=alpha
+WorkingDirectory=/opt/alpha-lab/research
+EnvironmentFile=/opt/alpha-lab/research/.env
+ExecStart=/usr/bin/curl -sS -X POST -H 'Content-Type: application/json' --max-time 30 http://127.0.0.1:8090/a
+# 失敗有訊息但不要 retry(workflow server 自己有 retry/requeue)
+
+[Install]
+WantedBy=timers.target

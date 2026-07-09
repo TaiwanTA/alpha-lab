@@ -68,7 +68,7 @@ export interface BDependencies {
     importance: 1 | 2 | 3 | 4 | 5;
     tags: string[];
     source_items: string[];
-  }) => Promise<unknown>;
+  }) => Promise<Pick<Signal, "id">>;
   markItemsProcessed: (sourceType: string, externalIds: string[]) => Promise<void>;
   ask: (prompt: string, options?: {
     system?: string;
@@ -83,6 +83,8 @@ export interface BDependencies {
 export interface DiscoverResult {
   itemsProcessed: number;
   newSignals: number;
+  // 新建 signal 的 UUID 列表。workflow 用來 trigger C workflow;CLI 路徑不需要
+  newSignalIds: string[];
 }
 
 function buildUserPrompt(
@@ -204,7 +206,7 @@ export async function discover(deps: BDependencies): Promise<DiscoverResult> {
   const items = await deps.getUnprocessedItems(MAX_ITEMS_PER_RUN);
   if (items.length === 0) {
     bLog.info("no unprocessed items");
-    return { itemsProcessed: 0, newSignals: 0 };
+    return { itemsProcessed: 0, newSignals: 0, newSignalIds: [] };
   }
 
   // 2. 拿 active signals(避免重複建)
@@ -250,6 +252,7 @@ export async function discover(deps: BDependencies): Promise<DiscoverResult> {
 
   // 5. 存進 signals 表
   let newSignals = 0;
+  const newSignalIds: string[] = [];
   for (const candidate of signalsField) {
     // 個別 candidate 也驗證:LLM 可能回缺欄位 / 型別錯 / importance 超出 1-5
     // 不驗的話這些壞資料會變成 insertSignal 失敗,被下方 catch 吞掉,
@@ -278,7 +281,8 @@ export async function discover(deps: BDependencies): Promise<DiscoverResult> {
         continue;
       }
 
-      await deps.insertSignal({
+      // insertSignal 回傳新建 signal 的 id(workflow 用來 trigger C per-signal)
+      const created = await deps.insertSignal({
         title: valid.title,
         description: valid.description,
         importance: valid.importance,
@@ -286,6 +290,9 @@ export async function discover(deps: BDependencies): Promise<DiscoverResult> {
         source_items: validItemIds,
       });
       newSignals++;
+      if (created && typeof created.id === "string" && created.id.length > 0) {
+        newSignalIds.push(created.id);
+      }
     } catch (err) {
       bLog
         .withMetadata({ title: valid.title })
@@ -310,11 +317,11 @@ export async function discover(deps: BDependencies): Promise<DiscoverResult> {
   bLog
     .withMetadata({ items_processed: items.length, new_signals: newSignals })
     .info("done");
-  return { itemsProcessed: items.length, newSignals };
+  return { itemsProcessed: items.length, newSignals, newSignalIds };
 }
 
 // 預設 deps:CLI 用真 DB + LLM
-function getDefaultDeps(): BDependencies {
+export function getDefaultDeps(): BDependencies {
   return {
     getUnprocessedItems,
     getActiveSignals,

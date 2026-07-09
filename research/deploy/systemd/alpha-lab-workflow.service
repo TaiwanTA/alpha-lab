@@ -1,0 +1,44 @@
+# alpha-lab workflow server 服務(長跑 background)
+#
+# 跑 `bun run workflow-server.ts`,在 background 持續 listen on
+# WORKFLOW_SERVER_PORT(default 8090)。systemd timer (alpha-lab-a.timer,
+# -b.timer, -d-pre.timer, -d-post.timer) 透過 curl 打到這個 service 內
+# 對應的 /a /b /d/pre /d/post routes,以 trigger A/B/C/D workflow runs。
+#
+# 不依賴 systemd cron — 用 systemd timer 是 spec 決定(更可靠 + log 整合)
+#
+# Bun 路徑:不寫死某個 install 路徑(/home/alpha/.local/share/mise/... 太脆),
+# 走 alpha user 的 PATH 即可,讓 mise / 直接裝的 bun 都能被找到。
+# 若 alpha user 沒裝 bun,執行前先 `mise install bun@latest` + `mise use -g bun@latest`。
+
+[Unit]
+Description=alpha-lab Vercel Workflow runtime
+After=network-online.target docker.service
+Wants=network-online.target
+# 需要 Postgres 跑起來(alpha-lab-postgres container 通常由 docker-compose up 帶起)
+After=docker.service
+
+[Service]
+Type=simple
+User=alpha
+WorkingDirectory=/opt/alpha-lab/research
+EnvironmentFile=/opt/alpha-lab/research/.env
+# Bun 路徑走 alpha user 的 PATH,mise / 直接裝的 bun 都不寫死路徑
+# (alpha user 預設 PATH 應該含 ~/.bun/bin 或 mise shims)
+Environment="PATH=/home/alpha/.bun/bin:/home/alpha/.local/share/mise/shims:/usr/local/bin:/usr/bin:/bin"
+ExecStart=bun run workflow-server.ts
+Restart=on-failure
+RestartSec=10
+
+# 讓 stdout 也寫 journal(就算 LOG_CONSOLE=false)
+StandardOutput=journal
+StandardError=journal
+
+# 安全限制
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

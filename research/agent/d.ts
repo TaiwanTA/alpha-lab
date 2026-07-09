@@ -300,7 +300,7 @@ function reportPath(type: ReportType, date: Date): string {
 }
 
 // 默认 deps
-async function getDefaultDeps(): Promise<DDependencies> {
+export async function getDefaultDeps(): Promise<DDependencies> {
   const { initDb, getActiveSignals, getSignalsByStatus } = await import("../lib/db.ts");
   await initDb();
   const hindsight = new HindsightClient(
