@@ -144,14 +144,23 @@ function stripInlineMarkdown(s: string): string {
 // 簡單 truncate:邊界在空白 + 加 …(避免截在單字中間)
 // 中文容錯:若截斷點前一個 char 不是 ASCII(等機空白分隔),直接切(中文本就無空格分隔,
 // 強回溯會一路回溯到 ASCII 才停在中文段最前,幾乎截空)(Kilo PR #11 Gemini high priority)
+//
+// iter 2 fix(Kilo PR #11):前版只在「段內無任何空白」才直切,但中文混早期 ASCII 空白
+// 仍會回溯到最早空白(幾乎截光中文內容)。改折衷:回溯找不到最近空白時,允許在段內從
+// maxChars 往左找最近空白,但若最近空白位置距 maxChars > maxChars/2(即目標 trim 後
+// 不到一半長),直接切 maxChars 邊界 — 寧可切稍長也不要截到只剩三分之一。
 function truncate(s: string, maxChars: number): string {
   if (s.length <= maxChars) return s;
   let cutAt = maxChars - 1;
-  // 只有當 maxChars 段內有 ASCII 空白時才回溯 (避免中文全無空白時 cutAt=0)
-  if (s.slice(0, maxChars).includes(" ")) {
+  const windowHasSpace = s.slice(0, maxChars).includes(" ");
+  if (windowHasSpace) {
+    // 回溯找最近空白
     while (cutAt > 0 && s[cutAt] !== " ") cutAt--;
+    // 若最近空白位置太早(切出來不到 maxChars 一半),直切 maxChars 邊界寧長不過短
+    if (cutAt < maxChars / 2) {
+      cutAt = maxChars - 1;
+    }
   } else {
-    // 段內無空白(純中文 / 純中文混 emoji 等),直接切 maxChars 邊界
     cutAt = maxChars - 1;
   }
   const sliced = cutAt > 0 ? s.slice(0, cutAt) : s.slice(0, maxChars - 1);
@@ -376,12 +385,24 @@ function formatFrontmatterValue(value: unknown): string {
 // (Kilo PR #11 CRITICAL:"true"/"false"/"42" 等 YAML 保留字串值需 quoting,
 // 否則 serializeFrontmatter 寫出 `summary: true` 會被 parseFrontmatter
 // 又讀成 boolean,round-trip typing drift)
+//
+// iter 2 fix(Kilo PR #11):加 inf/nan(+Inf/-Inf/NaN,YAML 1.2 規範)、
+// hex/octal/scientific 數字形態也 quoting,避免假數字 round-trip。
 function needsQuoting(s: string): boolean {
   if (s.length === 0) return true;
   if (!/^[A-Za-z0-9_-]+$/.test(s)) return true;
-  // YAML 保留字串 / 數字字串需 quoting
-  if (s === "true" || s === "false" || s === "null" || s === "~") return true;
-  if (/^-?\d+(?:\.\d+)?$/.test(s)) return true;  // 數字字串
+  const lower = s.toLowerCase();
+  // YAML 1.2 boolean/null literals(不分大小寫)
+  if (lower === "true" || lower === "false" || lower === "null" || s === "~") return true;
+  if (lower === "inf" || lower === "-inf" || lower === "nan") return true;
+  // 十進位整數 / 小數
+  if (/^-?\d+(?:\.\d+)?$/.test(s)) return true;
+  // 科學記號 e.g. 1e10 / -2.5E-3
+  if (/^-?\d+(?:\.\d+)?[eE][-+]?\d+$/.test(s)) return true;
+  // 十六進位 0x... / 八進位 0o... / 二進位 0b...(YAML 1.1 支援)
+  if (/^0[xXbBoO][0-9a-fA-F]+$/.test(s)) return true;
+  // 前導 + 號(如 "+5"、"true")— YAML 1.1 視某些為 type tag
+  if (s.startsWith("+")) return true;
   return false;
 }
 

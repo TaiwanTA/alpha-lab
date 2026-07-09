@@ -198,17 +198,32 @@ export async function publish(
       pushed = true;
       log.withMetadata({ branch }).info("pushed");
     } else {
-      log
-        .withMetadata({
-          branch,
-          stderr: pushResult.stderr,
-          stdout: pushResult.stdout,
-        })
-        .warn(
-          "git push failed — local commit preserved. " +
-            `Manually inspect remote and push (e.g. \`git push origin ${branch}\` or ` +
-            `\`git pull --rebase origin ${branch} && git push origin ${branch}\` if remote is ahead).`,
-        );
+      // 區分:spawn fail(git 不在 PATH / SIGKILL)vs 非 0 exit(remote ahead / 認證 / 網路)
+      // (Kilo PR #11 iter 2:訊息分開,給 operator 對的排查方向)
+      const isSpawnFail = pushResult.spawnError !== null && pushResult.spawnError !== undefined;
+      if (isSpawnFail) {
+        log
+          .withMetadata({
+            branch,
+            spawnError: pushResult.spawnError,
+          })
+          .warn(
+            "git push failed to spawn — local commit preserved. " +
+              "Likely `git` binary missing from PATH (install git or fix PATH).",
+          );
+      } else {
+        log
+          .withMetadata({
+            branch,
+            stderr: pushResult.stderr,
+            stdout: pushResult.stdout,
+          })
+          .warn(
+            "git push failed — local commit preserved. " +
+              `Manually inspect remote and push (e.g. \`git push origin ${branch}\` or ` +
+              `\`git pull --rebase origin ${branch} && git push origin ${branch}\` if remote is ahead).`,
+          );
+      }
     }
   }
 
@@ -230,10 +245,15 @@ export async function publish(
 
 // ---- 內部 git helper ----
 
+// 加區分:spawn fail(ENOENT git 不存在 / SIGKILL)vs remote ahead
+// 兩種情況訊息不同(Kilo PR #11 iter 2 + Gemini):
+//   - spawn fail:打出 spawn error 訊息 + 提示「確保 git 在 PATH」
+//   - 非 0 exit:remote ahead / 無權限 / 網路 — 提示用戶手動 inspect
 interface GitResult {
   ok: boolean;
   stdout: string;
   stderr: string;
+  spawnError?: string | null;  // spawn 失敗原因(no binary / SIGKILL 等)
 }
 
 function runGit(
@@ -251,15 +271,17 @@ function runGit(
   // git binary 本身失敗(ENOENT=git 不存在 / SIGKILL=OOM kill 等等)
   // result.status 是 null 而非 0(Kilo PR #11 Gemini medium priority)
   if (result.error) {
+    const msg = result.error.message;
     if (!allowFail) {
       throw new Error(
-        `git ${args.join(" ")} failed to spawn: ${result.error.message}`,
+        `git ${args.join(" ")} failed to spawn: ${msg}`,
       );
     }
     return {
       ok: false,
       stdout: "",
-      stderr: result.error.message,
+      stderr: msg,
+      spawnError: msg,
     };
   }
   const stdout = result.stdout ?? "";
@@ -273,6 +295,7 @@ function runGit(
     ok: result.status === 0,
     stdout: stdout.trim(),
     stderr: stderr.trim(),
+    spawnError: null,
   };
 }
 
