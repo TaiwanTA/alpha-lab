@@ -56,7 +56,10 @@ SSH_CMD="gcloud compute ssh --zone ${ZONE} ${INSTANCE} --project ${PROJECT}"
 SCP_CMD="gcloud compute scp --zone ${ZONE}"
 
 LOCAL_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
-TAR_FILE="/tmp/alpha-lab-deploy-$$.tar.gz"
+# 用 mktemp 而非 ${PID:-$$} 在 /tmp,避免 symlink race condition 攻擊
+TAR_FILE=$(mktemp /tmp/alpha-lab-deploy-XXXXXX.tar.gz)
+# trap 確保腳本 exit 時清掉(成功路徑也 rm,但保險)
+trap 'rm -f "${TAR_FILE}"' EXIT
 
 echo "[1/7] packaging local code → ${TAR_FILE}"
 cd "${LOCAL_ROOT}"
@@ -70,7 +73,6 @@ tar --exclude='research/node_modules' \
     --exclude='research/.test-pg' \
     --exclude='research/.swc' \
     --exclude='research/.wf-bundles' \
-    --exclude='research/bun.lock' \
     --exclude='blog/node_modules' \
     --exclude='blog/dist' \
     --exclude='blog/.astro' \
@@ -117,7 +119,8 @@ if [ -d '${VM_RESEARCH_DIR}.bak.\${TIMESTAMP}/../raw' ] || [ -d '${VM_DEPLOY_DIR
 fi
 
 # 補上 workflow + logging 相關環境變數到 .env(若缺)
-grep -q '^WORKFLOW_POSTGRES_URL=' '${VM_RESEARCH_DIR}/.env' 2>/dev/null || cat >> '${VM_RESEARCH_DIR}/.env' << 'ENVEOF'
+if ! grep -q '^WORKFLOW_POSTGRES_URL=' '${VM_RESEARCH_DIR}/.env' 2>/dev/null; then
+  cat >> '${VM_RESEARCH_DIR}/.env' << 'ENVEOF'
 
 # Vercel Workflow + Logging(自動 append by deploy-vm.sh)
 WORKFLOW_POSTGRES_URL=postgres://alpha:change-me@localhost:5432/alpha_lab
@@ -131,7 +134,8 @@ ENVEOF
 fi
 
 # 從 .env 取 POSTGRES_PASSWORD 填入 WORKFLOW_POSTGRES_URL(避免 change-me 留著)
-DB_PASS=\$(grep '^POSTGRES_PASSWORD=' '${VM_RESEARCH_DIR}/.env' | cut -d= -f2-)
+# grep 沒找到時 exit 1,但 set -e + pipefail 會中斷;改用 || true 容錯
+DB_PASS=\$(grep '^POSTGRES_PASSWORD=' '${VM_RESEARCH_DIR}/.env' | cut -d= -f2- || true)
 if [ -n \"\${DB_PASS}\" ]; then
   sed -i \"s|WORKFLOW_POSTGRES_URL=.*|WORKFLOW_POSTGRES_URL=postgres://alpha:\${DB_PASS}@localhost:5432/alpha_lab|\" '${VM_RESEARCH_DIR}/.env'
 fi
@@ -139,6 +143,9 @@ fi
 # 確保 LOG_DIR 存在
 sudo mkdir -p /var/log/alpha-lab
 sudo chown \${VM_USER}:\${VM_USER} /var/log/alpha-lab
+
+# 確保 ReadWritePaths 內的其他路徑都存在(systemd 不會自動 mkdir)
+mkdir -p '${VM_RESEARCH_DIR}/logs' '${VM_RESEARCH_DIR}/drafts' '${VM_RESEARCH_DIR}/.tmp-bundles'
 
 echo '    VM code synced OK'
 "
@@ -204,7 +211,10 @@ sudo systemctl status alpha-lab-workflow.service --no-pager 2>&1 | head -8
 "
 
 echo "[7/7] 驗證 /health"
+# set +e:curl / SSH 可能因 server 沒起來而 fail,但仍想 echo hint 給 user
+set +e
 HEALTH=$(${SSH_CMD} --command "curl -sS http://127.0.0.1:8090/health 2>&1" 2>&1)
+set -e
 echo "    ${HEALTH}"
 
 if echo "${HEALTH}" | grep -q '"status":"ok"'; then

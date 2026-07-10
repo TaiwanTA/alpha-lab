@@ -44,8 +44,9 @@ NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=read-only
 PrivateTmp=true
-# 需要寫入的路徑(log dir + drafts artifact + workflow build 產物 + tmp bundle)
-# LOG_DIR 預設 /var/log/alpha-lab,drafts/ 在 WorkingDirectory 下
+# 需要寫入的路徑(log dir + drafts artifact + workflow build 暫存)
+# ReadWritePaths 若路徑不存在 systemd 不會 mkdir(只在已有路徑解除 read-only),
+# 所以 deploy-vm.sh 會預先 mkdir -p 這些目錄(見腳本 step 3)
 ReadWritePaths=/var/log/alpha-lab /opt/alpha-lab/research/logs /opt/alpha-lab/research/drafts /opt/alpha-lab/research/.tmp-bundles
 
 [Install]
