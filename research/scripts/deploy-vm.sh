@@ -91,10 +91,18 @@ set -e
 VM_USER=\$(whoami)
 TIMESTAMP=\$(date +%Y%m%d-%H%M%S)
 
-# 備份舊 research(含 .env),只在 research/ 存在時做
+# 備份舊 research(只 cp 必要檔,不 cp node_modules — 省時間 + 省磁碟)。
+# 同時清掉超過 3 個的舊備份(Kilo PR #15:每次 cp -a 整個 research 含 node_modules
+# 很快撐爆 /opt,跑 10 次就 GB 級)
 if [ -d '${VM_RESEARCH_DIR}' ]; then
-  sudo cp -a '${VM_RESEARCH_DIR}' '${VM_RESEARCH_DIR}.bak.\${TIMESTAMP}'
+  sudo rsync -a --exclude='node_modules' --exclude='logs' --exclude='drafts' \
+    --exclude='.well-known' --exclude='.tmp-bundles' --exclude='.test-pg' \
+    '${VM_RESEARCH_DIR}' '${VM_RESEARCH_DIR}.bak.\${TIMESTAMP}' 2>/dev/null || \
+    sudo cp -a '${VM_RESEARCH_DIR}' '${VM_RESEARCH_DIR}.bak.\${TIMESTAMP}'
   echo \"    backed up to ${VM_RESEARCH_DIR}.bak.\${TIMESTAMP}\"
+  # 只保留最近 3 個 .bak,清掉舊的
+  ls -1d ${VM_DEPLOY_DIR}/research.bak.* 2>/dev/null | sort -r | tail -n +4 | xargs -r sudo rm -rf
+  echo '    cleaned old backups(kept latest 3)'
 fi
 
 # 解開新 code(sudo 因為 /opt 通常 root-owned)

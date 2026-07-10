@@ -11,10 +11,10 @@
 # (gcloud VM 預設 user 是 <account>_<domain>,e.g. q267009886_work_gmail_com)
 #
 # 安全限制:
-#   ProtectSystem=strict 讓整個 FS read-only,但 log dir + drafts dir + .well-known
-#   需要寫入。用 ReadWritePaths 白名單放行,比拿掉 ProtectSystem 更安全。
-#   ProtectHome=true 會擋 /home 完全 access;bun binary 通常在 ~/.bun/bin,
-#   所以改成 read-only 讓 binary 可被執行但不能改。
+#   ProtectSystem=strict 讓整個 FS read-only,但 log dir + drafts dir 需要寫入。
+#   用 ReadWritePaths 白名單放行,比拿掉 ProtectSystem 更安全。
+#   .well-known/ 是 workflow:build 產物,只在部署時寫(不是 runtime),不放行。
+#   ProtectHome=read-only 讓 bun binary 在 ~/.bun/bin 可執行但不能改。
 
 [Unit]
 Description=alpha-lab Vercel Workflow runtime
