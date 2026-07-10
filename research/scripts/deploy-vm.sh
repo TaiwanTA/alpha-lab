@@ -90,6 +90,8 @@ echo "[3/7] extract on VM + restore .env + chown"
 # 這樣避免多層 shell escape 的 bug(\$VAR vs \${VAR} vs '\${VAR}' 在不同層
 # 的展開行為差異)
 VM_SETUP_SCRIPT=$(mktemp /tmp/alpha-lab-vm-setup-XXXXXX.sh)
+# 額外 trap 這個 script(主 trap 是 TAR_FILE,VM_SETUP 是後來 mktemp 的)
+trap 'rm -f "${TAR_FILE}" "${VM_SETUP_SCRIPT}"' EXIT
 cat > "${VM_SETUP_SCRIPT}" << 'VMSCRIPT'
 #!/usr/bin/env bash
 set -e
@@ -104,9 +106,11 @@ BAK_DIR="${VM_RESEARCH_DIR}.bak.${TIMESTAMP}"
 # 保保留最近 3 個 .bak,清掉舊的(Kilo PR #15:避免 node_modules 撐爆 /opt)
 if [ -d "${VM_RESEARCH_DIR}" ]; then
   if command -v rsync >/dev/null 2>&1; then
+    # rsync 源路徑尾部加 / → 複製 research/「內容」到 bak/(不是 research/research/);
+    # 不加 / 會變 research/research/ nested。Gemini PR #16 high priority
     sudo rsync -a --exclude='node_modules' --exclude='logs' --exclude='drafts' \
       --exclude='.well-known' --exclude='.tmp-bundles' --exclude='.test-pg' \
-      "${VM_RESEARCH_DIR}" "${BAK_DIR}"
+      "${VM_RESEARCH_DIR}/" "${BAK_DIR}/"
   else
     # 無 rsync:用 tar pipe(避免 cp -a 整個含 node_modules)
     sudo mkdir -p "${BAK_DIR}"
@@ -114,13 +118,8 @@ if [ -d "${VM_RESEARCH_DIR}" ]; then
       --exclude='research/node_modules' --exclude='research/logs' \
       --exclude='research/drafts' --exclude='research/.well-known' \
       --exclude='research/.tmp-bundles' --exclude='research/.test-pg' \
-      research/ | tar -xf - -C '${BAK_DIR}/'"
-    # tar 產生 bak/research/,搬正
-    if [ -d "${BAK_DIR}/research" ]; then
-      sudo mv "${BAK_DIR}/research" "${BAK_DIR}.tmp"
-      sudo rmdir "${BAK_DIR}"
-      sudo mv "${BAK_DIR}.tmp" "${BAK_DIR}"
-    fi
+      research/ | tar -xf - -C '${BAK_DIR}/' --strip-components=1"
+    # --strip-components=1 讓 tar 解開時去掉 research/ 一層,直接放 bak/ 下
   fi
   echo "    backed up to ${BAK_DIR}"
   # 保留最新 3 個 bak,清掉舊的(避免磁碟累積)
@@ -167,7 +166,9 @@ fi
 # grep 沒找到時 exit 1,但 set -e + pipefail 會中斷;用 || true 容錯
 DB_PASS=$(grep '^POSTGRES_PASSWORD=' "${VM_RESEARCH_DIR}/.env" | cut -d= -f2- || true)
 if [ -n "${DB_PASS}" ]; then
-  sed -i "s|WORKFLOW_POSTGRES_URL=.*|WORKFLOW_POSTGRES_URL=postgres://alpha:${DB_PASS}@localhost:5432/alpha_lab|" "${VM_RESEARCH_DIR}/.env"
+  # Kilo PR #16:用 # 作 sed 分隔符(密碼可能含 | / 等字元,# 機率最低)
+  # 但 # 仍是合法 PG password 字元,若密碼含 # 也會壞;改用 perl 確保正確 escape
+  perl -i -pe "s|^WORKFLOW_POSTGRES_URL=.*|WORKFLOW_POSTGRES_URL=postgres://alpha:\${DB_PASS}\@localhost:5432/alpha_lab|" "${VM_RESEARCH_DIR}/.env"
 fi
 
 # 確保 LOG_DIR + ReadWritePaths 都存在
@@ -178,10 +179,11 @@ mkdir -p "${VM_RESEARCH_DIR}/logs" "${VM_RESEARCH_DIR}/drafts" "${VM_RESEARCH_DI
 echo '    VM code synced OK'
 VMSCRIPT
 
-# scp setup script 到 VM,執行,清理
+# scp setup script 到 VM,執行,清理(不管成敗都 rm VM 上 tmp script)
 ${SCP_CMD} "${VM_SETUP_SCRIPT}" "${INSTANCE}:/tmp/alpha-lab-vm-setup.sh" --project "${PROJECT}"
 rm -f "${VM_SETUP_SCRIPT}"
-${SSH_CMD} --command "bash /tmp/alpha-lab-vm-setup.sh && rm /tmp/alpha-lab-vm-setup.sh"
+# trap 仍會保險 rm local file
+${SSH_CMD} --command "bash /tmp/alpha-lab-vm-setup.sh; rm -f /tmp/alpha-lab-vm-setup.sh"
 
 if [ "${SKIP_BUILD}" = "true" ]; then
   echo "[4-7] --skip-build, 跳過 bun install / migrate / build / systemd"

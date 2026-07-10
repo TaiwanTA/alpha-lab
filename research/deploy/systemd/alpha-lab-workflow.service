@@ -31,8 +31,10 @@ WorkingDirectory=/opt/alpha-lab/research
 EnvironmentFile=/opt/alpha-lab/research/.env
 # Bun 路徑:走 user 的 PATH(mise shims / ~/.bun/bin 都 cover)
 Environment="PATH=/home/__PUBLISH_USER__/.bun/bin:/home/__PUBLISH_USER__/.local/share/mise/shims:/usr/local/bin:/usr/bin:/bin"
-# BUN_TMPDIR / BUN_INSTALL:systemd 預設的 private tmp + ProtectHome 可能讓 bun
-# 找不到預設 install cache;明確指定讓 bun 知道 cache + tmp 位置(VM 實測必要)
+# BUN_TMPDIR / BUN_INSTALL:systemd 的預設 tmp namespace 跟 bun install cache
+# 位置可能不一致(VM 實測 bun 1.3.x 報 'Unexpected accessing temporary directory'),
+# 明確指定讓 bun 找到 cache + tmp 位置。即使拿掉 PrivateTmp=true 後,
+# 攔截系統 /tmp 被 override 的情況(systemd service shell context 跟 user login shell 不同)
 Environment="BUN_TMPDIR=/tmp"
 Environment="BUN_INSTALL=/home/__PUBLISH_USER__/.bun"
 ExecStart=bun run workflow-server.ts
