@@ -160,7 +160,7 @@ bun run publish.ts drafts/reports/2026-07-09-pre.md
 bun run publish.ts drafts/reports/2026-07-09-post.md --push
 ```
 
-type → tag 對應(對齊 ADR-001「實體:報告」表):
+type → tag 對應(沿用 ADR-001 「實體:報告」表,內容未改;參見 ADR-002 跟 spec doc Section 3):
 
 | source path | type | tag |
 |---|---|---|
@@ -201,7 +201,7 @@ type → tag 對應(對齊 ADR-001「實體:報告」表):
 - migration 的 down(不做,見上方決策)
 
 ## 後續規劃
-見 `docs/ADR-001-pipeline-redesign.md`。簡版:
+見 [`../docs/ADR-002-v2-dagu-pivot.md`](../docs/ADR-002-v2-dagu-pivot.md)(canonical v2 architecture)跟 [`../docs/specs/2026-07-10-alpha-lab-v2-design.md`](../docs/specs/2026-07-10-alpha-lab-v2-design.md)(spec)。ADR-001 v1 已 git rm(完整歷史於 `git log -p`)。簡版:
 - ✅ A: 推文同步
 - ✅ B: 訊號發現(每 1h,從 items 找市場訊號)
 - ✅ C: 事件追蹤研究(每訊號一個 agent,用 Hindsight 存觀察)
