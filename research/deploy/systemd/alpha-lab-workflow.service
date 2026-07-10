@@ -7,9 +7,14 @@
 #
 # 不依賴 systemd cron — 用 systemd timer 是 spec 決定(更可靠 + log 整合)
 #
-# Bun 路徑:不寫死某個 install 路徑,走 user 的 PATH 即可,讓 mise / 直接裝的 bun 都能被找到。
-# 部署時 PUBLISH_USER 環境變數可覆蓋 default user(VM 上 user 可能不是 alpha,部署時需 patch)
-# gcloud VM 預設 user 是 <account>_<domain>(e.g. q267009886_work_gmail_com)
+# 部署:__PUBLISH_USER__ placeholder 由 deploy-vm.sh sed 替換成實際 VM user
+# (gcloud VM 預設 user 是 <account>_<domain>,e.g. q267009886_work_gmail_com)
+#
+# 安全限制:
+#   ProtectSystem=strict 讓整個 FS read-only,但 log dir + drafts dir 需要寫入。
+#   用 ReadWritePaths 白名單放行,比拿掉 ProtectSystem 更安全。
+#   .well-known/ 是 workflow:build 產物,只在部署時寫(不是 runtime),不放行。
+#   ProtectHome=read-only 讓 bun binary 在 ~/.bun/bin 可執行但不能改。
 
 [Unit]
 Description=alpha-lab Vercel Workflow runtime
@@ -34,11 +39,15 @@ RestartSec=10
 StandardOutput=journal
 StandardError=journal
 
-# 安全限制
+# 安全限制 + 白名單
 NoNewPrivileges=true
 ProtectSystem=strict
-ProtectHome=true
+ProtectHome=read-only
 PrivateTmp=true
+# 需要寫入的路徑(log dir + drafts artifact + workflow build 暫存)
+# ReadWritePaths 若路徑不存在 systemd 不會 mkdir(只在已有路徑解除 read-only),
+# 所以 deploy-vm.sh 會預先 mkdir -p 這些目錄(見腳本 step 3)
+ReadWritePaths=/var/log/alpha-lab /opt/alpha-lab/research/logs /opt/alpha-lab/research/drafts /opt/alpha-lab/research/.tmp-bundles
 
 [Install]
 WantedBy=multi-user.target
