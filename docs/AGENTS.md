@@ -10,7 +10,7 @@
 
 ### 規格 (specs)
 
-- [`specs/README.md`](specs/README.md) — v2 規格入口,鎖定約束表、各 spec 索引
+- [`specs/AGENTS.md`](specs/AGENTS.md) — v2 規格入口,鎖定約束表、各 spec 索引
 - [`specs/cross-cutting.md`](specs/cross-cutting.md) — 跨切面:架構、NFR 規則、檔案以 git 為主、測試策略
 - [`specs/x-pull.md`](specs/x-pull.md) — A:抓 X 推文
 - [`specs/signal-discovery.md`](specs/signal-discovery.md) — B:從未處理推文找新訊號
