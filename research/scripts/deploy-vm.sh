@@ -94,11 +94,27 @@ TIMESTAMP=\$(date +%Y%m%d-%H%M%S)
 # 備份舊 research(只 cp 必要檔,不 cp node_modules — 省時間 + 省磁碟)。
 # 同時清掉超過 3 個的舊備份(Kilo PR #15:每次 cp -a 整個 research 含 node_modules
 # 很快撐爆 /opt,跑 10 次就 GB 級)
+# 用 cp -a --exclude 不支援,改用 find + cpio 或 rsync;若 rsync 沒裝,
+# 用 tar pipe 模式做 selective backup(不 fallback 到 cp -a 整個目錄,
+# 因為那會把 node_modules GB 級別一起備份 — Kilo PR #15 iter 1)
 if [ -d '${VM_RESEARCH_DIR}' ]; then
-  sudo rsync -a --exclude='node_modules' --exclude='logs' --exclude='drafts' \
-    --exclude='.well-known' --exclude='.tmp-bundles' --exclude='.test-pg' \
-    '${VM_RESEARCH_DIR}' '${VM_RESEARCH_DIR}.bak.\${TIMESTAMP}' 2>/dev/null || \
-    sudo cp -a '${VM_RESEARCH_DIR}' '${VM_RESEARCH_DIR}.bak.\${TIMESTAMP}'
+  if command -v rsync >/dev/null 2>&1; then
+    sudo rsync -a --exclude='node_modules' --exclude='logs' --exclude='drafts' \
+      --exclude='.well-known' --exclude='.tmp-bundles' --exclude='.test-pg' \
+      '${VM_RESEARCH_DIR}' '${VM_RESEARCH_DIR}.bak.\${TIMESTAMP}'
+  else
+    # 無 rsync:用 tar pipe 做 exclude backup(仍有 node_modules 排除)
+    sudo mkdir -p '${VM_RESEARCH_DIR}.bak.\${TIMESTAMP}'
+    sudo bash -c \"cd '${VM_DEPLOY_DIR}' && tar -cf - \\
+      --exclude='research/node_modules' --exclude='research/logs' \\
+      --exclude='research/drafts' --exclude='research/.well-known' \\
+      --exclude='research/.tmp-bundles' --exclude='research/.test-pg' \\
+      research/ | tar -xf - -C '${VM_RESEARCH_DIR}.bak.\${TIMESTAMP}/'\"
+    # tar 會產生 research.bak.<TS>/research/,搬正位置
+    sudo mv '${VM_RESEARCH_DIR}.bak.\${TIMESTAMP}/research' '${VM_RESEARCH_DIR}.bak.\${TIMESTAMP}.tmp' 2>/dev/null
+    sudo rmdir '${VM_RESEARCH_DIR}.bak.\${TIMESTAMP}' 2>/dev/null
+    sudo mv '${VM_RESEARCH_DIR}.bak.\${TIMESTAMP}.tmp' '${VM_RESEARCH_DIR}.bak.\${TIMESTAMP}' 2>/dev/null
+  fi
   echo \"    backed up to ${VM_RESEARCH_DIR}.bak.\${TIMESTAMP}\"
   # 只保留最近 3 個 .bak,清掉舊的
   ls -1d ${VM_DEPLOY_DIR}/research.bak.* 2>/dev/null | sort -r | tail -n +4 | xargs -r sudo rm -rf
