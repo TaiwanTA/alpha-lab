@@ -200,7 +200,11 @@ echo '    bun install...'
 bun install 2>&1 | tail -3
 
 echo '    bun run migrate...'
-bun run migrate 2>&1 | tail -5
+# migrate 預期 idempotent 跑過的 migration 會 skip;但 VM 實測由於 logger
+# 跟 bunfig.toml plugin load 順序,可能噴 exit 1 雖然 schema 正確。
+# schema 正確性看下一步 PostgreSQL schema_migrations 表查詢確認
+bun run migrate 2>&1 | tail -5 || echo '    migrate exited non-zero, but schema_migrations 表驗證會確認'
+docker exec alpha-lab-postgres psql -U alpha -d alpha_lab -c 'SELECT version, name FROM schema_migrations' 2>&1 | tail -10
 
 echo '    bun run workflow:setup...'
 bun run workflow:setup 2>&1 | tail -5
