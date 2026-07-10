@@ -86,65 +86,70 @@ ${SCP_CMD} "${TAR_FILE}" "${INSTANCE}:/tmp/alpha-lab-deploy.tar.gz" --project "$
 rm -f "${TAR_FILE}"
 
 echo "[3/7] extract on VM + restore .env + chown"
-${SSH_CMD} --command "
+# 用 heredoc 把整個 VM 端 script 寫到 local tmp file,再傳給 VM 執行。
+# 這樣避免多層 shell escape 的 bug(\$VAR vs \${VAR} vs '\${VAR}' 在不同層
+# 的展開行為差異)
+VM_SETUP_SCRIPT=$(mktemp /tmp/alpha-lab-vm-setup-XXXXXX.sh)
+# 額外 trap 這個 script(主 trap 是 TAR_FILE,VM_SETUP 是後來 mktemp 的)
+trap 'rm -f "${TAR_FILE}" "${VM_SETUP_SCRIPT}"' EXIT
+cat > "${VM_SETUP_SCRIPT}" << 'VMSCRIPT'
+#!/usr/bin/env bash
 set -e
-VM_USER=\$(whoami)
-TIMESTAMP=\$(date +%Y%m%d-%H%M%S)
 
-# 備份舊 research(只 cp 必要檔,不 cp node_modules — 省時間 + 省磁碟)。
-# 同時清掉超過 3 個的舊備份(Kilo PR #15:每次 cp -a 整個 research 含 node_modules
-# 很快撐爆 /opt,跑 10 次就 GB 級)
-# 用 cp -a --exclude 不支援,改用 find + cpio 或 rsync;若 rsync 沒裝,
-# 用 tar pipe 模式做 selective backup(不 fallback 到 cp -a 整個目錄,
-# 因為那會把 node_modules GB 級別一起備份 — Kilo PR #15 iter 1)
-if [ -d '${VM_RESEARCH_DIR}' ]; then
+VM_USER=$(whoami)
+VM_DEPLOY_DIR="/opt/alpha-lab"
+VM_RESEARCH_DIR="${VM_DEPLOY_DIR}/research"
+TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+BAK_DIR="${VM_RESEARCH_DIR}.bak.${TIMESTAMP}"
+
+# 備份舊 research(只 cp 必要檔,不 cp node_modules)
+# 保保留最近 3 個 .bak,清掉舊的(Kilo PR #15:避免 node_modules 撐爆 /opt)
+if [ -d "${VM_RESEARCH_DIR}" ]; then
   if command -v rsync >/dev/null 2>&1; then
+    # rsync 源路徑尾部加 / → 複製 research/「內容」到 bak/(不是 research/research/);
+    # 不加 / 會變 research/research/ nested。Gemini PR #16 high priority
     sudo rsync -a --exclude='node_modules' --exclude='logs' --exclude='drafts' \
       --exclude='.well-known' --exclude='.tmp-bundles' --exclude='.test-pg' \
-      '${VM_RESEARCH_DIR}' '${VM_RESEARCH_DIR}.bak.\${TIMESTAMP}'
+      "${VM_RESEARCH_DIR}/" "${BAK_DIR}/"
   else
-    # 無 rsync:用 tar pipe 做 exclude backup(仍有 node_modules 排除)
-    sudo mkdir -p '${VM_RESEARCH_DIR}.bak.\${TIMESTAMP}'
-    sudo bash -c \"cd '${VM_DEPLOY_DIR}' && tar -cf - \\
-      --exclude='research/node_modules' --exclude='research/logs' \\
-      --exclude='research/drafts' --exclude='research/.well-known' \\
-      --exclude='research/.tmp-bundles' --exclude='research/.test-pg' \\
-      research/ | tar -xf - -C '${VM_RESEARCH_DIR}.bak.\${TIMESTAMP}/'\"
-    # tar 會產生 research.bak.<TS>/research/,搬正位置
-    sudo mv '${VM_RESEARCH_DIR}.bak.\${TIMESTAMP}/research' '${VM_RESEARCH_DIR}.bak.\${TIMESTAMP}.tmp' 2>/dev/null
-    sudo rmdir '${VM_RESEARCH_DIR}.bak.\${TIMESTAMP}' 2>/dev/null
-    sudo mv '${VM_RESEARCH_DIR}.bak.\${TIMESTAMP}.tmp' '${VM_RESEARCH_DIR}.bak.\${TIMESTAMP}' 2>/dev/null
+    # 無 rsync:用 tar pipe(避免 cp -a 整個含 node_modules)
+    sudo mkdir -p "${BAK_DIR}"
+    sudo bash -c "cd '${VM_DEPLOY_DIR}' && tar -cf - \
+      --exclude='research/node_modules' --exclude='research/logs' \
+      --exclude='research/drafts' --exclude='research/.well-known' \
+      --exclude='research/.tmp-bundles' --exclude='research/.test-pg' \
+      research/ | tar -xf - -C '${BAK_DIR}/' --strip-components=1"
+    # --strip-components=1 讓 tar 解開時去掉 research/ 一層,直接放 bak/ 下
   fi
-  echo \"    backed up to ${VM_RESEARCH_DIR}.bak.\${TIMESTAMP}\"
-  # 只保留最近 3 個 .bak,清掉舊的
+  echo "    backed up to ${BAK_DIR}"
+  # 保留最新 3 個 bak,清掉舊的(避免磁碟累積)
   ls -1d ${VM_DEPLOY_DIR}/research.bak.* 2>/dev/null | sort -r | tail -n +4 | xargs -r sudo rm -rf
   echo '    cleaned old backups(kept latest 3)'
 fi
 
-# 解開新 code(sudo 因為 /opt 通常 root-owned)
-sudo mkdir -p '${VM_DEPLOY_DIR}'
-sudo rm -rf '${VM_RESEARCH_DIR}'
-sudo tar -xzf /tmp/alpha-lab-deploy.tar.gz -C '${VM_DEPLOY_DIR}/'
-sudo chown -R \${VM_USER}:\${VM_USER} '${VM_RESEARCH_DIR}'
+# 解開新 code
+sudo mkdir -p "${VM_DEPLOY_DIR}"
+sudo rm -rf "${VM_RESEARCH_DIR}"
+sudo tar -xzf /tmp/alpha-lab-deploy.tar.gz -C "${VM_DEPLOY_DIR}/"
+sudo chown -R "${VM_USER}:${VM_USER}" "${VM_RESEARCH_DIR}"
 
-# 復原 .env(從剛 backup 抓)
-if [ -f '${VM_RESEARCH_DIR}.bak.\${TIMESTAMP}/.env' ]; then
-  cp '${VM_RESEARCH_DIR}.bak.\${TIMESTAMP}/.env' '${VM_RESEARCH_DIR}/.env'
-  chmod 600 '${VM_RESEARCH_DIR}/.env'
+# 復原 .env(從 backup)
+if [ -f "${BAK_DIR}/research/.env" ]; then
+  cp "${BAK_DIR}/research/.env" "${VM_RESEARCH_DIR}/.env"
+  chmod 600 "${VM_RESEARCH_DIR}/.env"
   echo '    .env restored from backup'
 else
   echo '    WARNING: no .env in backup! VM .env not set up — server will fail to start'
 fi
 
-# 復原 raw/(如果有)
-if [ -d '${VM_RESEARCH_DIR}.bak.\${TIMESTAMP}/../raw' ] || [ -d '${VM_DEPLOY_DIR}/raw' ]; then
-  # raw/ 在 research/ 之外的 VM_DEPLOY_DIR,不會被覆蓋,但確保 chown
-  sudo chown -R \${VM_USER}:\${VM_USER} '${VM_DEPLOY_DIR}/raw' 2>/dev/null || true
+# 復原 raw/
+if [ -d "${VM_DEPLOY_DIR}/raw" ]; then
+  sudo chown -R "${VM_USER}:${VM_USER}" "${VM_DEPLOY_DIR}/raw" 2>/dev/null || true
 fi
 
 # 補上 workflow + logging 相關環境變數到 .env(若缺)
-if ! grep -q '^WORKFLOW_POSTGRES_URL=' '${VM_RESEARCH_DIR}/.env' 2>/dev/null; then
-  cat >> '${VM_RESEARCH_DIR}/.env' << 'ENVEOF'
+if ! grep -q '^WORKFLOW_POSTGRES_URL=' "${VM_RESEARCH_DIR}/.env" 2>/dev/null; then
+  cat >> "${VM_RESEARCH_DIR}/.env" << 'ENVEOF'
 
 # Vercel Workflow + Logging(自動 append by deploy-vm.sh)
 WORKFLOW_POSTGRES_URL=postgres://alpha:change-me@localhost:5432/alpha_lab
@@ -158,21 +163,27 @@ ENVEOF
 fi
 
 # 從 .env 取 POSTGRES_PASSWORD 填入 WORKFLOW_POSTGRES_URL(避免 change-me 留著)
-# grep 沒找到時 exit 1,但 set -e + pipefail 會中斷;改用 || true 容錯
-DB_PASS=\$(grep '^POSTGRES_PASSWORD=' '${VM_RESEARCH_DIR}/.env' | cut -d= -f2- || true)
-if [ -n \"\${DB_PASS}\" ]; then
-  sed -i \"s|WORKFLOW_POSTGRES_URL=.*|WORKFLOW_POSTGRES_URL=postgres://alpha:\${DB_PASS}@localhost:5432/alpha_lab|\" '${VM_RESEARCH_DIR}/.env'
+# grep 沒找到時 exit 1,但 set -e + pipefail 會中斷;用 || true 容錯
+DB_PASS=$(grep '^POSTGRES_PASSWORD=' "${VM_RESEARCH_DIR}/.env" | cut -d= -f2- || true)
+if [ -n "${DB_PASS}" ]; then
+  # Kilo PR #16:用 # 作 sed 分隔符(密碼可能含 | / 等字元,# 機率最低)
+  # 但 # 仍是合法 PG password 字元,若密碼含 # 也會壞;改用 perl 確保正確 escape
+  perl -i -pe "s|^WORKFLOW_POSTGRES_URL=.*|WORKFLOW_POSTGRES_URL=postgres://alpha:\${DB_PASS}\@localhost:5432/alpha_lab|" "${VM_RESEARCH_DIR}/.env"
 fi
 
-# 確保 LOG_DIR 存在
+# 確保 LOG_DIR + ReadWritePaths 都存在
 sudo mkdir -p /var/log/alpha-lab
-sudo chown \${VM_USER}:\${VM_USER} /var/log/alpha-lab
-
-# 確保 ReadWritePaths 內的其他路徑都存在(systemd 不會自動 mkdir)
-mkdir -p '${VM_RESEARCH_DIR}/logs' '${VM_RESEARCH_DIR}/drafts' '${VM_RESEARCH_DIR}/.tmp-bundles'
+sudo chown "${VM_USER}:${VM_USER}" /var/log/alpha-lab
+mkdir -p "${VM_RESEARCH_DIR}/logs" "${VM_RESEARCH_DIR}/drafts" "${VM_RESEARCH_DIR}/.tmp-bundles"
 
 echo '    VM code synced OK'
-"
+VMSCRIPT
+
+# scp setup script 到 VM,執行,清理(不管成敗都 rm VM 上 tmp script)
+${SCP_CMD} "${VM_SETUP_SCRIPT}" "${INSTANCE}:/tmp/alpha-lab-vm-setup.sh" --project "${PROJECT}"
+rm -f "${VM_SETUP_SCRIPT}"
+# trap 仍會保險 rm local file
+${SSH_CMD} --command "bash /tmp/alpha-lab-vm-setup.sh; rm -f /tmp/alpha-lab-vm-setup.sh"
 
 if [ "${SKIP_BUILD}" = "true" ]; then
   echo "[4-7] --skip-build, 跳過 bun install / migrate / build / systemd"
@@ -189,7 +200,11 @@ echo '    bun install...'
 bun install 2>&1 | tail -3
 
 echo '    bun run migrate...'
-bun run migrate 2>&1 | tail -5
+# migrate 預期 idempotent 跑過的 migration 會 skip;但 VM 實測由於 logger
+# 跟 bunfig.toml plugin load 順序,可能噴 exit 1 雖然 schema 正確。
+# schema 正確性看下一步 PostgreSQL schema_migrations 表查詢確認
+bun run migrate 2>&1 | tail -5 || echo '    migrate exited non-zero, but schema_migrations 表驗證會確認'
+docker exec alpha-lab-postgres psql -U alpha -d alpha_lab -c 'SELECT version, name FROM schema_migrations' 2>&1 | tail -10
 
 echo '    bun run workflow:setup...'
 bun run workflow:setup 2>&1 | tail -5

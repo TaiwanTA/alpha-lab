@@ -31,6 +31,12 @@ WorkingDirectory=/opt/alpha-lab/research
 EnvironmentFile=/opt/alpha-lab/research/.env
 # Bun 路徑:走 user 的 PATH(mise shims / ~/.bun/bin 都 cover)
 Environment="PATH=/home/__PUBLISH_USER__/.bun/bin:/home/__PUBLISH_USER__/.local/share/mise/shims:/usr/local/bin:/usr/bin:/bin"
+# BUN_TMPDIR / BUN_INSTALL:systemd 的預設 tmp namespace 跟 bun install cache
+# 位置可能不一致(VM 實測 bun 1.3.x 報 'Unexpected accessing temporary directory'),
+# 明確指定讓 bun 找到 cache + tmp 位置。即使拿掉 PrivateTmp=true 後,
+# 攔截系統 /tmp 被 override 的情況(systemd service shell context 跟 user login shell 不同)
+Environment="BUN_TMPDIR=/tmp"
+Environment="BUN_INSTALL=/home/__PUBLISH_USER__/.bun"
 ExecStart=bun run workflow-server.ts
 Restart=on-failure
 RestartSec=10
@@ -43,10 +49,11 @@ StandardError=journal
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=read-only
-PrivateTmp=true
-# 需要寫入的路徑(log dir + drafts artifact + workflow build 暫存)
-# ReadWritePaths 若路徑不存在 systemd 不會 mkdir(只在已有路徑解除 read-only),
-# 所以 deploy-vm.sh 會預先 mkdir -p 這些目錄(見腳本 step 3)
+# PrivateTmp=true 拿掉 — bun 1.3.x 在 private tmp namespace 內會找不到 global cache,
+# 即使設 BUN_TMPDIR=/tmp 也只指到 private tmp 不是系統 / tmp,造成
+# 'Unexpected accessing temporary directory. Please set $BUN_TMPDIR' 啟動失敗
+# 對 alpha-lab workflow server 影響小(server 不處理 user input / file pipe)
+# ReadWritePaths 白名單放行特定路徑,比拿掉 ProtectSystem 更安全
 ReadWritePaths=/var/log/alpha-lab /opt/alpha-lab/research/logs /opt/alpha-lab/research/drafts /opt/alpha-lab/research/.tmp-bundles
 
 [Install]
