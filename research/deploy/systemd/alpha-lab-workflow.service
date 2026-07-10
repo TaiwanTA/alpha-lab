@@ -7,9 +7,9 @@
 #
 # 不依賴 systemd cron — 用 systemd timer 是 spec 決定(更可靠 + log 整合)
 #
-# Bun 路徑:不寫死某個 install 路徑(/home/alpha/.local/share/mise/... 太脆),
-# 走 alpha user 的 PATH 即可,讓 mise / 直接裝的 bun 都能被找到。
-# 若 alpha user 沒裝 bun,執行前先 `mise install bun@latest` + `mise use -g bun@latest`。
+# Bun 路徑:不寫死某個 install 路徑,走 user 的 PATH 即可,讓 mise / 直接裝的 bun 都能被找到。
+# 部署時 PUBLISH_USER 環境變數可覆蓋 default user(VM 上 user 可能不是 alpha,部署時需 patch)
+# gcloud VM 預設 user 是 <account>_<domain>(e.g. q267009886_work_gmail_com)
 
 [Unit]
 Description=alpha-lab Vercel Workflow runtime
@@ -20,12 +20,12 @@ After=docker.service
 
 [Service]
 Type=simple
-User=alpha
+# User 跑時期由部署腳本 sed 改成實際 VM user(gcloud VM 預設非 alpha)
+User=__PUBLISH_USER__
 WorkingDirectory=/opt/alpha-lab/research
 EnvironmentFile=/opt/alpha-lab/research/.env
-# Bun 路徑走 alpha user 的 PATH,mise / 直接裝的 bun 都不寫死路徑
-# (alpha user 預設 PATH 應該含 ~/.bun/bin 或 mise shims)
-Environment="PATH=/home/alpha/.bun/bin:/home/alpha/.local/share/mise/shims:/usr/local/bin:/usr/bin:/bin"
+# Bun 路徑:走 user 的 PATH(mise shims / ~/.bun/bin 都 cover)
+Environment="PATH=/home/__PUBLISH_USER__/.bun/bin:/home/__PUBLISH_USER__/.local/share/mise/shims:/usr/local/bin:/usr/bin:/bin"
 ExecStart=bun run workflow-server.ts
 Restart=on-failure
 RestartSec=10
