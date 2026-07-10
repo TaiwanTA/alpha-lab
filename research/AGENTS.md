@@ -113,11 +113,22 @@ curl http://127.0.0.1:8090/run/<runId>   # 查 workflow run 狀態
 ```
 
 ### Deploy(VM 上 systemd 接管排程)
+
+**自動化**:跑 `scripts/deploy-vm.sh` 從 local 一次做完——
+tar + scp + 解開 + 復原 .env + bun install + migrate + workflow:setup + workflow:build +
+patch systemd unit(__PUBLISH_USER__ → 實際 VM user)+ restart server + 驗證 /health。
+
 ```bash
-# 一次性:複製 unit 檔,啟 service + timers
+./scripts/deploy-vm.sh                 # 完整部署(含 systemd)
+./scripts/deploy-vm.sh --skip-systemd  # 只 sync code + rebuild,不動 systemd
+./scripts/deploy-vm.sh --skip-build    # 只 sync code
+```
+
+**手動一次首次部署**(deploy-vm.sh 之前的前置條件):
+```bash
 sudo cp deploy/systemd/alpha-lab-*.service deploy/systemd/alpha-lab-*.timer \
         /etc/systemd/system/
-
+sudo sed -i "s/__PUBLISH_USER__/$(whoami)/g" /etc/systemd/system/alpha-lab-*.service
 sudo systemctl daemon-reload
 sudo systemctl enable --now alpha-lab-workflow.service  # long-running HTTP server
 sudo systemctl enable --now alpha-lab-a.timer             # 6h
@@ -129,9 +140,11 @@ sudo systemctl enable --now alpha-lab-d-post.timer        # Mon-Fri 16:30 ET
 sudo systemctl status alpha-lab-workflow.service
 journalctl -u alpha-lab-workflow -f        # 看 server stdout / stderr
 systemctl list-timers alpha-lab-*           # 確認 4 個 timer 都 next-time 排好
+curl http://127.0.0.1:8090/health           # 應回 {"status":"ok","port":8090}
 ```
 
 ### Blog 發布(publish.ts,Step 8+9)
+
 
 把 `research/drafts/` 內的 markdown(由 C / D agent 產出)發布到 `blog/src/content/blog/`,變成 Astro content collection 內的 post。
 
