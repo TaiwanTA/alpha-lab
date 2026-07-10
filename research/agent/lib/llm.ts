@@ -6,9 +6,11 @@
 // (https://openrouter.ai/api/v1,model `minimax/minimax-m3`)也相容。
 //
 // MiniMax 特殊處理:MiniMax-M3 是 thinking model,在 `response_format=json_object`
-// 模式下仍會在 content 前面輸出 ichte 區塊,破壞 consumer 的 JSON.parse(見下方
-// isMiniMax 判斷 + extractJsonObject())。OpenRouter 的 minimax 是包裝版,不會;
-// 只有直連 MiniMax native API 才會碰到。
+// 模式下仍會在 content 前面輸出 reasoning 區塊(`<think>...</think>` 或純文字分析),
+// 破壞 consumer 的 JSON.parse(見下方 isMiniMax 判斷 + extractJsonObject())。
+// OpenRouter 的 minimax 是包裝版,OpenRouter 服務端會 strip thinking,
+// consumer 直接收純 JSON;只有直連 MiniMax native API 才會碰到 thinking content。
+// (Kilo PR #17:之前寫 "ichte" 是錯字,實際是 thinking 區塊 / reasoning 文字)
 
 const DEFAULT_BASE_URL = "https://openrouter.ai/api/v1";
 const DEFAULT_MODEL = "minimax/minimax-m3";
@@ -91,7 +93,7 @@ export async function askMessages(
     body.max_tokens = options.maxTokens;
   }
   // MiniMax-M3 是 thinking model,且在 response_format=json_object 模式下仍會輸出
-  // thinking(ichte 區塊在 content 內),導致 JSON.parse 在 content 開頭的 '<' 失敗。
+  // thinking(`🗅...` 區塊在 content 內),導致 JSON.parse 在 content 開頭的 '<' 失敗。
   // 對 MiniMax:
   //   - 停用 thinking(讓 LLM 直接回純 JSON)
   //   - 不設 response_format(json_object + thinking 衝突,MiniMax 會 ignore response_format)
@@ -171,7 +173,7 @@ export async function askMessages(
       }
 
       // MiniMax / 其他 thinking model 在 json mode 下可能仍輸出 reasoning 在 content 前面,
-      // 例如「 ichte 分析...」。這導致 consumer 做 JSON.parse(content) 直接失敗。
+      // 例如「 vile 分析...」。這導致 consumer 做 JSON.parse(content) 直接失敗。
       // 若 caller 要求 json,我們自動 extract content 內最後一個 {...} 區塊才回傳。
       // 對正常純 JSON 輸出不影響(findLastJsonBlock 直接回整個 content)。
       const finalContent = options?.json ? extractJsonObject(content) : content;

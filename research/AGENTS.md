@@ -189,7 +189,7 @@ type → tag 對應(對齊 ADR-001「實體:報告」表):
 - **X API bearer token 需先在 developer.x.com 開 pay-per-use billing**,沒開就只回 402
 - **X API v2 沒有 `in_reply_to_status_id` 這個 tweet field** — 看 X API v1 文檔學到的人會踩。v2 的 reply 資訊放在 `referenced_tweets[]` 裡,要找 `type=="replied_to"` 的那筆取 `id`。quote tweet 是 `type=="quoted"`,不該當 parent。X 的錯誤訊息會列出合法 field 名稱,可以直接看
 - **`bun test` 會動 DB**,不是單純 unit test — `db.test.ts` 需要一個真的 Postgres。要先建 `alpha_lab_test` DB + 跑 migration:`docker exec alpha-lab-postgres createdb -U alpha alpha_lab_test && DATABASE_URL=postgres://alpha:...@localhost:5432/alpha_lab_test bun run migrate`。`x-client` / `raw-writer` / `adapter` 那幾個 test 檔才是純單元測試,不需要 DB
-- **首跑 lack `lastExternalId` 會一次拉歷史垃圾** — 預測性專案下,過去資料價值低。`initial_backfill_days` (X adapter,預設 3 天) 控制首跑往回拉多遠。不設的話首跑會撞 `max_tweets_per_run` 上限(1000),浪費 API 費用拉幾個月推文。已踩過:首跑拉到 5 個月前共 1093 條,加參數後降到 ~43 條。VM 上生產持續跑後 items 數會持續累積(寫實作當下 ~57 條)— 不要把當下數字寫死進文檔,看 DB 查
+- **首跑 lack `lastExternalId` 會一次拉歷史垃圾** — 預測性專案下,過去資料價值低。`initial_backfill_days` (X adapter,預設 3 天) 控制首跑往回拉多遠。不設的話首跑會撞 `max_tweets_per_run` 上限(1000),浪費 API 費用拉幾個月推文。已踩過:首跑拉到 5 個月前共 1093 條,加參數後降到 ~43 條(之後 production 持續累積,不要把當下數字寫死進文檔,要查 `SELECT COUNT(*) FROM items`)
 
 ## 量級參考
 - 50 萬推文:raw JSONL ~1-3GB,DB ~500MB-1GB
