@@ -225,7 +225,7 @@ if [ "${SKIP_SYSTEMD}" = "true" ]; then
   exit 0
 fi
 
-echo "[5/7] patch systemd unit(__PUBLISH_USER__ → 實際 user)+ cp"
+echo "[5/7] patch systemd unit(__PUBLISH_USER__ + bun 絕對路徑)+ cp"
 ${SSH_CMD} --command "
 set -e
 VM_USER=\$(whoami)
@@ -233,7 +233,14 @@ VM_USER=\$(whoami)
 # 複製 unit 檔到 /tmp/sed patch 後 cp 到 /etc/systemd/system
 sudo cp ${VM_RESEARCH_DIR}/deploy/systemd/alpha-lab-*.service /tmp/
 sudo cp ${VM_RESEARCH_DIR}/deploy/systemd/alpha-lab-*.timer /tmp/
+
+# patch __PUBLISH_USER__ → 實際 VM user(全 service 檔)
 sudo sed -i \"s/__PUBLISH_USER__/\${VM_USER}/g\" /tmp/alpha-lab-*.service
+
+# patch ExecStart=bun → ExecStart=/home/<user>/.bun/bin/bun(systemd ProtectHome=read-only
+# 下 PATH 內的 bun binary 在 ~/.bun/bin,systemd 不會直接執行,要絕對路徑;
+# repo unit 保持乾淨的 'bun',deploy-vm.sh 在 patch 階段才換成絕對路徑)
+sudo sed -i \"s|^ExecStart=bun |ExecStart=/home/\${VM_USER}/.bun/bin/bun |\" /tmp/alpha-lab-workflow.service
 
 # 4 個 oneshot trigger service + 1 個 workflow server
 sudo cp /tmp/alpha-lab-*.service /etc/systemd/system/

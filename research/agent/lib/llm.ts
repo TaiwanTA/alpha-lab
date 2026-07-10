@@ -1,6 +1,14 @@
-// LLM call wrapper — 用 OpenRouter API(支援 15+ providers)
-//   不引入 SDK,純 fetch,跟 x-client / hindsight-client 同 pattern
-//   OpenRouter API: https://openrouter.ai/api/v1/chat/completions
+// LLM call wrapper — 純 fetch,跟 x-client / hindsight-client 同 pattern
+//
+// Provider 設計:用 OpenAI Chat Completions 相容 API(/v1/chat/completions),
+// 走 `LLM_BASE_URL` + `LLM_API_KEY` + `LLM_MODEL` 來切換 provider。當前 VM 用 MiniMax
+// (https://api.minimaxi.chat/v1,model `MiniMax-M3`),但本地 dev 或 CI 用 OpenRouter
+// (https://openrouter.ai/api/v1,model `minimax/minimax-m3`)也相容。
+//
+// MiniMax 特殊處理:MiniMax-M3 是 thinking model,在 `response_format=json_object`
+// 模式下仍會在 content 前面輸出 ichte 區塊,破壞 consumer 的 JSON.parse(見下方
+// isMiniMax 判斷 + extractJsonObject())。OpenRouter 的 minimax 是包裝版,不會;
+// 只有直連 MiniMax native API 才會碰到。
 
 const DEFAULT_BASE_URL = "https://openrouter.ai/api/v1";
 const DEFAULT_MODEL = "minimax/minimax-m3";
