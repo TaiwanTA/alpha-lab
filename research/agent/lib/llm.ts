@@ -82,17 +82,20 @@ export async function askMessages(
   if (options?.maxTokens !== undefined) {
     body.max_tokens = options.maxTokens;
   }
-  if (options?.json) {
-    body.response_format = { type: "json_object" };
-  }
-  // MiniMax-M3 跟 M2.x 是 thinking model,預設會在 content 前面輸出 reasoning
-  // (用 thinking 區塊或直接在 content 前面加 markdown 分析)。這會破壞 JSON parse。
-  // 對 MiniMax-M3 停用 thinking,讓 LLM 直接輸出最終 JSON;
-  // MiniMax-M2.x 不支援停用,靠 askMessages 的 JSON extract fallback 處理。
-  // 對非 MiniMax 模型(OpenRouter 等),thinking 參數會被忽略,不影響。
-  if (process.env.LLM_BASE_URL?.includes("minimaxi.chat") ||
-      (process.env.LLM_MODEL ?? "").toLowerCase().startsWith("minimax")) {
+  // MiniMax-M3 是 thinking model,且在 response_format=json_object 模式下仍會輸出
+  // thinking(ichte 區塊在 content 內),導致 JSON.parse 在 content 開頭的 '<' 失敗。
+  // 對 MiniMax:
+  //   - 停用 thinking(讓 LLM 直接回純 JSON)
+  //   - 不設 response_format(json_object + thinking 衝突,MiniMax 會 ignore response_format)
+  //   - 改靠 SYSTEM_PROMPT 要求 LLM 純 JSON output,再用 extractJsonObject() 從 content 內解
+  // 非 MiniMax 模型保留 response_format,行為不變
+  const isMiniMax =
+    process.env.LLM_BASE_URL?.includes("minimaxi.chat") ||
+    (process.env.LLM_MODEL ?? "").toLowerCase().startsWith("minimax");
+  if (isMiniMax) {
     body.thinking = { type: "disabled" };
+  } else if (options?.json) {
+    body.response_format = { type: "json_object" };
   }
 
   let attempt = 0;
@@ -159,8 +162,14 @@ export async function askMessages(
         throw new Error("LLM API returned choice without content");
       }
 
+      // MiniMax / 其他 thinking model 在 json mode 下可能仍輸出 reasoning 在 content 前面,
+      // 例如「 ichte 分析...」。這導致 consumer 做 JSON.parse(content) 直接失敗。
+      // 若 caller 要求 json,我們自動 extract content 內最後一個 {...} 區塊才回傳。
+      // 對正常純 JSON 輸出不影響(findLastJsonBlock 直接回整個 content)。
+      const finalContent = options?.json ? extractJsonObject(content) : content;
+
       return {
-        content,
+        content: finalContent,
         usage: {
           promptTokens: data.usage?.prompt_tokens ?? 0,
           completionTokens: data.usage?.completion_tokens ?? 0,
@@ -202,4 +211,59 @@ export async function askMessages(
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// 從 LLM content 內 extract JSON object:
+//   - 若 content 已是純 JSON(以 { 開頭),直接回整個 content
+//   - 若 content 含 markdown ```json{...}``` 或夾雜 reasoning 文字,
+//     抓最後一個 {...} 區塊(最後一個可能才是最終 JSON output)
+// 思考模型(thinking model)常會在 JSON 前面輸出 reasoning,造成 consumer
+// JSON.parse 在 content 開頭就失敗;這個 helper 把那段剝掉。
+function extractJsonObject(raw: string): string {
+  const trimmed = raw.trim();
+  // Fast path:已經是合法 JSON
+  try {
+    JSON.parse(trimmed);
+    return trimmed;
+  } catch {
+    // 繼續嘗試 extract
+  }
+  // 找最後一個 { 開始、對應 } 結束的區塊(從尾巴往回找)
+  // 用 stack-based brace matching 處理 nested object + 字串內 brace
+  const lastOpen = trimmed.lastIndexOf("{");
+  if (lastOpen === -1) return raw;  // 沒找到 { 放棄,回原 content 讓 consumer throw
+  // 從 lastOpen 往後走找對應的 } (nested brace matching)
+  let depth = 0;
+  let inString = false;
+  let escape = false;
+  for (let i = lastOpen; i < trimmed.length; i++) {
+    const ch = trimmed[i];
+    if (escape) {
+      escape = false;
+      continue;
+    }
+    if (ch === "\\") {
+      escape = true;
+      continue;
+    }
+    if (ch === '"') {
+      inString = !inString;
+      continue;
+    }
+    if (inString) continue;
+    if (ch === "{") depth++;
+    else if (ch === "}") {
+      depth--;
+      if (depth === 0) {
+        const candidate = trimmed.slice(lastOpen, i + 1);
+        try {
+          JSON.parse(candidate);
+          return candidate;
+        } catch {
+          // 不是合法 JSON,繼續找下一個 }
+        }
+      }
+    }
+  }
+  return raw;  // fallback:回原 content,讓 consumer 的 JSON.parse throw 給出對 diagnostics
 }
