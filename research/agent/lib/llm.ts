@@ -85,6 +85,15 @@ export async function askMessages(
   if (options?.json) {
     body.response_format = { type: "json_object" };
   }
+  // MiniMax-M3 跟 M2.x 是 thinking model,預設會在 content 前面輸出 reasoning
+  // (用 thinking 區塊或直接在 content 前面加 markdown 分析)。這會破壞 JSON parse。
+  // 對 MiniMax-M3 停用 thinking,讓 LLM 直接輸出最終 JSON;
+  // MiniMax-M2.x 不支援停用,靠 askMessages 的 JSON extract fallback 處理。
+  // 對非 MiniMax 模型(OpenRouter 等),thinking 參數會被忽略,不影響。
+  if (process.env.LLM_BASE_URL?.includes("minimaxi.chat") ||
+      (process.env.LLM_MODEL ?? "").toLowerCase().startsWith("minimax")) {
+    body.thinking = { type: "disabled" };
+  }
 
   let attempt = 0;
   while (attempt < MAX_ATTEMPTS) {
