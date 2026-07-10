@@ -1,14 +1,14 @@
 # research/AGENTS.md — 研究工作區
 
 ## 這裡做什麼
-研究投資人的資料湖 + LLM 分析工作區。Pipeline 從外部來源抓資料,LLM agent 定期分析,分析結果餵給 wiki / blog(之後)。
+研究投資人的資料湖 + LLM 分析工作區。Pipeline 從外部來源抓資料,LLM agent 定期分析(ABCD workflow),分析結果以 markdown draft 形式輸出到 `drafts/`,再由 `publish.ts` 發布到 `blog/src/content/blog/`。
 
 ## 已達成決定
 - 資料儲存:Postgres(在 Docker),`items` 表統一儲存所有來源
 - Schema:`items(source_type, source_label, external_id, external_parent, created_at, fetched_at, context)`
-- 排程:Vercel Workflow(`use workflow`,用 Postgres World)+ systemd timer 做 cron 觸發(之後加,Phase 3)
+- 排程:Vercel Workflow(`"use workflow"` directive,Postgres World)+ systemd timer 做 cron 觸發(已上線)
 - Raw 儲存:JSONL 檔案,`raw/<source_type>/<source_label>/<YYYY-MM>/<YYYY-MM-DD>.jsonl`
-- 投資人清單延後到 Phase 4
+- 投資人清單延後到 Phase 4(目前一個 source:Bill Ackman)
 
 ## 設計原則(讀 schema / code 前先看)
 - `items` 表是給 LLM 看的**索引層**,不是 source of truth。raw payload 在磁碟的 `raw/*.jsonl`
@@ -57,7 +57,7 @@
 - `lib/logger.ts` — loglayer singleton + 檔案輪替(daily/YMD/50M/14d)
 - `lib/adapters/x-user-timeline.ts` — X user timeline adapter
 - `lib/publish.ts` — publish helper 純函式:`detectType / deriveDate / slugify / extractTitle / extractSummary / parseFrontmatter / serializeFrontmatter / buildFrontmatter / resolveTargetPath`,unit-test in `tests/lib/publish.test.ts`
-- `agent/lib/llm.ts` — LLM(OpenRouter)呼叫 wrapper
+- `agent/lib/llm.ts` — LLM 呼叫 wrapper(OpenAI Chat Completions 相容 API;VM 用 MiniMax native,local dev 可用 OpenRouter;含 MiniMax-M3 thinking model 適配)
 - `agent/lib/types.ts` — LLM 共用型別
 - `agent/b.ts` — B agent(訊號發現):`discover(deps)`
 - `agent/c.ts` — C agent(per-signal 研究):`research(signalId, deps)`
@@ -179,29 +179,6 @@ type → tag 對應(對齊 ADR-001「實體:報告」表):
 2. 在 `pull.ts` 的 `ADAPTERS` map 註冊
 3. 在 `sources.json` 加 config
 
-### 環境變數(在 `.env`)
-- `DATABASE_URL` — Postgres 連線字串
-- `X_BEARER_TOKEN` — X API bearer token
-- `RAW_ROOT` — raw 檔案根目錄(預設 `../raw`)
-- `SOURCES_PATH` — sources.json 路徑(預設 `./sources.json`)
-- `LOG_DIR` — log 檔案根目錄(預設 `./logs`,啟動時 mkdir -p)
-- `LOG_CONSOLE` — `"false"` 時關閉 console transport,只寫檔(預設 `true`)
-
-### 跑流程
-```bash
-docker compose up -d
-bun run migrate
-cp .env.example .env   # 編輯填值,chmod 600
-bun run pull
-bun test
-bun run typecheck
-```
-
-### 新增資料來源
-1. 在 `lib/adapters/` 新增 `<source>.ts`,實作 `SourceAdapter` 介面
-2. 在 `pull.ts` 的 `ADAPTERS` map 註冊
-3. 在 `sources.json` 加 config
-
 ## 為什麼用這些工具
 - **Vercel Workflow(Phase 3)** — 不是 orchestrator,是 in-process TS SDK;比 Dagu(YAML + 外部 binary)更合我們 Bun + TS stack;Postgres World 可共用 alpha-lab 的 Postgres instance;cron 觸發用 systemd timer,夠用
 - **自寫 migrator** — `Bun.sql` 直接 raw SQL 的哲學下,drizzle/prisma/kysely 會引入 ORM 概念衝突
@@ -212,7 +189,7 @@ bun run typecheck
 - **X API bearer token 需先在 developer.x.com 開 pay-per-use billing**,沒開就只回 402
 - **X API v2 沒有 `in_reply_to_status_id` 這個 tweet field** — 看 X API v1 文檔學到的人會踩。v2 的 reply 資訊放在 `referenced_tweets[]` 裡,要找 `type=="replied_to"` 的那筆取 `id`。quote tweet 是 `type=="quoted"`,不該當 parent。X 的錯誤訊息會列出合法 field 名稱,可以直接看
 - **`bun test` 會動 DB**,不是單純 unit test — `db.test.ts` 需要一個真的 Postgres。要先建 `alpha_lab_test` DB + 跑 migration:`docker exec alpha-lab-postgres createdb -U alpha alpha_lab_test && DATABASE_URL=postgres://alpha:...@localhost:5432/alpha_lab_test bun run migrate`。`x-client` / `raw-writer` / `adapter` 那幾個 test 檔才是純單元測試,不需要 DB
-- **首跑 lack `lastExternalId` 會一次拉歷史垃圾** — 預測性專案下,過去資料價值低。`initial_backfill_days` (X adapter,預設 3 天) 控制首跑往回拉多遠。不設的話首跑會撞 `max_tweets_per_run` 上限(1000),浪費 API 費用拉幾個月推文。已踩過:首跑拉到 5 個月前共 1093 條,加參數後 43 條
+- **首跑 lack `lastExternalId` 會一次拉歷史垃圾** — 預測性專案下,過去資料價值低。`initial_backfill_days` (X adapter,預設 3 天) 控制首跑往回拉多遠。不設的話首跑會撞 `max_tweets_per_run` 上限(1000),浪費 API 費用拉幾個月推文。已踩過:首跑拉到 5 個月前共 1093 條,加參數後降到 ~43 條(之後 production 持續累積,不要把當下數字寫死進文檔,要查 `SELECT COUNT(*) FROM items`)
 
 ## 量級參考
 - 50 萬推文:raw JSONL ~1-3GB,DB ~500MB-1GB
@@ -220,16 +197,17 @@ bun run typecheck
 - 月費(e2-medium VM + Postgres + 50 萬推文):~$25-35
 
 ## 不做的事
-- LLM 分析(留給外部 agent)
-- 排程(Phase 3 會用 Vercel Workflow 包,systemd timer 觸發)
-- 自動 retry 整個 pipeline(用 Workflow 的 retry 機制)
+- 排程自己跑(已交給 systemd timer + workflow-server;新 agent 加在 `workflow/` 內,不要另起 cron)
 - migration 的 down(不做,見上方決策)
 
 ## 後續規劃
 見 `docs/ADR-001-pipeline-redesign.md`。簡版:
-- ✅ A: 推文同步(已上線)
-- ⏳ B: 訊號發現(每 1-2h,從 items 找市場訊號)
-- ⏳ C: 事件追蹤研究(每訊號一個 agent,用 Hindsight 存觀察)
-- ⏳ D: 報告生產(MVP 先做美股盤前 + 盤後)
+- ✅ A: 推文同步
+- ✅ B: 訊號發現(每 1h,從 items 找市場訊號)
+- ✅ C: 事件追蹤研究(每訊號一個 agent,用 Hindsight 存觀察)
+- ✅ D: 報告生產(美股盤前 + 盤後)
+- ✅ Workflow 整合 + systemd timer 排程
+- ✅ Blog 發布流程(publish.ts)
+- ⏳ Phase 4:投資人清單決定 + 模擬下注 + 反思校準
 
 核心原則:每個 agent 只做一件事並且足夠專注 → 費用更少、品質更好、更可預測。
