@@ -10,8 +10,6 @@
 // 破壞 consumer 的 JSON.parse(見下方 isMiniMax 判斷 + extractJsonObject())。
 // OpenRouter 的 minimax 是包裝版,OpenRouter 服務端會 strip thinking,
 // consumer 直接收純 JSON;只有直連 MiniMax native API 才會碰到 thinking content。
-// (Kilo PR #17 iter 1:之前寫 "ichte" 是錯字;iter 2 又被 LLM 改成亂碼字元,
-// 此版用純文字「think 標記或純文字分析」描述)
 
 const DEFAULT_BASE_URL = "https://openrouter.ai/api/v1";
 const DEFAULT_MODEL = "minimax/minimax-m3";
