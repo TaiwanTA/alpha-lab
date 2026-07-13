@@ -1,21 +1,21 @@
 [Unit]
-Description=Alpha Lab Dagu runtime
+Description=Alpha Lab Dagu runtime (compose wrapper)
+# This unit replaces the legacy `dagu start-all` systemd unit. It
+# drives the Docker compose stack defined at
+# /opt/alpha-lab/automation/deploy/dagu/docker-compose.yml.
 After=network-online.target docker.service
 Wants=network-online.target
+Requires=docker.service
 
 [Service]
-Type=simple
-User=alpha-lab-dagu
-Group=alpha-lab-dagu
-Environment=DAGU_HOME=/var/lib/alpha-lab/dagu
-WorkingDirectory=/var/lib/alpha-lab/dagu
-ExecStart=/usr/local/bin/dagu start-all
+Type=oneshot
+RemainAfterExit=true
+WorkingDirectory=/opt/alpha-lab/automation/deploy/dagu
+ExecStart=/usr/bin/docker compose -f /opt/alpha-lab/automation/deploy/dagu/docker-compose.yml up -d --remove-orphans
+ExecStop=/usr/bin/docker compose -f /opt/alpha-lab/automation/deploy/dagu/docker-compose.yml down
+ExecReload=/usr/bin/docker compose -f /opt/alpha-lab/automation/deploy/dagu/docker-compose.yml up -d --force-recreate
 Restart=on-failure
 RestartSec=5
-NoNewPrivileges=true
-PrivateTmp=true
-ProtectSystem=strict
-ReadWritePaths=/var/lib/alpha-lab/dagu
 
 [Install]
 WantedBy=multi-user.target

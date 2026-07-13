@@ -1,0 +1,61 @@
+# Dagu runtime as a Docker compose service on the alpha-lab VM.
+#
+# Topology:
+#   - joins the shared `hindsight-net` external network so it can
+#     reach `hindsight-hindsight-1:8888` and (via container name
+#     resolution) other services on that network;
+#   - mounts `/var/run/docker.sock` so dagu's `run:` steps can
+#     `docker exec` into the `hermes-hermes-1` container, where the
+#     hermes CLI lives. hermes v0.18.0 has no OpenAI-compatible
+#     HTTP endpoint, so the CLI is the only path to the configured
+#     `MiniMax-M3` model.
+#   - mounts the host's `/opt/alpha-lab` so the DAG scripts that
+#     reference `/opt/alpha-lab/automation/scripts/*` work without
+#     rebuilding the image on every change.
+#
+# Replace the legacy systemd unit (`alpha-lab-dagu.service`). After
+# this compose is in place, `systemctl start alpha-lab-dagu` should
+# exec `docker compose -f /opt/alpha-lab/automation/deploy/dagu/docker-compose.yml up -d`.
+
+name: alpha-lab-dagu
+
+services:
+  dagu:
+    image: ghcr.io/dagu-org/dagu:2.10.7
+    container_name: alpha-lab-dagu
+    restart: unless-stopped
+    user: "0:0"  # docker.sock access requires root in the container
+    command: ["start-all"]
+    ports:
+      - "127.0.0.1:8080:8080"
+    env_file:
+      # /etc/alpha-lab/dagu.env is mode 0440 root:alpha-lab-dagu.
+      # dagu's container runs as root so it can read the file.
+      # Tighten to `user: "999:982"` after adding the alpha-lab-dagu
+      # host user to the docker group and switching to a non-root
+      # container user.
+      - /etc/alpha-lab/dagu.env
+    environment:
+      # Override HINDSIGHT_BASE_URL: the env file records the
+      # host-loopback URL (useful for human-facing tooling on the
+      # VM), but from inside this container `127.0.0.1` is the
+      # container's own loopback, not the host. The Hindsight
+      # service is on the same `hindsight-net`; reach it by its
+      # container name.
+      HINDSIGHT_BASE_URL: "http://hindsight-hindsight-1:8888"
+    volumes:
+      # Persistent dagu state (dags, runs, logs).
+      - /var/lib/alpha-lab/dagu:/var/lib/alpha-lab/dagu
+      # Live source for the DAGs and helper scripts. Read-only so
+      # steps cannot accidentally mutate the deployed automation.
+      - /opt/alpha-lab/automation:/opt/alpha-lab/automation:ro
+      # docker.sock for `docker exec hermes-hermes-1 ...` calls
+      # from the hermes step.
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      - hindsight-net
+
+networks:
+  hindsight-net:
+    external: true
+    name: hindsight-net
