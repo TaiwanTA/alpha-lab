@@ -65,11 +65,24 @@ dagu version   # 預期: 2.10.7
 
 ```bash
 sudo cp /home/joker/projects/alpha-lab/automation/deploy/dagu/alpha-lab-dagu.service /etc/systemd/system/
-sudo sed -i "s|__PUBLISH_USER__|alpha-lab-dagu|g" /etc/systemd/system/alpha-lab-dagu.service
 sudo systemctl daemon-reload
 ```
 
-預期：`/etc/systemd/system/alpha-lab-dagu.service` 內 User=alpha-lab-dagu。
+確認 service 檔內 `User=`、`Environment=`、`ExecStart=`：
+
+```bash
+grep -E '^(User|Environment|ExecStart)=' /etc/systemd/system/alpha-lab-dagu.service
+```
+
+預期輸出：
+
+```
+User=alpha-lab-dagu
+Environment=DAGU_HOME=/var/lib/alpha-lab/dagu
+ExecStart=/usr/local/bin/dagu start-all
+```
+
+> 註：此 service file 在 commit `4a7d2fe` 內已是 hardcoded `User=alpha-lab-dagu`，**無** `__PUBLISH_USER__` placeholder。
 
 ## 5. 部署 Dagu admin config
 
@@ -120,7 +133,35 @@ sudo chmod 0400 /etc/alpha-lab/dagu.env
 
 預期：file owner `root:root`、perm `0400`。**絕不**把任何 token 寫進 git。
 
-## 7. 啟動 Dagu service
+> **已知取捨：** 三組 secret 全部由 `EnvironmentFile=` 注入 Dagu server process，**所有** `run:` step 都能在 shell 內讀到（process env 繼承）。目前唯一真正取用 `PUBLISH_TOKEN` 的 step 是 `blog-publish` 的 `push`，其他 step 不會主動讀取，所以是局部收斂的。但若未來要在受限模型行為之外做額外隔離，下一步可以改用 Dagu step-level secret provider 或在 step 內用一行 `env: PUBLISH_TOKEN=...` 限制範圍。
+
+## 7. 安裝 hermes 給 `alpha-lab-dagu` 可執行
+
+如果 hermes 是用 bun 裝在 `joker` user 的 `~/.bun/bin/hermes`，`alpha-lab-dagu` 預設沒讀權。**兩種做法擇一**：
+
+```bash
+# 做法 A（推薦）：把 hermes 與所需 binary 暴露成 world-readable + executable
+# 預期: hermes 自身是 ELF 或 bun launcher；需要看實際 owner
+ls -la /home/joker/.bun/bin/hermes 2>/dev/null || ls -la /home/joker/.local/bin/hermes
+sudo chmod -R o+rX /home/joker/.bun/bin /home/joker/.bun/registry 2>/dev/null || true
+sudo chmod -R o+rX /home/joker/.local/bin /home/joker/.local/share 2>/dev/null || true
+
+# 做法 B：把 hermes 與整個 bun 工具鏈系統級安裝到 /usr/local
+sudo cp /home/joker/.bun/bin/hermes /usr/local/bin/hermes
+sudo chmod 0755 /usr/local/bin/hermes
+```
+
+> 做法 B 較乾淨：hermes binary 脫離 user home，所有 system user 都能用，且不再依賴 `/home/joker/.bun/` 的權限。**推薦做法 B**。若 hermes 是 bun launcher（殼層 script），需連 `~/.bun/bin/bun` 一起複製並把 `#!/usr/bin/env bun` 改成 `#!$(command -v bun)`，或直接安裝 hermes 為系統套件（如果 Hindsight plugin 已有 standalone binary）。
+
+驗證 `alpha-lab-dagu` 真的能跑 hermes：
+
+```bash
+sudo -u alpha-lab-dagu -H /usr/local/bin/hermes --version
+```
+
+預期：版本字串，非 `Permission denied` 或 `command not found`。
+
+## 8. 啟動 Dagu service
 
 ```bash
 sudo systemctl enable --now alpha-lab-dagu
@@ -138,7 +179,7 @@ sudo journalctl -u alpha-lab-dagu -n 50 --no-pager
 
 常見原因：env file 路徑錯、token 含特殊字元需 quotes、Dagu 嘗試 git_sync 401。
 
-## 8. 初始化 Dagu admin 帳號（首次）
+## 9. 初始化 Dagu admin 帳號（首次）
 
 Dagu bind 在 `127.0.0.1:8080`，需 SSH tunnel 看 UI：
 
@@ -151,17 +192,42 @@ ssh -L 8080:127.0.0.1:8080 alpha-lab
 
 Dagu Git Sync 啟動後會每 5 分鐘 sync `automation/dags/*` 進 `/var/lib/alpha-lab/dagu/dags/`。等第一次 sync 完（看 UI 的 DAGs 列表）才進下一步。
 
-## 9. 配置 Hermes profile `alpha-lab-fixture`
+## 10. 配置 Hermes profile `alpha-lab-fixture`
+
+`alpha-lab-dagu` 是 system user（shell `/usr/sbin/nologin`），不能直接互動式 `hermes memory setup`；且 hermes binary 來自 root 安裝到 `/usr/local/bin/`，需要明確加入 PATH。**用一次性指令替代互動式 wizard**：
 
 ```bash
-sudo -u alpha-lab-dagu -H bash -lc 'hermes memory setup'
-# 互動輸入:
-#   provider: hindsight
-#   mode: local_external
-#   bank: alpha-lab-v3-fixture
-#   auto_retain: yes
-#   auto_recall: yes
+# alpha-lab-dagu 的 home 是 /var/lib/alpha-lab；hermes 不在它的預設 PATH
+# 我們安裝在 /usr/local/bin/hermes，對所有 user 可見，但仍需 export PATH 確認
+
+sudo -u alpha-lab-dagu -H bash -c '
+  export PATH=/usr/local/bin:$PATH
+  hermes memory setup \
+    --provider hindsight \
+    --mode local_external \
+    --bank alpha-lab-v3-fixture \
+    --auto-retain \
+    --auto-recall
+'
 ```
+
+> 若 `hermes memory setup` 還沒實作 non-interactive flags（不同版本差異），改用配置檔寫入：
+
+```bash
+sudo -u alpha-lab-dagu -H bash -c '
+  mkdir -p ~/.hermes
+  cat > ~/.hermes/profiles/alpha-lab-fixture.yaml <<EOF
+provider: hindsight
+mode: local_external
+bank: alpha-lab-v3-fixture
+auto_retain: true
+auto_recall: true
+EOF
+  chmod 0600 ~/.hermes/profiles/alpha-lab-fixture.yaml
+'
+```
+
+驗證 profile 已被讀：
 
 驗證：
 
@@ -174,38 +240,51 @@ sudo -u alpha-lab-dagu -H bash -lc 'hermes -p alpha-lab-fixture memory list'
 若 `hermes memory list` 找不到 bank，**先建 bank**：
 
 ```bash
-# 從 Dagu process 角度看 Hindsight 是 host loopback:8888
-curl -fsS -X POST http://127.0.0.1:8888/v1/banks \
+# Hindsight v0.8.x: bank create is a PUT upsert; bank_id is in the path.
+# Bearer token: 用 playbook Step 6 注入的 HINDSIGHT_API_KEY (或 self-hosted 未設時省略)
+curl -fsS -X PUT "http://127.0.0.1:8888/v1/default/banks/alpha-lab-v3-fixture" \
+  -H "Authorization: Bearer ${HINDSIGHT_API_KEY:-x}" \
   -H 'Content-Type: application/json' \
-  -d '{"bank_id":"alpha-lab-v3-fixture","name":"alpha-lab rebuild fixture","background":"isolated bank for the v3 rebuild milestone; must not read or write the production bank alpha-lab","traits":{"skepticism":0.5,"literalism":0.7}}'
+  -d '{
+    "retain_mission": "Extract only facts explicitly stated in the fixture Markdown; do not infer.",
+    "retain_extraction_mode": "concise",
+    "enable_observations": true,
+    "observations_mission": "Stable facts about the v3 rebuild milestone."
+  }'
 ```
 
-預期：HTTP 201（或 200 + 已存在 idempotent 回應）。`alpha-lab` bank 不得被讀寫。
+預期：HTTP 200 + `bank_id: "alpha-lab-v3-fixture"`。Self-hosted 若無 token 認證，把 `Authorization` 標頭移除（`${HINDSIGHT_API_KEY:-x}` 會被代換為 `x` 但若 server 接受任意值即可；若 server 嚴格認證則 401）。
 
-## 10. （可選）預先驗證 Hindsight bank 行為
+## 11. （可選）預先驗證 Hindsight bank 行為
 
 ```bash
-# 由 Hindsight container 端查
-docker exec hermes-hindsight-1 sh -c 'curl -s http://127.0.0.1:8888/banks | jq'
+# 由 Hindsight container 端查; v0.8.x banks 列表透過 /v1/default/banks
+docker exec hermes-hindsight-1 sh -c 'curl -s http://127.0.0.1:8888/v1/default/banks | jq'
 ```
 
 預期：`alpha-lab-v3-fixture` 存在、`alpha-lab` 仍存在且未變更。
 
-`alpha-lab` bank 的 baseline 事實數記下來（`alpha-lab-facts-before.json`）；Dagu run 完成後再查一次，**必須**仍是同一個數字：
+`alpha-lab` bank 的 baseline `.total` 記下來（`alpha-lab-total-before.json`）；Dagu run 完成後再查一次，**必須**仍是同一個數字：
 
 ```bash
-curl -fsS http://127.0.0.1:8888/v1/banks/alpha-lab/facts?limit=1 | jq '.items | length' > /tmp/alpha-lab-facts-before.json
+curl -fsS 'http://127.0.0.1:8888/v1/default/banks/alpha-lab/memories/list?limit=0' | jq '.total' > /tmp/alpha-lab-total-before.json
 ```
 
-`alpha-lab-v3-fixture` 跑完後應有 > 0 筆 retain 記錄：
+`alpha-lab-v3-fixture` 跑完後應有 > 0 筆 retain 記錄（Hindsight v0.8.x：list memory units path）：
 
 ```bash
-curl -fsS http://127.0.0.1:8888/v1/banks/alpha-lab-v3-fixture/facts?limit=10 | jq
+curl -fsS 'http://127.0.0.1:8888/v1/default/banks/alpha-lab-v3-fixture/memories/list?limit=0' | jq '.total'
 ```
 
-預期：至少一筆 fixture retain；`source` 應包含 `alpha-lab-fixture` Hermes profile。
+預期：> 0。若想看具體 facts：
 
-## 11. 啟動 fixture-research DAG
+```bash
+curl -fsS 'http://127.0.0.1:8888/v1/default/banks/alpha-lab-v3-fixture/memories/list?limit=10' | jq '.items[] | {id, type, text, mentioned_at: .date}'
+```
+
+預期：list 內含 fixture retain；`type` 為 `world`、`experience` 或 `observation`；`text` 引用 fixture 內容。
+
+## 12. 啟動 fixture-research DAG
 
 ```bash
 sudo -u alpha-lab-dagu -H bash -lc 'DAGU_HOME=/var/lib/alpha-lab/dagu dagu start fixture-research'
@@ -230,7 +309,7 @@ sudo journalctl -u alpha-lab-dagu -n 200 --no-pager
 - Hindsight 不可用：HINDSIGHT_BASE_URL 寫錯（注意 127.0.0.1 對 Dagu process 是 host loopback，不是 container loopback）。
 - Publisher 拒絕：candidate 不符合 frontmatter 規則；Dagu UI 的 `hermes` step 的 stdout artifact 會保留 `candidate.md` 供查。
 
-## 12. 端到端驗收清單
+## 14. 端到端驗收清單
 
 Dagu run 顯示 `succeeded` 後，逐條核對：
 
@@ -243,16 +322,34 @@ Dagu run 顯示 `succeeded` 後，逐條核對：
 - [ ] `https://alpha-lab.pages.dev/tags/` 不含此文章 tag。
 - [ ] `https://alpha-lab.pages.dev/feed.xml` 不含此文章。
 - [ ] 重跑 `dagu start fixture-research`，**不**產生第二個 git commit（`git log origin/main` 仍只有那一次）。
+- [ ] Hindsight `alpha-lab-v3-fixture` bank 至少 1 筆 retain 記錄：
+
+  ```bash
+  curl -fsS 'http://127.0.0.1:8888/v1/default/banks/alpha-lab-v3-fixture/memories/list?limit=0' | jq '.total'
+  ```
+
+  預期：> 0。
+- [ ] Hindsight `alpha-lab` production bank `.total` 與 baseline 相同：
+
+  ```bash
+  # 跑 Dagu 前先取 baseline
+  curl -fsS 'http://127.0.0.1:8888/v1/default/banks/alpha-lab/memories/list?limit=0' | jq '.total' > /tmp/alpha-lab-total-before.json
+  # 跑 Dagu 後再取一次，比較兩者
+  curl -fsS 'http://127.0.0.1:8888/v1/default/banks/alpha-lab/memories/list?limit=0' | jq '.total'
+  cat /tmp/alpha-lab-total-before.json
+  ```
+
+  預期：兩個數字相等（rebuild 不得污染 production bank）。
 - [ ] 把 `candidate.md` 換成含 `<script>` 的版本，再跑，**不**產生新 commit（publisher 拒絕）；Dagu UI 的 publish step 顯示 `failed`。
 
-## 13. 失敗時的回退
+## 15. 失敗時的回退
 
 - **Dagu process 卡住**：`sudo systemctl restart alpha-lab-dagu`。
 - **VM 端 secret 疑慮**：`sudo chmod 0400 /etc/alpha-lab/dagu.env`、重讀 unit `sudo systemctl daemon-reload`。
 - **Dagu run 留垃圾**：`/var/lib/alpha-lab/dagu/data/dag-runs/<dag>/<run-id>/` 是 isolated workspace；用 `dagu history --cleanup` 清理。
 - **main 上多了不該有的 commit**：`git revert <sha>`，把 Dagu run 標記 failed 後不重跑。
 
-## 14. 後續（不在本 playbook 範圍）
+## 16. 後續（不在本 playbook 範圍）
 
 - 用真實 X、新聞、網站來源替換 fixture。
 - 啟用 GitHub `schedule` 觸發 Dagu sub-DAG（Task 5 之外）。
