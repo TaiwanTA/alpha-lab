@@ -1,0 +1,129 @@
+# Sub-DAG invoked by `fixture-research` after a candidate has been
+# produced. This is the ONLY place in the system that holds
+# `PUBLISH_TOKEN`; the token is injected as a process environment
+# variable only on the final `git push` step and is never visible
+# to any earlier step, the publisher script, or Hermes.
+#
+# Verified Dagu v2.10.7 syntax only:
+#   - `${env.NAME}` is the only strict-binding namespace that resolves
+#     to a process environment variable.
+#   - `output: VARNAME` captures a step's stdout into a string variable.
+#   - `preconditions: [...]` gates a step on shell conditions or value
+#     matches; this is how the diff-count gate is implemented.
+#   - `working_dir:` (not `dir:`); `DAG_RUN_ID` (not `DAGU_RUN_ID`).
+#
+# This sub-DAG accepts two parameters:
+#   - `candidate_path` (absolute path to the candidate Markdown)
+#   - `runtime_sha` (the commit SHA that produced the candidate)
+#
+# It performs:
+#   1. a fresh `main` checkout into a NEW worktree (never the one
+#      that produced the candidate);
+#   2. materialization of the candidate into the new worktree;
+#   3. the pure draft publisher;
+#   4. Astro `npm ci` / `npm run lint` / `npm run build`;
+#   5. a deterministic diff-count gate (exactly one new Markdown file);
+#   6. a single `git commit` + `git push` with `PUBLISH_TOKEN`.
+#
+# It NEVER executes any script from the parent's worktree; the
+# checkout here is independent of the parent's `workspace/app`.
+
+params:
+  candidate_path: ""
+  runtime_sha: ""
+
+artifacts:
+  enabled: true
+timeout_sec: 900
+type: graph
+
+steps:
+  - id: checkout
+    action: git.checkout
+    with:
+      repository: https://github.com/TaiwanTA/alpha-lab.git
+      ref: main
+      path: ./workspace/publish
+      depth: 1
+      force: true
+      token: "${env.GIT_READ_TOKEN}"
+
+  - id: record_workdir
+    depends: [checkout]
+    working_dir: ./workspace/publish
+    run: pwd
+    output: WORKDIR
+
+  - id: materialize_candidate
+    depends: [record_workdir]
+    working_dir: ./workspace/publish
+    run: |
+      set -euo pipefail
+      cp "${params.candidate_path}" "${WORKDIR}/candidate.md"
+      test -s "${WORKDIR}/candidate.md"
+      echo "Materialized candidate from ${params.candidate_path}"
+      echo "Runtime SHA: ${params.runtime_sha}"
+
+  - id: publish_draft
+    depends: [materialize_candidate]
+    working_dir: ./workspace/publish
+    run: |
+      set -euo pipefail
+      cd "${WORKDIR}/automation"
+      bun install --frozen-lockfile
+      bun run scripts/publish-draft.ts \
+        --candidate "${WORKDIR}/candidate.md" \
+        --blog-dir "${WORKDIR}/blog" \
+        --runtime-sha "${params.runtime_sha}"
+    env:
+
+  - id: site_lint_build
+    depends: [publish_draft]
+    working_dir: ./workspace/publish
+    run: |
+      set -euo pipefail
+      cd "${WORKDIR}/blog"
+      npm ci
+      npm run lint
+      npm run build
+
+  - id: diff_gate_count
+    depends: [site_lint_build]
+    working_dir: ./workspace/publish
+    run: |
+      set -euo pipefail
+      git -C "${WORKDIR}" add -- blog/src/content/blog || true
+      git -C "${WORKDIR}" diff --cached --name-only -- 'blog/src/content/blog/*.md' | wc -l
+    output: DIFF_COUNT
+
+  - id: diff_gate_publish_path
+    depends: [diff_gate_count]
+    preconditions:
+      - condition: "[ ${DIFF_COUNT:-0} -eq 1 ]"
+    working_dir: ./workspace/publish
+    run: |
+      set -euo pipefail
+      git -C "${WORKDIR}" diff --cached --name-only -- 'blog/src/content/blog/*.md' | tr -d '\n'
+    output: DIFF_PATH
+
+  - id: commit
+    depends: [diff_gate_publish_path]
+    working_dir: ./workspace/publish
+    run: |
+      set -euo pipefail
+      git -C "${WORKDIR}" config user.email "alpha-lab-bot@users.noreply.github.com"
+      git -C "${WORKDIR}" config user.name "alpha-lab-bot"
+      git -C "${WORKDIR}" commit -m "feat(blog): publish draft from fixture-research (${DAG_RUN_ID})"
+
+  - id: push
+    depends: [commit]
+    working_dir: ./workspace/publish
+    run: |
+      set -euo pipefail
+      git -C "${WORKDIR}" push "https://x-access-token:${PUBLISH_TOKEN}@github.com/TaiwanTA/alpha-lab.git" HEAD:main
+    env:
+      - PUBLISH_TOKEN=${env.PUBLISH_TOKEN}
+    retry_policy:
+      limit: 1
+      interval_sec: 30
+      exit_code: [128]

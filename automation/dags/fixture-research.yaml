@@ -1,0 +1,86 @@
+# Root DAG for the Dagu safe-publish rebuild.
+#
+# Verified Dagu v2.10.7 syntax only:
+#   - `${env.NAME}` is the only strict-binding namespace that resolves
+#     to a process environment variable.
+#   - `stdout: { artifact: ... }` is the only form that registers an
+#     immutable per-run artifact.
+#   - `output: VARNAME` captures a step's stdout into a string variable
+#     resolvable as `${VARNAME}` in downstream steps.
+#   - `working_dir:` (not `dir:`); `DAG_RUN_ID` (not `DAGU_RUN_ID`).
+#   - `action: dag.run` with `with.params` passes named parameters; the
+#     child DAG reads them as `${params.NAME}`.
+#   - `dag.run` does NOT expose `${step_id.outputs.*}` to the parent in
+#     v2.10.7; the child publishes its own results via the standard
+#     RunStatus JSON, which is observable in the Dagu UI but is not
+#     needed for control flow here.
+#
+# This DAG owns:
+#   - a single, fresh Hermes session for the `alpha-lab-fixture` profile;
+#   - one `git rev-parse HEAD` capture for the runtime SHA;
+#   - one synchronous `blog-publish` sub-DAG invocation.
+# It does NOT own the publish step itself. The publisher and the Git
+# push are owned by `blog-publish.yaml`.
+
+artifacts:
+  enabled: true
+timeout_sec: 900
+type: graph
+
+steps:
+  - id: checkout
+    action: git.checkout
+    with:
+      repository: https://github.com/TaiwanTA/alpha-lab.git
+      ref: main
+      path: ./workspace/app
+      depth: 1
+      force: true
+      token: "${env.GIT_READ_TOKEN}"
+
+  - id: record_runtime_sha
+    depends: [checkout]
+    working_dir: ./workspace/app
+    run: git rev-parse HEAD
+    output: RUNTIME_SHA
+
+  - id: record_workdir
+    depends: [checkout]
+    working_dir: ./workspace/app
+    run: pwd
+    output: WORKDIR
+
+  - id: hermes
+    depends: [record_runtime_sha, record_workdir]
+    working_dir: ./workspace/app
+    run: |
+      set -euo pipefail
+      export ALPHA_LAB_RUN_ID="${DAG_RUN_ID}"
+      export ALPHA_LAB_WORKSPACE="$PWD"
+      export ALPHA_LAB_CANDIDATE_PATH="$PWD/candidate.md"
+      hermes -p alpha-lab-fixture -z "$(cat automation/prompts/fixture-research.md)" > "$ALPHA_LAB_CANDIDATE_PATH"
+      cat "$ALPHA_LAB_CANDIDATE_PATH"
+    env:
+      - HINDSIGHT_BASE_URL=${env.HINDSIGHT_BASE_URL}
+      - HINDSIGHT_API_KEY=${env.HINDSIGHT_API_KEY}
+      - HINDSIGHT_BANK_ID=alpha-lab-v3-fixture
+    stdout:
+      artifact: candidate.md
+    timeout_sec: 600
+    retry_policy:
+      limit: 1
+      interval_sec: 30
+      exit_code: [1]
+
+  - id: publish
+    depends: [hermes]
+    action: dag.run
+    with:
+      dag: blog-publish
+      params:
+        candidate_path: "${WORKDIR}/candidate.md"
+        runtime_sha: "${RUNTIME_SHA}"
+    retry_policy:
+      limit: 1
+      interval_sec: 30
+      exit_code: [1]
