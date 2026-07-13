@@ -27,3 +27,6 @@ research/_staging/
 
 # Hermes agent state
 .hermes/
+
+# SDD local progress / reviews
+.superpowers/
