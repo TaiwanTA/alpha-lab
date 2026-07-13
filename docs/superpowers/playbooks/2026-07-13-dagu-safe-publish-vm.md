@@ -161,7 +161,30 @@ sudo -u alpha-lab-dagu -H /usr/local/bin/hermes --version
 
 預期：版本字串，非 `Permission denied` 或 `command not found`。
 
-## 8. 啟動 Dagu service
+## 7.5. 把 DAG YAML 放到 Dagu 的 dags 目錄
+
+> **依賴：** Step 6 已把 `GIT_READ_TOKEN` 注入 `/etc/alpha-lab/dagu.env`。Dagu 啟動時會用這個 token 做 `git_sync` 拉 `main`，但**本步驟不靠 git_sync**——直接 cp 檔案進 Dagu 的 `dags_dir`，跳過 git_sync 找不到 main 分支空集合的問題。`blog-publish.yaml` 內的 `git.checkout` 步驟在執行 DAG 時（不是啟動 Dagu 時）才用 `GIT_READ_TOKEN`，那時 token 已在 process env。
+
+`automation/dags/*.yaml` 目前只在 `rebuild/task-3-dags` 與後續 `rebuild/task-5-vm` 分支上，**不在** `main`。`admin.yaml` 的 `git_sync` 從 `main` 拉，會找不到 DAG → Dagu UI 列表是空的。
+
+**這個 milestone 不要 merge rebuild 分支到 main**（先發後驗風險）。改用**手動 cp** 進 Dagu 的 dags 目錄，讓 Dagu 直接讀檔、跳過 git_sync：
+
+```bash
+sudo mkdir -p /var/lib/alpha-lab/dagu/dags
+sudo cp /home/joker/projects/alpha-lab/automation/dags/fixture-research.yaml /var/lib/alpha-lab/dagu/dags/
+sudo cp /home/joker/projects/alpha-lab/automation/dags/blog-publish.yaml /var/lib/alpha-lab/dagu/dags/
+sudo chown -R alpha-lab-dagu:alpha-lab-dagu /var/lib/alpha-lab/dagu/dags
+sudo -u alpha-lab-dagu dagu validate /var/lib/alpha-lab/dagu/dags/fixture-research.yaml
+sudo -u alpha-lab-dagu dagu validate /var/lib/alpha-lab/dagu/dags/blog-publish.yaml
+```
+
+預期：兩條 `dagu validate` 都 exit 0。
+
+> **重跑時**：若你在 `rebuild/*` 分支上重新 checkout 或 pull 程式碼，再次跑這段 cp 指令把最新 YAML 同步到 Dagu 的 dags 目錄。**不需要**重啟 systemd unit（Dagu 會在每次 `dagu start` 時讀檔）。
+>
+> **未來 cutover**：當所有 task 都被合併到 `main`、且 `automation/dags/*.yaml` 在 `main` 內後，刪除這步 cp、刪除 `dags/` 內手動放的檔，git_sync 會自己從 `main` 拉到。
+
+## 9. 啟動 Dagu service
 
 ```bash
 sudo systemctl enable --now alpha-lab-dagu
@@ -179,7 +202,7 @@ sudo journalctl -u alpha-lab-dagu -n 50 --no-pager
 
 常見原因：env file 路徑錯、token 含特殊字元需 quotes、Dagu 嘗試 git_sync 401。
 
-## 9. 初始化 Dagu admin 帳號（首次）
+## 10. 初始化 Dagu admin 帳號（首次）
 
 Dagu bind 在 `127.0.0.1:8080`，需 SSH tunnel 看 UI：
 
@@ -192,7 +215,7 @@ ssh -L 8080:127.0.0.1:8080 alpha-lab
 
 Dagu Git Sync 啟動後會每 5 分鐘 sync `automation/dags/*` 進 `/var/lib/alpha-lab/dagu/dags/`。等第一次 sync 完（看 UI 的 DAGs 列表）才進下一步。
 
-## 10. 配置 Hermes profile `alpha-lab-fixture`
+## 11. 配置 Hermes profile `alpha-lab-fixture`
 
 `alpha-lab-dagu` 是 system user（shell `/usr/sbin/nologin`），不能直接互動式 `hermes memory setup`；且 hermes binary 來自 root 安裝到 `/usr/local/bin/`，需要明確加入 PATH。**用一次性指令替代互動式 wizard**：
 
@@ -254,7 +277,7 @@ curl -fsS -X PUT "http://127.0.0.1:8888/v1/default/banks/alpha-lab-v3-fixture" \
 
 預期：HTTP 200 + `bank_id: "alpha-lab-v3-fixture"`。**Self-hosted 是否需要 `Authorization` header** 取決於 Hindsight container 啟動設定（環境變數 `HINDSIGHT_API_KEY` 或類似的 auth provider）。若有開，必須把 `${HINDSIGHT_API_KEY:-x}` 換成實際 bearer token；若沒開，移除 `Authorization` 標頭即可。
 
-## 11. （可選）預先驗證 Hindsight bank 行為
+## 12. （可選）預先驗證 Hindsight bank 行為
 
 > **Auth header 假設：** 下方所有 Hindsight `curl` 都預設 self-hosted 未開 bearer auth。如果你的 `hermes-hindsight-1` 啟動時設了 `HINDSIGHT_API_KEY` 或其他 auth provider，**每條 curl 都要加** `-H "Authorization: Bearer $HINDSIGHT_API_KEY"`。
 
@@ -285,7 +308,7 @@ curl -fsS 'http://127.0.0.1:8888/v1/default/banks/alpha-lab-v3-fixture/memories/
 
 預期：list 內含 fixture retain；`type` 為 `world`、`experience` 或 `observation`；`text` 引用 fixture 內容。
 
-## 12. 啟動 fixture-research DAG
+## 13. 啟動 fixture-research DAG
 
 ```bash
 sudo -u alpha-lab-dagu -H bash -lc 'DAGU_HOME=/var/lib/alpha-lab/dagu dagu start fixture-research'
@@ -310,7 +333,7 @@ sudo journalctl -u alpha-lab-dagu -n 200 --no-pager
 - Hindsight 不可用：HINDSIGHT_BASE_URL 寫錯（注意 127.0.0.1 對 Dagu process 是 host loopback，不是 container loopback）。
 - Publisher 拒絕：candidate 不符合 frontmatter 規則；Dagu UI 的 `hermes` step 的 stdout artifact 會保留 `candidate.md` 供查。
 
-## 14. 端到端驗收清單
+## 15. 端到端驗收清單
 
 Dagu run 顯示 `succeeded` 後，逐條核對：
 
@@ -343,14 +366,14 @@ Dagu run 顯示 `succeeded` 後，逐條核對：
   預期：兩個數字相等（rebuild 不得污染 production bank）。
 - [ ] 把 `candidate.md` 換成含 `<script>` 的版本，再跑，**不**產生新 commit（publisher 拒絕）；Dagu UI 的 publish step 顯示 `failed`。
 
-## 15. 失敗時的回退
+## 16. 失敗時的回退
 
 - **Dagu process 卡住**：`sudo systemctl restart alpha-lab-dagu`。
 - **VM 端 secret 疑慮**：`sudo chmod 0400 /etc/alpha-lab/dagu.env`、重讀 unit `sudo systemctl daemon-reload`。
 - **Dagu run 留垃圾**：`/var/lib/alpha-lab/dagu/data/dag-runs/<dag>/<run-id>/` 是 isolated workspace；用 `dagu history --cleanup` 清理。
 - **main 上多了不該有的 commit**：`git revert <sha>`，把 Dagu run 標記 failed 後不重跑。
 
-## 16. 後續（不在本 playbook 範圍）
+## 17. 後續（不在本 playbook 範圍）
 
 - 用真實 X、新聞、網站來源替換 fixture。
 - 啟用 GitHub `schedule` 觸發 Dagu sub-DAG（Task 5 之外）。
