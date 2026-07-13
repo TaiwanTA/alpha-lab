@@ -113,6 +113,12 @@ Dagu secrets must be step-scoped. `PUBLISH_TOKEN` is not a DAG-global environmen
 - candidate artifact persistence failure：`fixture-research` fail；沒有 publication side effect。
 - `blog-publish` failure：保留 research artifact 與 parent/sub-DAG run history；可只重跑 publish sub-DAG，不重新呼叫 Hermes 或消耗研究 token。
 
+### 可行性關卡
+
+在實作 publisher 之前，必須先在隔離 VM profile 驗證 Dagu-to-Hermes integration：手動 Dagu step 必須能啟動 `hermes -p alpha-lab-fixture -z`、完成 external Hindsight retain/recall、寫入 `candidate.md`，並在 Dagu run record 中暴露 stdout/stderr 與 artifact。
+
+這是強制的第一個 implementation checkpoint，不是 fallback path。若 Dagu process execution、Hermes profile selection、Hindsight external-provider configuration 或 Dagu artifact handoff 需要不相容的 workaround，必須在實作 publication 前停止，依觀察到的限制更新本設計與 implementation plan；不得悄悄引入平行 orchestrator 或 compatibility shim。
+
 ## File layout
 
 ```text
