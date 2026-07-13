@@ -246,16 +246,17 @@ curl -fsS -X PUT "http://127.0.0.1:8888/v1/default/banks/alpha-lab-v3-fixture" \
   -H "Authorization: Bearer ${HINDSIGHT_API_KEY:-x}" \
   -H 'Content-Type: application/json' \
   -d '{
-    "retain_mission": "Extract only facts explicitly stated in the fixture Markdown; do not infer.",
+    "retain_mission": "Extract only facts explicitly stated in the fixture Markdown; do not infer; do not read or write the production bank alpha-lab.",
     "retain_extraction_mode": "concise",
-    "enable_observations": true,
-    "observations_mission": "Stable facts about the v3 rebuild milestone."
+    "enable_observations": false
   }'
 ```
 
-預期：HTTP 200 + `bank_id: "alpha-lab-v3-fixture"`。Self-hosted 若無 token 認證，把 `Authorization` 標頭移除（`${HINDSIGHT_API_KEY:-x}` 會被代換為 `x` 但若 server 接受任意值即可；若 server 嚴格認證則 401）。
+預期：HTTP 200 + `bank_id: "alpha-lab-v3-fixture"`。**Self-hosted 是否需要 `Authorization` header** 取決於 Hindsight container 啟動設定（環境變數 `HINDSIGHT_API_KEY` 或類似的 auth provider）。若有開，必須把 `${HINDSIGHT_API_KEY:-x}` 換成實際 bearer token；若沒開，移除 `Authorization` 標頭即可。
 
 ## 11. （可選）預先驗證 Hindsight bank 行為
+
+> **Auth header 假設：** 下方所有 Hindsight `curl` 都預設 self-hosted 未開 bearer auth。如果你的 `hermes-hindsight-1` 啟動時設了 `HINDSIGHT_API_KEY` 或其他 auth provider，**每條 curl 都要加** `-H "Authorization: Bearer $HINDSIGHT_API_KEY"`。
 
 ```bash
 # 由 Hindsight container 端查; v0.8.x banks 列表透過 /v1/default/banks
