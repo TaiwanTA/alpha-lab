@@ -30,3 +30,9 @@ research/_staging/
 
 # SDD local progress / reviews
 .superpowers/
+
+# Automation runtime scratch / Dagu local cache
+automation/.dagu/
+automation/.run-logs/
+automation/outbox/
+automation/candidates/

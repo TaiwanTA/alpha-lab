@@ -135,7 +135,6 @@ Install, daemon-reload, enable and start it. Verify locally with `curl --fail ht
 Create `automation/dags/feasibility-check.yaml` using only verified Dagu v2 syntax. The command must call a fresh profile and redirect final Hermes output to a candidate path while Dagu captures stdout as an artifact:
 
 ```yaml
-name: feasibility-check
 artifacts:
   enabled: true
 timeout_sec: 900
@@ -151,10 +150,10 @@ steps:
       token: "${secrets.GIT_READ_TOKEN}"
   - id: hermes
     depends: [checkout]
-    dir: ./workspace/app
+    working_dir: ./workspace/app
     run: |
       set -euo pipefail
-      export ALPHA_LAB_RUN_ID="${DAGU_RUN_ID}"
+      export ALPHA_LAB_RUN_ID="${DAG_RUN_ID}"
       export ALPHA_LAB_WORKSPACE="$PWD"
       export ALPHA_LAB_CANDIDATE_PATH="$PWD/candidate.md"
       hermes -p alpha-lab-fixture -z "$(cat automation/prompts/fixture-research.md)" > "$ALPHA_LAB_CANDIDATE_PATH"
@@ -162,13 +161,19 @@ steps:
     env:
       - HINDSIGHT_BASE_URL=${secrets.HINDSIGHT_BASE_URL}
       - HINDSIGHT_BANK_ID=alpha-lab-v3-fixture
-    stdout_artifact: candidate.md
+    stdout: candidate.md
     timeout_sec: 600
     retry_policy:
       limit: 1
       interval_sec: 30
       exit_code: [1]
 ```
+
+> Dagu v2.10.7 verified contract:
+> - DAG name is inferred from the file name; do not add `name:` at the root.
+> - Step working directory uses `working_dir`, not `dir`.
+> - Per-step stdout capture uses the `stdout` field; `stdout_artifact` is the older name.
+> - The runtime exports `DAG_RUN_ID`, not `DAGU_RUN_ID`. Use `DAG_RUN_ID` for `ALPHA_LAB_RUN_ID`.
 
 Run `dagu validate automation/dags/feasibility-check.yaml` locally and on the VM after sync.
 
