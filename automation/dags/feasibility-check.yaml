@@ -7,8 +7,21 @@
 # which Dagu infers as `feasibility-check` for `dagu start` and for
 # downstream `dag.run` references.
 #
-# Verified Dagu v2.10.7 syntax only: `type: graph`, `action:`, `with:`,
-# `depends:`, `working_dir:`, `stdout:`, `retry_policy:`. No v1 fields.
+# Verified Dagu v2.10.7 syntax only:
+#   - `${env.NAME}` is the only strict-binding namespace that resolves
+#     to a process environment variable. The legacy `${secrets.X}`
+#     form does not exist in v2.10.7 and would be sent to GitHub as
+#     a literal BasicAuth password.
+#   - `stdout: { artifact: ... }` is the only form that registers an
+#     immutable per-run artifact.
+#   - `working_dir:` (not `dir:`); `DAG_RUN_ID` (not `DAGU_RUN_ID`).
+#   - Git, Hindsight and LLM credentials are injected as process
+#     environment variables by the VM systemd unit; this DAG never
+#     receives them through any other channel and never sees the
+#     publish or Cloudflare credentials.
+#
+# This DAG must NOT be expanded to publish anything. The publisher is
+# only added in Task 3 (`fixture-research` + `blog-publish`).
 
 artifacts:
   enabled: true
@@ -24,7 +37,7 @@ steps:
       path: ./workspace/app
       depth: 1
       force: true
-      token: "${secrets.GIT_READ_TOKEN}"
+      token: "${env.GIT_READ_TOKEN}"
 
   - id: hermes
     depends: [checkout]
@@ -37,9 +50,11 @@ steps:
       hermes -p alpha-lab-fixture -z "$(cat automation/prompts/fixture-research.md)" > "$ALPHA_LAB_CANDIDATE_PATH"
       cat "$ALPHA_LAB_CANDIDATE_PATH"
     env:
-      - HINDSIGHT_BASE_URL=${secrets.HINDSIGHT_BASE_URL}
+      - HINDSIGHT_BASE_URL=${env.HINDSIGHT_BASE_URL}
+      - HINDSIGHT_API_KEY=${env.HINDSIGHT_API_KEY}
       - HINDSIGHT_BANK_ID=alpha-lab-v3-fixture
-    stdout: candidate.md
+    stdout:
+      artifact: candidate.md
     timeout_sec: 600
     retry_policy:
       limit: 1

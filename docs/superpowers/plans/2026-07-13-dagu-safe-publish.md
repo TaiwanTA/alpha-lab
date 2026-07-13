@@ -90,7 +90,7 @@ git_sync:
   path: automation/dags
   auth:
     type: token
-    token: "${secrets.GIT_READ_TOKEN}"
+    token: "${env.GIT_READ_TOKEN}"
   auto_sync:
     enabled: true
     on_startup: true
@@ -147,7 +147,7 @@ steps:
       path: ./workspace/app
       depth: 1
       force: true
-      token: "${secrets.GIT_READ_TOKEN}"
+      token: "${env.GIT_READ_TOKEN}"
   - id: hermes
     depends: [checkout]
     working_dir: ./workspace/app
@@ -159,9 +159,9 @@ steps:
       hermes -p alpha-lab-fixture -z "$(cat automation/prompts/fixture-research.md)" > "$ALPHA_LAB_CANDIDATE_PATH"
       cat "$ALPHA_LAB_CANDIDATE_PATH"
     env:
-      - HINDSIGHT_BASE_URL=${secrets.HINDSIGHT_BASE_URL}
+      - HINDSIGHT_BASE_URL=${env.HINDSIGHT_BASE_URL}
       - HINDSIGHT_BANK_ID=alpha-lab-v3-fixture
-    stdout: candidate.md
+    stdout: { artifact: "candidate.md" }
     timeout_sec: 600
     retry_policy:
       limit: 1
