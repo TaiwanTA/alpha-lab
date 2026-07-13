@@ -29,14 +29,20 @@ type: graph
 
 steps:
   - id: checkout
-    action: git.checkout
-    with:
-      repository: https://github.com/TaiwanTA/alpha-lab.git
-      ref: main
-      path: ./workspace/app
-      depth: 1
-      force: true
-      token: "${env.GIT_READ_TOKEN}"
+    # Dagu 2.10.7's git.checkout action uses go-git and sends Basic Auth
+    # with username="git" when token is set, which GitHub rejects since
+    # 2021-08. Even when username/password is provided, the go-git
+    # transport still surfaces a similar error against fine-grained PATs.
+    # Verified escape hatch: shell `git clone` with x-access-token in
+    # the URL works. We use a run step here to keep DAG-only state.
+    # Inject token as step env (Dagu resolves ${env.GIT_READ_TOKEN}
+    # in the env list at step start). The shell then reads $GIT_READ_TOKEN.
+    # dagu 2.10.7 does not interpolate ${env.X} inside the run script
+    # body; it only does so in YAML structural values. We delegate to a
+    # wrapper script that reads $GIT_READ_TOKEN from the inherited
+    # process environment, which is set by systemd's EnvironmentFile
+    # in the alpha-lab-dagu.service unit.
+    run: bash /opt/alpha-lab/automation/scripts/clone-fixture.sh
 
   - id: record_runtime_sha
     depends: [checkout]
