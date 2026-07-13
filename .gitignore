@@ -27,3 +27,12 @@ research/_staging/
 
 # Hermes agent state
 .hermes/
+
+# SDD local progress / reviews
+.superpowers/
+
+# Automation runtime scratch / Dagu local cache
+automation/.dagu/
+automation/.run-logs/
+automation/outbox/
+automation/candidates/

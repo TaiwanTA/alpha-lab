@@ -10,9 +10,48 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  validate-automation:
+    name: Validate Dagu automation
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install automation dependencies
+        working-directory: automation
+        run: bun install --frozen-lockfile
+
+      - name: Test and typecheck automation
+        working-directory: automation
+        run: |
+          bun test
+          bun run typecheck
+
+      - name: Install Dagu v2.10.7
+        run: |
+          curl -fsSL https://github.com/dagucloud/dagu/releases/download/v2.10.7/dagu_2.10.7_linux_amd64.tar.gz -o /tmp/dagu.tar.gz
+          echo '8884a11a982bcaf675b562544b70f81a71c6cb7a7adbafe42ed2e6f6e42ece20  /tmp/dagu.tar.gz' | sha256sum -c -
+          tar -xzf /tmp/dagu.tar.gz -C /tmp
+          sudo install /tmp/dagu /usr/local/bin/dagu
+          dagu version
+
+      - name: Validate Dagu definitions
+        run: |
+          dagu validate automation/dags/fixture-research.yaml
+          dagu validate automation/dags/blog-publish.yaml
+
   deploy:
     name: Build and deploy
     runs-on: ubuntu-latest
+    needs: validate-automation
+    timeout-minutes: 15
 
     steps:
       - name: Checkout
