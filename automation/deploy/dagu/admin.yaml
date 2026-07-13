@@ -1,0 +1,27 @@
+# Dagu admin configuration for the alpha-lab VM.
+#
+# This YAML is non-secret. The bootstrap admin credential is supplied
+# through Dagu's first-run loopback UI and is stored in the VM secret
+# store, never in this file. `GIT_READ_TOKEN` is resolved at runtime
+# from Dagu's local secret provider; it is referenced here by name
+# only and never appears in the file.
+
+host: "127.0.0.1"
+port: 8080
+paths:
+  dags_dir: /var/lib/alpha-lab/dagu/dags
+  data_dir: /var/lib/alpha-lab/dagu/data
+  log_dir: /var/lib/alpha-lab/dagu/logs
+git_sync:
+  enabled: true
+  repository: github.com/TaiwanTA/alpha-lab
+  branch: main
+  path: automation/dags
+  auth:
+    type: token
+    token: "${secrets.GIT_READ_TOKEN}"
+  auto_sync:
+    enabled: true
+    on_startup: true
+    interval: 300
+  push_enabled: false

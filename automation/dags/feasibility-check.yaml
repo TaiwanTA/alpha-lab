@@ -1,0 +1,47 @@
+# Feasibility gate: prove the Dagu-to-Hermes-to-Hindsight contract.
+#
+# This DAG is the first implementation checkpoint of the
+# Dagu-Hermes execution contract. It deliberately contains only the
+# checkout, the fresh Hermes session, and the artifact capture; no
+# publisher step is invoked here. The DAG filename is the DAG name,
+# which Dagu infers as `feasibility-check` for `dagu start` and for
+# downstream `dag.run` references.
+#
+# Verified Dagu v2.10.7 syntax only: `type: graph`, `action:`, `with:`,
+# `depends:`, `working_dir:`, `stdout:`, `retry_policy:`. No v1 fields.
+
+artifacts:
+  enabled: true
+timeout_sec: 900
+type: graph
+
+steps:
+  - id: checkout
+    action: git.checkout
+    with:
+      repository: https://github.com/TaiwanTA/alpha-lab.git
+      ref: main
+      path: ./workspace/app
+      depth: 1
+      force: true
+      token: "${secrets.GIT_READ_TOKEN}"
+
+  - id: hermes
+    depends: [checkout]
+    working_dir: ./workspace/app
+    run: |
+      set -euo pipefail
+      export ALPHA_LAB_RUN_ID="${DAG_RUN_ID}"
+      export ALPHA_LAB_WORKSPACE="$PWD"
+      export ALPHA_LAB_CANDIDATE_PATH="$PWD/candidate.md"
+      hermes -p alpha-lab-fixture -z "$(cat automation/prompts/fixture-research.md)" > "$ALPHA_LAB_CANDIDATE_PATH"
+      cat "$ALPHA_LAB_CANDIDATE_PATH"
+    env:
+      - HINDSIGHT_BASE_URL=${secrets.HINDSIGHT_BASE_URL}
+      - HINDSIGHT_BANK_ID=alpha-lab-v3-fixture
+    stdout: candidate.md
+    timeout_sec: 600
+    retry_policy:
+      limit: 1
+      interval_sec: 30
+      exit_code: [1]

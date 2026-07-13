@@ -1,0 +1,21 @@
+[Unit]
+Description=Alpha Lab Dagu runtime
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=alpha-lab-dagu
+Group=alpha-lab-dagu
+Environment=DAGU_HOME=/var/lib/alpha-lab/dagu
+WorkingDirectory=/var/lib/alpha-lab/dagu
+ExecStart=/usr/local/bin/dagu start-all
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/alpha-lab/dagu
+
+[Install]
+WantedBy=multi-user.target
