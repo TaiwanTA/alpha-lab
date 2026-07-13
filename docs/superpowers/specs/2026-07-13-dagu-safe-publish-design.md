@@ -82,6 +82,37 @@ Hindsight remains the existing self-hosted service, but this milestone uses only
 - A Dagu run records the checked-out Git SHA in its logs and candidate metadata.
 - Dagu never publishes or writes DAG definitions back to GitHub.
 
+## Dagu 與 Hermes execution contract
+
+Dagu 是 Hermes process 的單向 supervisor，不是 agent framework；Hermes 不可呼叫 Dagu API、MCP、CLI 或建立／觸發其他 DAG。Dagu 只等待 Hermes exit、保存其輸出並依定義好的 retry policy 決定下一步。
+
+### 每次 research run 的生命週期
+
+1. Dagu 為 run 建立唯一 workspace，並以 read-only Git credential checkout `main`，記錄 runtime Git SHA。
+2. Dagu 從該 worktree 讀取 fixture 與 prompt，將 `ALPHA_LAB_RUN_ID`、`ALPHA_LAB_WORKSPACE` 與 `ALPHA_LAB_CANDIDATE_PATH` 提供給 Hermes step。
+3. Dagu 以新的 one-shot Hermes session 執行 `hermes -p alpha-lab-fixture -z <prompt>`；session 只處理本次 fixture，不沿用先前 session conversation。
+4. `alpha-lab-fixture` Hermes profile 的唯一 external memory provider 是 Hindsight `local_external`，指向 VM loopback/private network 上的 Hindsight container 與 bank `alpha-lab-v3-fixture`。它在本次 session retain fixture 事實，並 recall 相關 observations/facts。
+5. Hermes 僅可寫入 `ALPHA_LAB_CANDIDATE_PATH` 的 `candidate.md`；它不得執行 Git publish、網站 deploy 或其他 Dagu workflow。
+6. Dagu 捕捉 Hermes stdout、stderr、exit code 與 timeout。只有 exit code 為零且 candidate 存在時，才將 immutable copy 寫為 Dagu run artifact。
+7. Dagu 將 artifact reference 與 runtime Git SHA 傳入 `blog-publish` sub-DAG。publisher 在全新的 worktree 讀 artifact，不重用 Hermes worktree。
+
+### Process credential contract
+
+| Process | 可用 credential | 必須不可用 credential |
+|---|---|---|
+| `fixture-research` 的 Dagu checkout step | read-only Git credential（private repo 時） | `PUBLISH_TOKEN`、Cloudflare token |
+| Hermes process | LLM provider、Hindsight external provider 設定 | Git write credential、`PUBLISH_TOKEN`、Cloudflare token、Dagu 管理 credential |
+| `blog-publish` validation/push step | `PUBLISH_TOKEN`，僅在最終非-agent step 注入 | LLM provider、Hindsight provider、Cloudflare token |
+| GitHub `deploy.yml` | Cloudflare token | `PUBLISH_TOKEN`、LLM provider、Hindsight provider |
+
+Dagu secrets must be step-scoped. `PUBLISH_TOKEN` is not a DAG-global environment variable and is not inherited by the Hermes subprocess.
+
+### Failure semantics
+
+- Hermes timeout、non-zero exit、缺少 candidate 或 Hindsight retain/recall failure：`fixture-research` fail；Dagu 可依 DAG retry policy 重跑 Hermes step，`blog-publish` 不啟動。
+- candidate artifact persistence failure：`fixture-research` fail；沒有 publication side effect。
+- `blog-publish` failure：保留 research artifact 與 parent/sub-DAG run history；可只重跑 publish sub-DAG，不重新呼叫 Hermes 或消耗研究 token。
+
 ## File layout
 
 ```text
