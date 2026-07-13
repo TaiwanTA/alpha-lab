@@ -174,6 +174,7 @@ steps:
 > - Step working directory uses `working_dir`, not `dir`.
 > - Per-step stdout capture uses the `stdout` field; `stdout_artifact` is the older name.
 > - The runtime exports `DAG_RUN_ID`, not `DAGU_RUN_ID`. Use `DAG_RUN_ID` for `ALPHA_LAB_RUN_ID`.
+>- `${secrets.X}` is not a v2.10.7 strict-binding namespace. Reference secrets as `${env.NAME}` and inject them as process environment variables through the VM systemd unit.
 
 Run `dagu validate automation/dags/feasibility-check.yaml` locally and on the VM after sync.
 
