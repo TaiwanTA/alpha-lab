@@ -6,16 +6,25 @@
 # during the fixture-research DAG to retain the offline fixture's
 # `safe-publish.md` content as facts.
 #
-# This script runs inside the alpha-lab-dagu container, so
-# HINDSIGHT_BASE_URL must point to a Hindsight address reachable
-# from the container (typically the docker network alias
-# `http://hindsight-hindsight-1:8888`). The DAG step's `env:` block
-# and the compose's `environment:` block both set this.
+# Hindsight v0.8.4 retain schema: the request body is
+# `{"items": [{"content": "...", "context": "..."}, ...]}`.
+# The `facts` alias is NOT accepted; the field is `items`.
+# The endpoint is `POST /v1/default/banks/{bank_id}/memories`.
+#
+# Env resolution: this wrapper runs as a child of the dagu process
+# (which is on the host's network namespace). The dagu service
+# unit's EnvironmentFile is /etc/alpha-lab/dagu.env; we source it
+# here to get HINDSIGHT_BASE_URL etc.  dagu v2.10.7 does not
+# propagate process env into run-step shells, so the source is
+# explicit.
 set -eo pipefail
+set +u
+. /etc/alpha-lab/dagu.env
+set -u
 
-INPUT="${1:?usage: hindsight-retain.sh <facts-file>}"
-: "${HINDSIGHT_BASE_URL:?HINDSIGHT_BASE_URL must be set in the dagu container env}"
-: "${HINDSIGHT_BANK_ID:?HINDSIGHT_BANK_ID must be set in the dagu container env}"
+INPUT="${1:?usage: hindsight-retain.sh <items-file>}"
+: "${HINDSIGHT_BASE_URL:?HINDSIGHT_BASE_URL must be set in /etc/alpha-lab/dagu.env}"
+: "${HINDSIGHT_BANK_ID:?HINDSIGHT_BANK_ID must be set in /etc/alpha-lab/dagu.env}"
 : "${HINDSIGHT_API_KEY:=}"
 
 if [ ! -f "$INPUT" ]; then

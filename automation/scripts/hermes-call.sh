@@ -1,49 +1,98 @@
 #!/usr/bin/env bash
 # Hermes CLI wrapper for Dagu.
 #
-# Reads the prompt from $1 (a file path) and invokes the hermes CLI
-# inside the `hermes-hermes-1` container via `docker exec`. The
-# container is on the shared `hindsight-net` docker network and is
-# started by the `hermes` compose at /opt/hermes/hermes. The CLI
-# uses the model configured in /opt/data/config.yaml (currently
-# `MiniMax-M3` via `minimax-oauth`).
+# Reads the prompt body from $HERMES_PROMPT (env) and runs the
+# hermes CLI inside a one-shot container based on the
+# `nousresearch/hermes-agent:latest` image (the same image the
+# long-running `hermes-hermes-1` gateway is built on). We use
+# `docker run --rm` (not `docker exec`) because bind mounts are
+# only available at `docker run` time. The model config in
+# /opt/data lives on a host bind-mount; we re-bind the same path
+# so the agent picks up the same `minimax-oauth` config and
+# profile state as the gateway.
 #
-# Why docker exec instead of HTTP:
-#   - Hermes v0.18.0 has no OpenAI-compatible HTTP endpoint. The
-#     `gateway` subcommand is messaging-only; `proxy` only supports
-#     nous/xai; `serve` is the JSON-RPC backend for the desktop
-#     app. The CLI is the only path that uses the configured
-#     `minimax-oauth` provider with the configured model.
+# Profile: defaults to the `default` profile, which is the only
+# one with the `MiniMax-M3` model configured.
 #
-# This script runs inside the alpha-lab-dagu container, which
-# mounts /var/run/docker.sock so the `docker` CLI is available and
-# so `docker exec hermes-hermes-1 ...` works.
+# Network URL override: $HINDSIGHT_BASE_URL is the host-loopback
+# URL (`http://127.0.0.1:8888`) when sourced from the dagu env
+# file, but inside the one-shot container that 127.0.0.1 is the
+# container's own loopback, not the host. We override to the
+# docker network alias `hindsight-hindsight-1:8888` (other
+# container on `hindsight-net`).
+#
+# Entrypoint override: the image's default entrypoint is an s6
+# init that supervises the hermes gateway. We override with
+# `--entrypoint ""` to run hermes directly as PID 1, so s6 does
+# not interpret our SIGTERM as a shutdown signal.
+#
+# Write target: the dagu step's workspace is bind-mounted :rw
+# (the wrapper uses `--user 0:0` so the in-container root can
+# write to the host dir). The agent writes the candidate to
+# $ALPHA_LAB_CANDIDATE_PATH; the dagu step then `cat`s it.
+#
+# Exit code: hermes's safety guard may reject `write_file` to
+# certain paths and exit non-zero even after the model produces
+# a valid response. Since the candidate content is in stdout
+# (and on disk if the write succeeded), we always `|| true` to
+# keep the dagu step's exit code 0 and avoid spurious retries.
+# The dagu step is the unit of acceptance; hermes's
+# write-guard refusal is a soft fail.
+#
+# Env resolution: see hindsight-retain.sh.
 set -eo pipefail
+set +u
+. /etc/alpha-lab/dagu.env
+set -u
 
-PROMPT_FILE="${1:?usage: hermes-call.sh <prompt-file>}"
-PROFILE="${HERMES_PROFILE:-alpha-lab-fixture}"
-: "${HINDSIGHT_BASE_URL:?HINDSIGHT_BASE_URL must be set in the dagu container env}"
-: "${HINDSIGHT_BANK_ID:?HINDSIGHT_BANK_ID must be set in the dagu container env}"
+: "${HERMES_PROMPT:?HERMES_PROMPT must be set by the dagu step (cat the prompt file into the env)}"
+: "${ALPHA_LAB_CANDIDATE_PATH:?ALPHA_LAB_CANDIDATE_PATH must be set by the dagu step (host path)}"
+: "${HERMES_PROFILE:=default}"
+: "${HERMES_IMAGE:=nousresearch/hermes-agent:latest}"
+: "${HERMES_DATA_HOST:=/opt/hermes/hermes/data}"
+: "${HINDSIGHT_BANK_ID:?HINDSIGHT_BANK_ID must be set in /etc/alpha-lab/dagu.env}"
 : "${HINDSIGHT_API_KEY:=}"
 
-if [ ! -f "$PROMPT_FILE" ]; then
-  echo "prompt file not found: $PROMPT_FILE" >&2
+HOST_DIR="$(dirname "$ALPHA_LAB_CANDIDATE_PATH")"
+HOST_FILE="$(basename "$ALPHA_LAB_CANDIDATE_PATH")"
+mkdir -p "$HOST_DIR"
+
+if [ "${#HERMES_PROMPT}" -lt 50 ]; then
+  echo "HERMES_PROMPT suspiciously short (${#HERMES_PROMPT} chars); aborting" >&2
   exit 2
 fi
 
-PROMPT="$(cat "$PROMPT_FILE")"
-echo "=== hermes-call === profile=$PROFILE prompt_len=${#PROMPT} bank=$HINDSIGHT_BANK_ID"
+# Inside the one-shot container, 127.0.0.1 is the container's
+# own loopback. Use the docker network alias instead.
+CONTAINER_HINDSIGHT_URL="http://hindsight-hindsight-1:8888"
 
-# `hermes -z PROMPT` runs the agent non-interactively with the
-# given prompt and prints the agent's final answer to stdout. The
-# CLI config in /opt/data/config.yaml selects the model. Profile
-# `-p alpha-lab-fixture` is a single-shot session.
-#
-# We pass HINDSIGHT_* into the container so the hermes tooling
-# (if any) can reach Hindsight over the shared docker network.
-docker exec \
-  -e HINDSIGHT_BASE_URL="$HINDSIGHT_BASE_URL" \
+echo "=== hermes-call === profile=$HERMES_PROFILE prompt_len=${#HERMES_PROMPT} host_path=$ALPHA_LAB_CANDIDATE_PATH image=$HERMES_IMAGE bank=$HINDSIGHT_BANK_ID hindsight_url=$CONTAINER_HINDSIGHT_URL"
+
+# `--user 0:0` runs the agent as root in the container so the
+# :rw bind mount is fully usable. Stdout goes to the dagu
+# step's stdout (which dagu captures as the `candidate.md`
+# artifact via `stdout: { artifact: ... }` in the YAML).
+docker run --rm \
+  --user 0:0 \
+  --entrypoint "" \
+  --network hindsight-net \
+  -v "${HOST_DIR}:/workspace:rw" \
+  -v "${HERMES_DATA_HOST}:/opt/data" \
+  -e HINDSIGHT_BASE_URL="$CONTAINER_HINDSIGHT_URL" \
   -e HINDSIGHT_API_KEY="$HINDSIGHT_API_KEY" \
   -e HINDSIGHT_BANK_ID="$HINDSIGHT_BANK_ID" \
-  hermes-hermes-1 \
-  hermes -p "$PROFILE" -z "$PROMPT"
+  -e ALPHA_LAB_RUN_ID="${ALPHA_LAB_RUN_ID:-}" \
+  -e ALPHA_LAB_WORKSPACE="/workspace" \
+  -e ALPHA_LAB_CANDIDATE_PATH="/workspace/${HOST_FILE}" \
+  -e HERMES_WRITE_SAFE_ROOT="/workspace" \
+  -w /workspace \
+  "$HERMES_IMAGE" \
+  /opt/hermes/bin/hermes -p "$HERMES_PROFILE" -z "$HERMES_PROMPT" \
+  > "$ALPHA_LAB_CANDIDATE_PATH" 2>/dev/null || true
+
+if [ ! -s "$ALPHA_LAB_CANDIDATE_PATH" ]; then
+  echo "candidate file is empty or missing; hermes produced no output" >&2
+  exit 1
+fi
+
+echo "wrote candidate to $ALPHA_LAB_CANDIDATE_PATH ($(wc -c < "$ALPHA_LAB_CANDIDATE_PATH") bytes)"

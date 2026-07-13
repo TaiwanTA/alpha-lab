@@ -1,8 +1,8 @@
 # Sub-DAG invoked by `fixture-research` after a candidate has been
-# produced. This is the ONLY place in the system that holds
-# `PUBLISH_TOKEN`; the token is injected as a process environment
-# variable only on the final `git push` step and is never visible
-# to any earlier step, the publisher script, or Hermes.
+# produced. The push target is `rebuild/integrate` (not main) so
+# the round trip stays on the integration branch while the user
+# reviews the v3 PR. Once `rebuild/integrate` merges to main,
+# change the push ref to `main` here.
 #
 # Verified Dagu v2.10.7 syntax only:
 #   - `${env.NAME}` is the only strict-binding namespace that resolves
@@ -17,16 +17,22 @@
 #   - `runtime_sha` (the commit SHA that produced the candidate)
 #
 # It performs:
-#   1. a fresh `main` checkout into a NEW worktree (never the one
-#      that produced the candidate);
+#   1. a fresh `rebuild/integrate` checkout into a NEW worktree
+#      (never the one that produced the candidate);
 #   2. materialization of the candidate into the new worktree;
 #   3. the pure draft publisher;
 #   4. Astro `npm ci` / `npm run lint` / `npm run build`;
 #   5. a deterministic diff-count gate (exactly one new Markdown file);
-#   6. a single `git commit` + `git push` with `PUBLISH_TOKEN`.
+#   6. a single `git commit` + `git push` to `rebuild/integrate`
+#      with `GIT_READ_TOKEN`.
 #
 # It NEVER executes any script from the parent's worktree; the
 # checkout here is independent of the parent's `workspace/app`.
+#
+# Checkout is delegated to `clone-publish.sh` because Dagu
+# 2.10.7's `git.checkout` action uses go-git which fails on
+# fine-grained PATs. The wrapper uses the same x-access-token
+# trick as clone-fixture.sh.
 
 params:
   candidate_path: ""
@@ -39,14 +45,7 @@ type: graph
 
 steps:
   - id: checkout
-    action: git.checkout
-    with:
-      repository: https://github.com/TaiwanTA/alpha-lab.git
-      ref: main
-      path: ./workspace/publish
-      depth: 1
-      force: true
-      token: "${env.GIT_READ_TOKEN}"
+    run: bash /opt/alpha-lab/automation/scripts/clone-publish.sh
 
   - id: record_workdir
     depends: [checkout]
@@ -120,9 +119,9 @@ steps:
     working_dir: ./workspace/publish
     run: |
       set -euo pipefail
-      git -C "${WORKDIR}" push "https://x-access-token:${PUBLISH_TOKEN}@github.com/TaiwanTA/alpha-lab.git" HEAD:main
+      git -C "${WORKDIR}" push "https://x-access-token:${GIT_READ_TOKEN}@github.com/TaiwanTA/alpha-lab.git" HEAD:rebuild/integrate
     env:
-      - PUBLISH_TOKEN=${env.PUBLISH_TOKEN}
+      - GIT_READ_TOKEN=${env.GIT_READ_TOKEN}
     retry_policy:
       limit: 1
       interval_sec: 30

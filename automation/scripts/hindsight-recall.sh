@@ -6,18 +6,25 @@
 # stdout. Used by the fixture-research DAG to surface prior
 # observations before drafting.
 #
-# This script runs inside the alpha-lab-dagu container; see the
-# docker network alias note in hindsight-retain.sh.
+# Hindsight v0.8.4 recall schema (from /openapi.json): the
+# request body is `{"query": "..."}`. Optional fields include
+# `types`, `budget`, `max_tokens`. There is no `limit` field; the
+# result count is governed by `max_tokens` (default 4096).
+#
+# Env resolution: see hindsight-retain.sh.
 set -eo pipefail
+set +u
+. /etc/alpha-lab/dagu.env
+set -u
 
 QUERY="${1:?usage: hindsight-recall.sh <query>}"
-: "${HINDSIGHT_BASE_URL:?HINDSIGHT_BASE_URL must be set in the dagu container env}"
-: "${HINDSIGHT_BANK_ID:?HINDSIGHT_BANK_ID must be set in the dagu container env}"
+: "${HINDSIGHT_BASE_URL:?HINDSIGHT_BASE_URL must be set in /etc/alpha-lab/dagu.env}"
+: "${HINDSIGHT_BANK_ID:?HINDSIGHT_BANK_ID must be set in /etc/alpha-lab/dagu.env}"
 : "${HINDSIGHT_API_KEY:=}"
 
 echo "=== hindsight-recall === bank=$HINDSIGHT_BANK_ID query_len=${#QUERY}"
 curl -fsS -X POST \
   -H "Content-Type: application/json" \
   ${HINDSIGHT_API_KEY:+-H "Authorization: Bearer $HINDSIGHT_API_KEY"} \
-  -d "$(jq -nc --arg q "$QUERY" '{query: $q, limit: 10}')" \
+  -d "$(jq -nc --arg q "$QUERY" '{query: $q}')" \
   "${HINDSIGHT_BASE_URL}/v1/default/banks/${HINDSIGHT_BANK_ID}/memories/recall"

@@ -23,17 +23,24 @@
 # push are owned by `blog-publish.yaml`.
 #
 # Runtime topology on the alpha-lab VM:
-#   - dagu is a Docker container (alpha-lab-dagu) on the shared
-#     `hindsight-net` external network.
-#   - The hermes CLI lives in the `hermes-hermes-1` container; the
-#     wrapper scripts `docker exec` into it. hermes v0.18.0 has no
-#     OpenAI-compatible HTTP endpoint, so HTTP cannot replace the
-#     CLI path without an image bump.
-#   - Hindsight is reached as `http://hindsight-hindsight-1:8888`
-#     (other container on the same `hindsight-net`); the dagu
-#     container's `127.0.0.1` is the container's own loopback, NOT
-#     the host, so URLs that target the host's Hindsight binding
-#     must use the container-name alias.
+#   - dagu runs as a systemd service (PID 1 of the alpha-lab-dagu
+#     user), NOT inside a Docker container. The current deployment
+#     uses /usr/local/bin/dagu start-all. Migrating to docker
+#     compose is tracked separately; for now the dagu process is on
+#     the host's network namespace.
+#   - Hindsight is reached at `http://127.0.0.1:8888` (host's
+#     loopback binding). The wrapper scripts source
+#     /etc/alpha-lab/dagu.env to discover the URL.
+#   - The hermes CLI lives in the `nousresearch/hermes-agent:latest`
+#     image; the wrapper uses `docker run --rm` (one-shot) with
+#     bind mounts so the dagu step's workspace is visible to the
+#     agent. hermes v0.18.0 has no OpenAI-compatible HTTP
+#     endpoint, so HTTP cannot replace the CLI path without an
+#     image bump.
+#
+# Hindsight v0.8.4 retain schema: the request body is
+# `{"items": [{"content": "...", "context": "..."}, ...]}`.
+# The `facts` alias is NOT accepted; the field is `items`.
 
 artifacts:
   enabled: true
@@ -51,8 +58,8 @@ steps:
     # dagu 2.10.7 does not interpolate ${env.X} inside the run script
     # body; it only does so in YAML structural values. We delegate to a
     # wrapper script that reads $GIT_READ_TOKEN from the inherited
-    # process environment, which is set by the dagu container's
-    # `env_file:` entry (the secret env file is mounted in by compose).
+    # process environment, which is set by the systemd unit's
+    # `EnvironmentFile=/etc/alpha-lab/dagu.env`.
     run: bash /opt/alpha-lab/automation/scripts/clone-fixture.sh
 
   - id: record_runtime_sha
@@ -70,28 +77,18 @@ steps:
   - id: hindsight_retain
     depends: [record_workdir]
     working_dir: ./workspace/app
-    # HINDSIGHT_BASE_URL is the dagu-container alias of the Hindsight
-    # service on the shared hindsight-net. The host's
-    # /etc/alpha-lab/dagu.env still records the loopback URL for
-    # human-facing tooling; the dagu container's env_file does not
-    # override the URL because the wrapper scripts read
-    # $HINDSIGHT_BASE_URL from process env at run time.
+    # Build the retain payload from the offline fixture and POST
+    # to the isolated `alpha-lab-v3-fixture` bank. The production
+    # `alpha-lab` bank is NEVER touched by the fixture DAG.
     run: |
       set -euo pipefail
-      # Build the retain payload from the offline fixture and POST
-      # to the isolated `alpha-lab-v3-fixture` bank. The production
-      # `alpha-lab` bank is NEVER touched by the fixture DAG.
       jq -nc --rawfile body automation/fixtures/safe-publish.md \
-        '{facts: [{content: $body, context: "fixture:safe-publish"}]}' \
+        '{items: [{content: $body, context: "fixture:safe-publish"}]}' \
         > .hindsight-retain.json
       bash /opt/alpha-lab/automation/scripts/hindsight-retain.sh .hindsight-retain.json
     env:
-      # Use the docker network alias. $HINDSIGHT_API_KEY is
-      # optional for self-hosted Hindsight (left empty in
-      # /etc/alpha-lab/dagu.env).
-      - HINDSIGHT_BASE_URL=http://hindsight-hindsight-1:8888
-      - HINDSIGHT_API_KEY=${env.HINDSIGHT_API_KEY}
       - HINDSIGHT_BANK_ID=alpha-lab-v3-fixture
+      - HINDSIGHT_API_KEY=${env.HINDSIGHT_API_KEY}
     retry_policy:
       limit: 1
       interval_sec: 10
@@ -106,9 +103,8 @@ steps:
         | tee .hindsight-recall.json
       test -s .hindsight-recall.json
     env:
-      - HINDSIGHT_BASE_URL=http://hindsight-hindsight-1:8888
-      - HINDSIGHT_API_KEY=${env.HINDSIGHT_API_KEY}
       - HINDSIGHT_BANK_ID=alpha-lab-v3-fixture
+      - HINDSIGHT_API_KEY=${env.HINDSIGHT_API_KEY}
 
   - id: hermes
     depends: [hindsight_recall, record_runtime_sha, record_workdir]
@@ -118,19 +114,14 @@ steps:
       export ALPHA_LAB_RUN_ID="${DAG_RUN_ID}"
       export ALPHA_LAB_WORKSPACE="$PWD"
       export ALPHA_LAB_CANDIDATE_PATH="$PWD/candidate.md"
-      # Delegate to the wrapper, which `docker exec`s the hermes CLI
-      # inside the `hermes-hermes-1` container. The CLI uses the
-      # configured `MiniMax-M3` model. hermes v0.18.0 has no
-      # OpenAI-compatible HTTP endpoint (the docs reference a newer
-      # version); the `proxy` subcommand only supports nous/xai and
-      # would lose the configured model.
-      bash /opt/alpha-lab/automation/scripts/hermes-call.sh \
-        automation/prompts/fixture-research.md > "$ALPHA_LAB_CANDIDATE_PATH"
+      # Read the prompt body into HERMES_PROMPT. The wrapper
+      # passes it to hermes inside a one-shot container.
+      export HERMES_PROMPT="$(cat automation/prompts/fixture-research.md)"
+      bash /opt/alpha-lab/automation/scripts/hermes-call.sh
       cat "$ALPHA_LAB_CANDIDATE_PATH"
     env:
-      - HINDSIGHT_BASE_URL=http://hindsight-hindsight-1:8888
-      - HINDSIGHT_API_KEY=${env.HINDSIGHT_API_KEY}
       - HINDSIGHT_BANK_ID=alpha-lab-v3-fixture
+      - HINDSIGHT_API_KEY=${env.HINDSIGHT_API_KEY}
     stdout:
       artifact: candidate.md
     timeout_sec: 600
@@ -143,7 +134,11 @@ steps:
     depends: [hermes]
     action: dag.run
     with:
-      dag: blog-publish
+      # Absolute path: dagu 2.10.7's `action: dag.run` resolves
+      # the child DAG against the dagu server's CWD, not the
+      # configured dags_dir. The child file lives at the
+      # dags_dir; an absolute path sidesteps the CWD issue.
+      dag: /var/lib/alpha-lab/dagu/dags/blog-publish.yaml
       params:
         candidate_path: "${WORKDIR}/candidate.md"
         runtime_sha: "${RUNTIME_SHA}"
