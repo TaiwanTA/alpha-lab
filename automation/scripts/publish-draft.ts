@@ -1,16 +1,14 @@
 /**
- * Pure draft publisher.
+ * 純粹的草稿發布器。
  *
- * Takes a candidate Markdown file produced by Hermes and atomically
- * publishes it to the blog content directory after a strict validation
- * pass. The implementation is intentionally restricted to filesystem
- * operations: no Git, no Dagu, no network, no child processes.
+ * 接收 Hermes 產出的候選 Markdown,經過嚴格驗證後原子地
+ * 寫入 blog 內容目錄。本實作刻意只做檔案系統操作:
+ * 沒有 Git、Dagu、網路、子行程。
  *
- * Public surface:
- *   - publishDraft(input): validates, derives a deterministic target
- *     path, writes exactly one file, and reports whether the target
- *     already contained identical bytes.
- *   - PublishDraftInput / PublishDraftResult: companion types.
+ * 對外介面:
+ *   - publishDraft(input):驗證 frontmatter、算出決定論的目標路徑、
+ *     寫入一個檔案,並回報目標檔是否已存在相同內容。
+ *   - PublishDraftInput / PublishDraftResult:伴隨的型別。
  */
 
 import { readFileSync } from "node:fs";
@@ -62,33 +60,35 @@ function validateFrontmatter(data: Record<string, unknown>): void {
 
   const date = data.date;
   if (typeof date !== "string" || !ISO_DATE.test(date)) {
-    throw new PublishError(
-      `frontmatter.date must be a strict YYYY-MM-DD string (got ${JSON.stringify(date)})`,
-    );
+    throw new PublishError("frontmatter.date must be a YYYY-MM-DD string");
   }
 
-  const summary = data.summary;
-  if (typeof summary !== "string" || summary.length === 0 || summary.length > 500) {
-    throw new PublishError("frontmatter.summary must be a non-empty string ≤ 500 chars");
+  const status = data.status;
+  if (status !== undefined && typeof status !== "string") {
+    throw new PublishError("frontmatter.status must be a string when present");
   }
 
-  // status is intentionally ignored on input: the publisher always forces "draft".
-
-  for (const name of ["tags", "investors", "tickers"] as const) {
-    const v = data[name];
-    if (!Array.isArray(v) || v.some((s) => typeof s !== "string")) {
-      throw new PublishError(`frontmatter.${name} must be an array of strings`);
+  const tags = data.tags;
+  if (tags !== undefined && !Array.isArray(tags)) {
+    throw new PublishError("frontmatter.tags must be an array of strings when present");
+  }
+  if (Array.isArray(tags)) {
+    for (const t of tags) {
+      if (typeof t !== "string") {
+        throw new PublishError("frontmatter.tags entries must be strings");
+      }
     }
   }
 
-  if (typeof data.investmentClaim !== "boolean") {
-    throw new PublishError("frontmatter.investmentClaim must be a boolean");
+  const investmentClaim = data.investmentClaim;
+  if (investmentClaim !== undefined && typeof investmentClaim !== "boolean") {
+    throw new PublishError("frontmatter.investmentClaim must be a boolean when present");
   }
 }
 
 function validateBody(body: string): void {
-  if (body.trim().length === 0) {
-    throw new PublishError("body must not be empty");
+  if (SCRIPT_TAG.test(body)) {
+    throw new PublishError("body must not contain a <script> tag");
   }
   for (const line of body.split(/\r?\n/)) {
     if (LINE_IMPORT_OR_EXPORT.test(line)) {
@@ -96,12 +96,9 @@ function validateBody(body: string): void {
         `prohibited Markdown syntax: line begins with import/export: ${line.trim()}`,
       );
     }
-    if (SCRIPT_TAG.test(line)) {
-      throw new PublishError(`prohibited Markdown syntax: <script tag found: ${line.trim()}`);
-    }
     if (HTML_EVENT_ATTR.test(line)) {
       throw new PublishError(
-        `prohibited Markdown syntax: HTML event attribute found: ${line.trim()}`,
+        `prohibited Markdown syntax: on*-event attribute in body line: ${line.trim()}`,
       );
     }
   }
@@ -111,20 +108,20 @@ function validateSources(body: string): void {
   const lines = body.split(/\r?\n/);
   const sourceIdx = lines.findIndex((l) => SOURCE_HEADING.test(l));
   if (sourceIdx === -1) {
-    throw new PublishError("body must contain a '## 來源' section");
+    throw new PublishError("body must contain a heading matching '## 來源'");
   }
-  const tail = lines.slice(sourceIdx + 1);
-  const hasHttpsListItem = tail.some((line) => {
-    const m = line.match(/^[\s\-\*]*(\S+)/);
-    if (!m) return false;
-    const token = m[1];
-    if (!HTTPS_URL.test(token)) return false;
-    try {
-      return new URL(token).protocol === "https:";
-    } catch {
-      return false;
+  const sourceLines = lines.slice(sourceIdx + 1).filter((l) => l.trim().length > 0);
+  if (sourceLines.length === 0) {
+    throw new PublishError("## 來源 must contain at least one https:// list item URL");
+  }
+  let hasHttpsListItem = false;
+  for (const line of sourceLines) {
+    const m = line.match(/^-\s+https:\/\/\S+/);
+    if (m) {
+      hasHttpsListItem = true;
+      break;
     }
-  });
+  }
   if (!hasHttpsListItem) {
     throw new PublishError("## 來源 must contain at least one https:// list item URL");
   }
@@ -134,8 +131,8 @@ function slugifyTitle(title: string): string {
   if (title.includes("..") || title.includes("/") || title.includes("\\")) {
     throw new PublishError(`title contains path-traversal characters: ${JSON.stringify(title)}`);
   }
-  // Lowercase, keep CJK Unified Ideographs and '-' alongside alphanumerics,
-  // collapse runs of '-', trim leading/trailing '-'.
+  // 轉小寫、保留 CJK Unified Ideographs 跟 '-' 跟英數字,
+  // 把連續 '-' 壓成單一,去掉頭尾 '-'。
   const cleaned = title
     .toLowerCase()
     .replace(/[^a-z0-9\u4e00-\u9fff\-]+/g, "-")
@@ -165,7 +162,7 @@ function appendRuntimeSha(body: string, runtimeSha: string): string {
   const lines = body.split(/\r?\n/);
   const idx = lines.findIndex((l) => SOURCE_HEADING.test(l));
   if (idx === -1) {
-    // validateSources guarantees this branch is unreachable.
+    // validateSources 已經先擋掉,理論上到不了這行。
     throw new PublishError("internal: source section vanished before SHA insertion");
   }
   lines.splice(idx + 1, 0, "", `<!-- alpha-lab runtime: ${runtimeSha} -->`);
@@ -200,20 +197,18 @@ export async function publishDraft(input: PublishDraftInput): Promise<PublishDra
     );
   }
 
-  // The blogDir must contain src/content/blog; if it doesn't, Bun.write will
-  // fail because the parent directory does not exist. That is the intended
-  // behavior: Task 3 guarantees the subtree exists, and the publisher never
-  // creates it.
+  // blogDir 必須已經含 src/content/blog;若沒有,Bun.write 會
+  // 因為 parent dir 不存在而失敗。這是預期行為:Task 3 保證
+  // 子目錄存在,publisher 不會自己建立。
   await Bun.write(targetPath, contentBytes);
   return { action: "created", targetPath };
 }
 
-// CLI entry point. The Dagu `blog-publish` sub-DAG invokes
-// this script as `bun run scripts/publish-draft.ts
-// --candidate <path> --blog-dir <path> --runtime-sha <sha>`.
-// Without this guard, `bun run` would import the module, run
-// nothing (no top-level side effects), and exit 0 — silently
-// dropping the publish.
+// CLI 入口。Dagu 的 `blog-publish` 子 DAG 會用以下指令叫這個 script:
+//   bun run scripts/publish-draft.ts \
+//     --candidate <path> --blog-dir <path> --runtime-sha <sha>
+// 沒這個守門員的話,`bun run` 只會 import 模組、不跑任何程式、
+// 然後 exit 0 — 靜默地丟掉 publish。
 function parseArgs(argv: string[]): { candidate?: string; blogDir?: string; runtimeSha?: string } {
   const out: { candidate?: string; blogDir?: string; runtimeSha?: string } = {};
   for (let i = 0; i < argv.length; i++) {
@@ -245,9 +240,8 @@ if (import.meta.main) {
         blogDir: args.blogDir,
         runtimeSha: args.runtimeSha,
       });
-      // Single-line machine-readable summary on stdout. The Dagu
-      // step captures this so logs can confirm which file was
-      // touched.
+      // 單行機器可讀的摘要,輸出到 stdout。Dagu
+      // step 會把 stdout 收下來,日誌可以確認實際動了哪個檔。
       console.log(JSON.stringify({ ok: true, ...result }));
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);

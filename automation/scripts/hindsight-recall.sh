@@ -1,17 +1,16 @@
 #!/usr/bin/env bash
-# Hindsight recall wrapper for Dagu.
+# 由 Dagu `fixture-research` DAG 的 `hindsight_recall` step
+# 呼叫。從 $1 讀 query 字串,POST 到 Hindsight 的 recall
+# endpoint,目標 bank 是 $HINDSIGHT_BANK_ID,回應的 JSON
+# 寫到 stdout。fixture 流程用這個在 hermes 起草之前撈
+# 先前 retain 過的 observations。
 #
-# Queries the Hindsight recall endpoint for bank $HINDSIGHT_BANK_ID
-# with a query string from $1, and writes the response JSON to
-# stdout. Used by the fixture-research DAG to surface prior
-# observations before drafting.
+# Hindsight v0.8.4 recall schema (從 /openapi.json 來):
+# request body 是 `{"query": "..."}`。可選欄位有
+# `types`、`budget`、`max_tokens`。沒有 `limit` 欄位,
+# 結果數量由 `max_tokens` 控制 (預設 4096)。
 #
-# Hindsight v0.8.4 recall schema (from /openapi.json): the
-# request body is `{"query": "..."}`. Optional fields include
-# `types`, `budget`, `max_tokens`. There is no `limit` field; the
-# result count is governed by `max_tokens` (default 4096).
-#
-# Env resolution: see hindsight-retain.sh.
+# 環境變數讀取:見 hindsight-retain.sh。
 set -eo pipefail
 set +u
 if [[ ! -f /etc/alpha-lab/dagu.env ]]; then
@@ -26,8 +25,8 @@ QUERY="${1:?usage: hindsight-recall.sh <query>}"
 : "${HINDSIGHT_BANK_ID:?HINDSIGHT_BANK_ID must be set in /etc/alpha-lab/dagu.env}"
 : "${HINDSIGHT_API_KEY:=}"
 
-# Diagnostic on stderr; stdout is the contract (Hindsight JSON
-# response). dagu captures stdout as the step's output.
+# 診斷訊息走 stderr;stdout 是合約內容 (Hindsight 的 JSON
+# 回應)。dagu 把 stdout 收成 step 的 output。
 echo "=== hindsight-recall === bank=$HINDSIGHT_BANK_ID query_len=${#QUERY}" >&2
 
 CURL_ARGS=(-fsS -X POST -H "Content-Type: application/json")

@@ -1,24 +1,27 @@
 #!/usr/bin/env bash
-# Deploy the alpha-lab dagu runtime to the GCP VM.
+# 把 alpha-lab dagu runtime 部署到 GCP VM。
 #
-# This script:
-#   1. Tars the local `automation/` directory (excluding secrets
-#      and large artefacts);
-#   2. Pipes the tarball over `gcloud compute ssh` to the VM;
-#   3. Extracts to /opt/alpha-lab on the VM (overwriting the
-#      previous deploy);
-#   4. Copies the DAG files to
-#      /var/lib/alpha-lab/dagu/dags/ (which dagu watches);
-#   5. Sets mode 0750 root:alpha-lab-dagu on git-askpass.sh
-#      (so alpha-lab-dagu can read+execute it; no other user can);
-#   6. Updates the admin.yaml on the VM (the systemd unit itself
-#      is already in place from the first deploy);
-#   7. daemon-reload + restart.
+# 注意:這是 ops script,不是 Dagu runtime 的一部分。Dagu
+# step 不會叫它,只有人在 local 跑的時候用。
 #
-# It does NOT push the git branch to origin; the user does that
-# separately.
+# 流程:
+#   1. 把 local `automation/` 目錄打包 (排除 secrets 跟
+#      大型產物)
+#   2. 透過 `gcloud compute ssh` 把 tarball 傳到 VM
+#   3. 在 VM 上解到 /opt/alpha-lab (蓋掉前一次的部署)
+#   4. 把 DAG 檔 cp 到 /var/lib/alpha-lab/dagu/dags/
+#      (dagu 監看這個目錄)
+#   5. 設定 git-askpass.sh 為 mode 0750 root:alpha-lab-dagu
+#      (讓 alpha-lab-dagu 可以讀+執行,其他 user 不行)
+#   6. 更新 admin.yaml (systemd unit 本身在第一次部署時就建好)
+#   7. daemon-reload + restart
 #
-# Usage:
+# 不做的事:
+#   - 不會把 git branch 推到 origin (那個 user 自己做)
+#   - 不會覆蓋 VM 上的 .env
+#   - 不會動 systemd timer (只 restart service)
+#
+# 用法:
 #   ./scripts/deploy-dagu.sh
 
 set -euo pipefail
@@ -44,28 +47,24 @@ tar --exclude='node_modules' \
 echo "    $(du -h "${TAR_FILE}" | cut -f1) packaged"
 
 echo "[2/5] scp tar to VM + extract"
-# Capture the timestamp once so the bak dir and its removal use
-# the same value. The first deploy has no prior
-# /opt/alpha-lab/automation to back up, in which case the mv
-# fails with "No such file or directory" — that's the legitimate
-# first-deploy path, not a deploy error. After the first deploy
-# any mv failure (disk full, SELinux, container holding the old
-# tree) IS a deploy error and must abort before we extract on
-# top of a half-moved tree.
+# 把 timestamp 收進變數 TS,讓 rm 跟 mv 用同一個值,避免跨秒
+# 時兩個 timestamp 不同的競態。第一次部署時 /opt/alpha-lab
+# /automation 還不存在,mv 會 "No such file or directory" 失敗
+# — 這是合法的 first-deploy 路徑,不是 deploy 錯。first-deploy
+# 之後任何 mv 失敗 (磁碟滿、SELinux、container 還在用舊工作樹)
+# 都是真的 deploy 錯,必須在 extract 之前 abort,否則 tar 解到
+# 還沒搬走的舊 tree 上面會新舊混雜。
 #
-# To distinguish the two cases, the remote probe checks for the
-# source dir first; mv is only attempted if the dir exists.
+# 區分兩種情況:remote 先 probe 來源 dir,只有存在才 mv。
 "${SSH_CMD[@]}" --command "TS=\$(date +%s); sudo rm -rf /opt/alpha-lab/automation.bak.\$TS 2>/dev/null; if [ -d /opt/alpha-lab/automation ]; then sudo mv /opt/alpha-lab/automation /opt/alpha-lab/automation.bak.\$TS; fi; sudo mkdir -p /opt/alpha-lab/automation && sudo chown \$(whoami):\$(id -gn) /opt/alpha-lab/automation"
 gcloud compute scp --zone "${ZONE}" "${TAR_FILE}" "${INSTANCE}:/tmp/dagu-deploy.tar.gz" --project "${PROJECT}"
 rm -f "${TAR_FILE}"
 "${SSH_CMD[@]}" --command "cd /opt/alpha-lab/automation && sudo tar -xzf /tmp/dagu-deploy.tar.gz --strip-components=1 --no-same-owner && sudo chown -R \$(whoami):\$(id -gn) . && sudo chmod +x scripts/*.sh && rm -f /tmp/dagu-deploy.tar.gz && echo '    extracted'"
 
 echo "[3/5] cp DAGs + perms for git-askpass.sh"
-# Scope shopt -s nullglob to the `for` loop only (via a subshell
-# with `set +o nullglob` on exit), so the subsequent chown/chmod
-# `*.yaml` lines still see the literal pattern if the dir is
-# empty (in which case they should fail loudly under set -e,
-# not silently chmod the empty string).
+# 把 shopt -s nullglob 的範圍限在 for 迴圈內 (開 + 關),讓
+# 後續的 chown/chmod *.yaml 在目錄是空的情況下能 fail loud
+# (set -e 下 chmod 空字串會觸發 abort,而不是無聲成功)。
 "${SSH_CMD[@]}" --command 'set -e
 DAGS_SRC=/opt/alpha-lab/automation/dags
 DAGS_DST=/var/lib/alpha-lab/dagu/dags
@@ -78,8 +77,8 @@ done
 shopt -u nullglob
 ls -la "$DAGS_DST/" | head -20
 echo "    dags copied"
-# git-askpass.sh must be readable+executable by alpha-lab-dagu
-# (git forks it as the calling user) and by no one else.
+# git-askpass.sh 必須 alpha-lab-dagu 可讀+可執行 (git 用
+# 呼叫端 user fork 它),其他 user 不可讀。
 if [ -f /opt/alpha-lab/automation/scripts/git-askpass.sh ]; then
   sudo chown root:alpha-lab-dagu /opt/alpha-lab/automation/scripts/git-askpass.sh
   sudo chmod 0750 /opt/alpha-lab/automation/scripts/git-askpass.sh

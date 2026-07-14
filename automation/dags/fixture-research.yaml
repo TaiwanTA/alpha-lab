@@ -1,46 +1,43 @@
-# Root DAG for the Dagu safe-publish rebuild.
+# Dagu safe-publish rebuild 的根 DAG。
 #
-# Verified Dagu v2.10.7 syntax only:
-#   - `${env.NAME}` is the only strict-binding namespace that resolves
-#     to a process environment variable.
-#   - `stdout: { artifact: ... }` is the only form that registers an
-#     immutable per-run artifact.
-#   - `output: VARNAME` captures a step's stdout into a string variable
-#     resolvable as `${VARNAME}` in downstream steps.
-#   - `working_dir:` (not `dir:`); `DAG_RUN_ID` (not `DAGU_RUN_ID`).
-#   - `action: dag.run` with `with.params` passes named parameters; the
-#     child DAG reads them as `${params.NAME}`.
-#   - `dag.run` does NOT expose `${step_id.outputs.*}` to the parent in
-#     v2.10.7; the child publishes its own results via the standard
-#     RunStatus JSON, which is observable in the Dagu UI but is not
-#     needed for control flow here.
+# 已驗證 Dagu v2.10.7 語法:
+#   - `${env.NAME}` 是唯一能解析到 process env 變數的 namespace。
+#   - `stdout: { artifact: ... }` 是唯一能註冊 immutable per-run
+#     artifact 的形式。
+#   - `output: VARNAME` 把 step 的 stdout 收成字串變數,在下游
+#     用 `${VARNAME}` 取。
+#   - `working_dir:` (不是 `dir:`);`DAG_RUN_ID` (不是 `DAGU_RUN_ID`)。
+#   - `action: dag.run` 用 `with.params` 傳命名參數;子 DAG 用
+#     `${params.NAME}` 讀。
+#   - `dag.run` 在 v2.10.7 不會把 `${step_id.outputs.*}` 暴露給
+#     父 DAG;子 DAG 透過標準 RunStatus JSON 發布自己的結果,
+#     在 Dagu UI 看得到,但這裡的 control flow 不需要。
 #
-# This DAG owns:
-#   - a single, fresh Hermes session for the `alpha-lab-fixture` profile;
-#   - one `git rev-parse HEAD` capture for the runtime SHA;
-#   - one synchronous `blog-publish` sub-DAG invocation.
-# It does NOT own the publish step itself. The publisher and the Git
-# push are owned by `blog-publish.yaml`.
+# 這個 DAG 負責:
+#   - 一次全新的 Hermes session,profile = alpha-lab-fixture
+#   - 一次 `git rev-parse HEAD` 抓 runtime SHA
+#   - 一次同步的 `blog-publish` 子 DAG 呼叫
+# 它不負責 publish 步驟本身;publisher 跟 git push 都在
+# `blog-publish.yaml`。
 #
-# Runtime topology on the alpha-lab VM:
-#   - dagu runs as a systemd service (PID 1 of the alpha-lab-dagu
-#     user), NOT inside a Docker container. The current deployment
-#     uses /usr/local/bin/dagu start-all. Migrating to docker
-#     compose is tracked separately; for now the dagu process is on
-#     the host's network namespace.
-#   - Hindsight is reached at `http://127.0.0.1:8888` (host's
-#     loopback binding). The wrapper scripts source
-#     /etc/alpha-lab/dagu.env to discover the URL.
-#   - The hermes CLI lives in the `nousresearch/hermes-agent:latest`
-#     image; the wrapper uses `docker run --rm` (one-shot) with
-#     bind mounts so the dagu step's workspace is visible to the
-#     agent. hermes v0.18.0 has no OpenAI-compatible HTTP
-#     endpoint, so HTTP cannot replace the CLI path without an
-#     image bump.
+# VM 上的 runtime topology:
+#   - dagu 是 systemd service (alpha-lab-dagu user 的 PID 1),
+#     不在 Docker container 裡。目前部署用
+#     /usr/local/bin/dagu start-all。改用 docker compose 另開
+#     一個追蹤項目;現在 dagu process 跟 host 共用 network
+#     namespace。
+#   - Hindsight 走 `http://127.0.0.1:8888` (host 的 loopback
+#     binding)。wrapper script 自己 source /etc/alpha-lab/dagu.env
+#     拿到 URL。
+#   - hermes CLI 住在 `nousresearch/hermes-agent:latest` image 裡;
+#     wrapper 用 `docker run --rm` (一次性) 配合 bind mount,
+#     讓 dagu step 的 workspace 對 agent 可見。hermes v0.18.0
+#     沒有 OpenAI-compatible HTTP endpoint,不換 image 升級就
+#     沒辦法走 HTTP。
 #
-# Hindsight v0.8.4 retain schema: the request body is
-# `{"items": [{"content": "...", "context": "..."}, ...]}`.
-# The `facts` alias is NOT accepted; the field is `items`.
+# Hindsight v0.8.4 retain schema:request body 是
+# `{"items": [{"content": "...", "context": "..."}, ...]}`。
+# `facts` 別名不接受;欄位叫 `items`。
 
 artifacts:
   enabled: true
@@ -49,17 +46,15 @@ type: graph
 
 steps:
   - id: checkout
-    # Dagu 2.10.7's git.checkout action uses go-git and sends Basic Auth
-    # with username="git" when token is set, which GitHub rejects since
-    # 2021-08. Even when username/password is provided, the go-git
-    # transport still surfaces a similar error against fine-grained PATs.
-    # Verified escape hatch: shell `git clone` with x-access-token in
-    # the URL works. We use a run step here to keep DAG-only state.
-    # dagu 2.10.7 does not interpolate ${env.X} inside the run script
-    # body; it only does so in YAML structural values. We delegate to a
-    # wrapper script that reads $GIT_READ_TOKEN from the inherited
-    # process environment, which is set by the systemd unit's
-    # `EnvironmentFile=/etc/alpha-lab/dagu.env`.
+    # Dagu 2.10.7 的 git.checkout action 用 go-git,token 模式下
+    # 會送 username="git" 的 Basic Auth,GitHub 從 2021-08 起
+    # 拒絕 fine-grained PAT。即使給 username/password,go-git
+    # 對 fine-grained PAT 還是會壞。確認過的解法:用 shell
+    # `git clone` + URL 裡放 x-access-token。這裡用 run step
+    # 保持 DAG-only state。dagu 2.10.7 不會在 run script body
+    # 內展開 ${env.X},只在 YAML 結構值內展開,所以委派給
+    # wrapper script,它從 process env (systemd unit 的
+    # EnvironmentFile=/etc/alpha-lab/dagu.env 設的) 讀 token。
     run: bash /opt/alpha-lab/automation/scripts/clone-fixture.sh
 
   - id: record_runtime_sha
@@ -77,9 +72,9 @@ steps:
   - id: hindsight_retain
     depends: [record_workdir]
     working_dir: ./workspace/app
-    # Build the retain payload from the offline fixture and POST
-    # to the isolated `alpha-lab-v3-fixture` bank. The production
-    # `alpha-lab` bank is NEVER touched by the fixture DAG.
+    # 用 offline fixture 組 retain payload,POST 到隔離的
+    # `alpha-lab-v3-fixture` bank。生產的 `alpha-lab` bank
+    # fixture DAG 永遠不會碰到。
     run: |
       set -euo pipefail
       jq -nc --rawfile body automation/fixtures/safe-publish.md \
@@ -114,8 +109,8 @@ steps:
       export ALPHA_LAB_RUN_ID="${DAG_RUN_ID}"
       export ALPHA_LAB_WORKSPACE="$PWD"
       export ALPHA_LAB_CANDIDATE_PATH="$PWD/candidate.md"
-      # Read the prompt body into HERMES_PROMPT. The wrapper
-      # passes it to hermes inside a one-shot container.
+      # 把 prompt 內容讀進 HERMES_PROMPT。wrapper 把它傳給
+      # 一次性容器內的 hermes。
       export HERMES_PROMPT="$(cat automation/prompts/fixture-research.md)"
       bash /opt/alpha-lab/automation/scripts/hermes-call.sh
       cat "$ALPHA_LAB_CANDIDATE_PATH"
@@ -134,10 +129,9 @@ steps:
     depends: [hermes]
     action: dag.run
     with:
-      # Absolute path: dagu 2.10.7's `action: dag.run` resolves
-      # the child DAG against the dagu server's CWD, not the
-      # configured dags_dir. The child file lives at the
-      # dags_dir; an absolute path sidesteps the CWD issue.
+      # 絕對路徑:dagu 2.10.7 的 `action: dag.run` 用 dagu
+      # server 的 CWD 解析子 DAG,不是設定的 dags_dir。子檔
+      # 在 dags_dir,用絕對路徑繞過 CWD 問題。
       dag: /var/lib/alpha-lab/dagu/dags/blog-publish.yaml
       params:
         candidate_path: "${WORKDIR}/candidate.md"

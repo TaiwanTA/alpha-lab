@@ -1,40 +1,34 @@
 #!/usr/bin/env bash
-# Git askpass helper for Dagu safe-publish.
 #
-# Invoked by git when GIT_ASKPASS is set and the remote challenges
-# for credentials. The prompt argument is the question git is
-# asking (e.g. "Username for 'https://github.com'" or
-# "Password for 'https://x-access-token@github.com'").
+# git 在設了 GIT_ASKPASS 且遠端要認證時,會 fork 這個 script
+# 並把要問的問題當作第一個參數傳進來 (例如
+# "Username for 'https://github.com'" 或
+# "Password for 'https://x-access-token@github.com'")。
 #
-# We route by prompt string:
-#   - Username prompt  -> emit the literal "x-access-token"
-#     (matches the username already baked into the URL; this
-#     lets git proceed to the password prompt without looping)
-#   - Password prompt  -> emit the token from $GIT_READ_TOKEN,
-#     terminated with a newline (git's askpass protocol reads
-#     one line at a time; the newline is the canonical line
-#     terminator)
-#   - Anything else    -> same as Password (defensive fallback
-#     for older git / go-git retry paths)
+# 依 prompt 字串分流:
+#   - Username prompt  -> 輸出字面值 "x-access-token"
+#     (跟 URL 裡已經放好的 username 一致;這樣 git 會
+#      繼續問 password,不會卡在 username 階段)
+#   - Password prompt  -> 從 $GIT_READ_TOKEN 輸出 token,
+#     加上換行 (git askpass 協定一次讀一行;換行是慣例
+#     的行結束符)
+#   - 其他             -> 同 Password 的 fallback
+#     (防舊版 git / go-git 重試路徑出現其他 prompt)
 #
-# The token is read from the caller's process env (the dagu
-# step env, set by the dagu systemd EnvironmentFile
-# /etc/alpha-lab/dagu.env). This script itself reads the var
-# but does NOT log or echo the value beyond the final `printf`
-# (which git consumes via fd 1 to satisfy the credential
-# prompt).
+# Token 從呼叫端的 process env 讀進來 (dagu step env,由
+# systemd unit 的 EnvironmentFile /etc/alpha-lab/dagu.env 設定)。
+# 這個 script 自己讀變數,但除了最後的 printf (git 透過 fd 1
+# 收走以滿足認證 prompt) 之外不會 log 或 echo。
 #
-# File mode: 0750, owner root:alpha-lab-dagu. alpha-lab-dagu
-# needs read+execute (git runs this script as the calling user,
-# which is alpha-lab-dagu). The token is not readable by other
-# users.
+# 檔案權限:mode 0750、owner root:alpha-lab-dagu。alpha-lab-dagu
+# 需要讀+執行 (git 用呼叫端 user 跑 askpass,呼叫端就是
+# alpha-lab-dagu)。token 對其他 user 不可讀。
 #
-# Why this exists: the prior pattern embedded the token in the
-# git URL (`https://x-access-token:${TOKEN}@github.com/...`),
-# which leaked the token to `ps`, dagu logs, and shell history.
-# With askpass, the URL is `https://x-access-token@github.com/...`
-# (username only), and the password flows over git's credential
-# channel — not argv.
+# 為什麼要這個:之前的做法把 token 嵌在 git URL
+# (`https://x-access-token:${TOKEN}@github.com/...`),這會
+# 讓 token 漏到 ps、dagu log 跟 shell history。用 askpass
+# 之後 URL 只放 username `x-access-token`,密碼走 git 的
+# credential channel,不會出現在 argv。
 set -euo pipefail
 : "${GIT_READ_TOKEN:?GIT_READ_TOKEN must be set in the dagu step env}"
 case "${1:-}" in

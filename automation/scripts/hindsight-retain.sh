@@ -1,22 +1,22 @@
 #!/usr/bin/env bash
-# Hindsight retain wrapper for Dagu.
+# Hindsight retain wrapper for Dagu。
 #
-# Reads a facts JSON document from $1 (file path) and POSTs it to
-# the Hindsight retain endpoint for bank $HINDSIGHT_BANK_ID. Used
-# during the fixture-research DAG to retain the offline fixture's
-# `safe-publish.md` content as facts.
+# 由 Dagu `fixture-research` DAG 的 `hindsight_retain` step
+# 呼叫。從 $1 讀 facts JSON 檔路徑,POST 到 Hindsight 的
+# retain endpoint,目標 bank 是 $HINDSIGHT_BANK_ID。fixture
+# 流程用這個把 offline fixture 的 `safe-publish.md` 內容
+# 當 facts 灌進 Hindsight,供後續 recall 跟 hermes 參考。
 #
-# Hindsight v0.8.4 retain schema: the request body is
-# `{"items": [{"content": "...", "context": "..."}, ...]}`.
-# The `facts` alias is NOT accepted; the field is `items`.
-# The endpoint is `POST /v1/default/banks/{bank_id}/memories`.
+# Hindsight v0.8.4 retain schema:request body 格式是
+# `{"items": [{"content": "...", "context": "..."}, ...]}`。
+# 欄位叫 `items`,不是 `facts` (會被 422 拒絕)。
+# endpoint 是 `POST /v1/default/banks/{bank_id}/memories`。
 #
-# Env resolution: this wrapper runs as a child of the dagu process
-# (which is on the host's network namespace). The dagu service
-# unit's EnvironmentFile is /etc/alpha-lab/dagu.env; we source it
-# here to get HINDSIGHT_BASE_URL etc.  dagu 2.10.7 does not
-# propagate process env into run-step shells, so the source is
-# explicit.
+# 環境變數讀取:這個 wrapper 是 dagu process 的子行程
+# (在 host 的 network namespace)。dagu systemd unit 的
+# EnvironmentFile 是 /etc/alpha-lab/dagu.env;在這裡 source
+# 是因為 dagu 2.10.7 不會把 process env 傳進 run-step 的
+# 子 shell。
 set -eo pipefail
 set +u
 if [[ ! -f /etc/alpha-lab/dagu.env ]]; then
@@ -36,13 +36,14 @@ if [ ! -f "$INPUT" ]; then
   exit 2
 fi
 
-# Diagnostic on stderr; stdout is the contract (Hindsight JSON
-# response).
+# 診斷訊息走 stderr;stdout 是合約內容 (Hindsight 的 JSON
+# 回應)。
 echo "=== hindsight-retain === bank=$HINDSIGHT_BANK_ID file=$INPUT" >&2
 
-# Bash array avoids word-splitting if HINDSIGHT_API_KEY ever
-# contains whitespace or shell metacharacters (the env file is
-# root:alpha-lab-dagu 0440; defensive all the same).
+# 用 bash array 組 curl 參數,避免 HINDSIGHT_API_KEY 萬一
+# 含空白或 shell meta-char 時被 word-splitting 拆開
+# (目前自架不設 key,但 dagu.env 是 root:alpha-lab-dagu
+# 0440,防禦性寫法)。
 CURL_ARGS=(-fsS -X POST -H "Content-Type: application/json")
 if [[ -n "${HINDSIGHT_API_KEY}" ]]; then
   CURL_ARGS+=(-H "Authorization: Bearer ${HINDSIGHT_API_KEY}")

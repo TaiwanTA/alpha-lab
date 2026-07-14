@@ -1,40 +1,38 @@
-# Sub-DAG invoked by `fixture-research` after a candidate has been
-# produced. The push target is `rebuild/integrate` (not main) so
-# the round trip stays on the integration branch while the user
-# reviews the v3 PR. Once `rebuild/integrate` merges to main,
-# change the push ref to `main` here.
+# 子 DAG,由 `fixture-research` 在 candidate 產出後呼叫。
+# push 目標是 `rebuild/integrate` (不是 main),這樣整個 round
+# trip 留在 integration 分支上,等使用者 review v3 PR。
+# `rebuild/integrate` merge 到 main 之後,把這裡的 push ref
+# 改回 `main`。
 #
-# Verified Dagu v2.10.7 syntax only:
-#   - `${env.NAME}` is the only strict-binding namespace that resolves
-#     to a process environment variable.
-#   - `output: VARNAME` captures a step's stdout into a string variable.
-#   - `preconditions: [...]` gates a step on shell conditions or value
-#     matches; this is how the diff-count gate is implemented.
-#   - `working_dir:` (not `dir:`); `DAG_RUN_ID` (not `DAGU_RUN_ID`).
+# 已驗證 Dagu v2.10.7 語法:
+#   - `${env.NAME}` 是唯一能解析 process env 變數的 namespace。
+#   - `output: VARNAME` 把 step 的 stdout 收成字串變數。
+#   - `preconditions: [...]` 用 shell condition 或 value 比對
+#     gate step;這就是 diff-count gate 的實作方式。
+#   - `working_dir:` (不是 `dir:`);`DAG_RUN_ID` (不是 `DAGU_RUN_ID`)。
 #
-# This sub-DAG accepts two parameters:
-#   - `candidate_path` (absolute path to the candidate Markdown)
-#   - `runtime_sha` (the commit SHA that produced the candidate)
+# 子 DAG 接收兩個參數:
+#   - `candidate_path` (candidate Markdown 的絕對路徑)
+#   - `runtime_sha` (產生 candidate 的 commit SHA)
 #
-# It performs:
-#   1. a fresh `rebuild/integrate` checkout into a NEW worktree
-#      (never the one that produced the candidate);
-#   2. materialization of the candidate into the new worktree;
-#   3. the pure draft publisher (CLI entry added in this
-#      iteration — see scripts/publish-draft.ts);
-#   4. Astro `npm ci` / `npm run lint` / `npm run build`;
-#   5. a deterministic diff-count gate (exactly one new Markdown file);
-#   6. a single `git commit` + `git push` to `rebuild/integrate`
-#      with `GIT_READ_TOKEN` (provided via the shared askpass
-#      helper, never embedded in the URL).
+# 流程:
+#   1. 重新 checkout `rebuild/integrate` 到一個新的 worktree
+#      (絕對不是產出 candidate 的那個)
+#   2. 把 candidate 放到新 worktree
+#   3. 跑純函式的 draft publisher (本輪加了 CLI 入口 ——
+#      見 scripts/publish-draft.ts)
+#   4. Astro `npm ci` / `npm run lint` / `npm run build`
+#   5. 決定論的 diff-count gate (恰好一個新增的 Markdown 檔)
+#   6. 一次 `git commit` + `git push` 到 `rebuild/integrate`,
+#      用 `GIT_READ_TOKEN` (走 askpass helper,不嵌在 URL 裡)
 #
-# It NEVER executes any script from the parent's worktree; the
-# checkout here is independent of the parent's `workspace/app`.
+# 不會跑父 worktree 的任何 script;這裡的 checkout 跟父的
+# `workspace/app` 完全獨立。
 #
-# Checkout is delegated to `clone-publish.sh` because Dagu
-# 2.10.7's `git.checkout` action uses go-git which fails on
-# fine-grained PATs. The wrapper uses the same x-access-token
-# trick (via GIT_ASKPASS, not argv) as clone-fixture.sh.
+# checkout 委派給 `clone-publish.sh`,因為 Dagu 2.10.7 的
+# `git.checkout` 用 go-git,對 fine-grained PAT 會壞。wrapper
+# 用跟 clone-fixture.sh 一樣的 x-access-token 技巧
+# (GIT_ASKPASS,不走 argv)。
 
 params:
   candidate_path: ""
@@ -93,9 +91,9 @@ steps:
     working_dir: ./workspace/publish
     run: |
       set -euo pipefail
-      # `git add` returns 0 on no-op (path with no changes) and
-      # non-zero on real failure (index lock, permission, missing
-      # path). Surface the failure; do not mask it with || true.
+      # `git add` 在 path 沒變化時回 0,在真的有錯時 (index
+      # lock、權限、路徑不存在) 回非零。讓錯浮上來,不要
+      # 用 || true 吞掉。
       git -C "${WORKDIR}" add -- blog/src/content/blog
       git -C "${WORKDIR}" diff --cached --name-only -- 'blog/src/content/blog/*.md' | wc -l
     output: DIFF_COUNT
@@ -125,7 +123,7 @@ steps:
     run: |
       set -euo pipefail
       export GIT_ASKPASS=/opt/alpha-lab/automation/scripts/git-askpass.sh
-      # Username only in URL; password flows through GIT_ASKPASS.
+      # URL 只放 username,密碼走 GIT_ASKPASS。
       git -C "${WORKDIR}" push "https://x-access-token@github.com/TaiwanTA/alpha-lab.git" HEAD:rebuild/integrate
     env:
       - GIT_READ_TOKEN=${env.GIT_READ_TOKEN}
