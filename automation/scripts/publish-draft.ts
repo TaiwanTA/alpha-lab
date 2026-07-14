@@ -4,10 +4,12 @@
  * 接收 Hermes 產出的候選 Markdown,經過嚴格驗證後原子地
  * 寫入 blog 內容目錄。本實作刻意只做檔案系統操作:
  * 沒有 Git、Dagu、網路、子行程。
+  *
  *
  * 對外介面:
- *   - publishDraft(input):驗證 frontmatter、算出決定論的目標路徑、
+ *   - publishDraft(input):驗證 frontmatter、算出固定的目標路徑、
  *     寫入一個檔案,並回報目標檔是否已存在相同內容。
+  *
  *   - PublishDraftInput / PublishDraftResult:伴隨的型別。
  */
 
@@ -60,35 +62,33 @@ function validateFrontmatter(data: Record<string, unknown>): void {
 
   const date = data.date;
   if (typeof date !== "string" || !ISO_DATE.test(date)) {
-    throw new PublishError("frontmatter.date must be a YYYY-MM-DD string");
+    throw new PublishError(
+      `frontmatter.date must be a strict YYYY-MM-DD string (got ${JSON.stringify(date)})`,
+    );
   }
 
-  const status = data.status;
-  if (status !== undefined && typeof status !== "string") {
-    throw new PublishError("frontmatter.status must be a string when present");
+  const summary = data.summary;
+  if (typeof summary !== "string" || summary.length === 0 || summary.length > 500) {
+    throw new PublishError("frontmatter.summary must be a non-empty string ≤ 500 chars");
   }
 
-  const tags = data.tags;
-  if (tags !== undefined && !Array.isArray(tags)) {
-    throw new PublishError("frontmatter.tags must be an array of strings when present");
-  }
-  if (Array.isArray(tags)) {
-    for (const t of tags) {
-      if (typeof t !== "string") {
-        throw new PublishError("frontmatter.tags entries must be strings");
-      }
+  // 輸入的 status 欄位刻意忽略:publisher 一律強制寫成 "draft"。
+
+  for (const name of ["tags", "investors", "tickers"] as const) {
+    const v = data[name];
+    if (!Array.isArray(v) || v.some((s) => typeof s !== "string")) {
+      throw new PublishError(`frontmatter.${name} must be an array of strings`);
     }
   }
 
-  const investmentClaim = data.investmentClaim;
-  if (investmentClaim !== undefined && typeof investmentClaim !== "boolean") {
-    throw new PublishError("frontmatter.investmentClaim must be a boolean when present");
+  if (typeof data.investmentClaim !== "boolean") {
+    throw new PublishError("frontmatter.investmentClaim must be a boolean");
   }
 }
 
 function validateBody(body: string): void {
-  if (SCRIPT_TAG.test(body)) {
-    throw new PublishError("body must not contain a <script> tag");
+  if (body.trim().length === 0) {
+    throw new PublishError("body must not be empty");
   }
   for (const line of body.split(/\r?\n/)) {
     if (LINE_IMPORT_OR_EXPORT.test(line)) {
@@ -96,9 +96,12 @@ function validateBody(body: string): void {
         `prohibited Markdown syntax: line begins with import/export: ${line.trim()}`,
       );
     }
+    if (SCRIPT_TAG.test(line)) {
+      throw new PublishError(`prohibited Markdown syntax: <script tag found: ${line.trim()}`);
+    }
     if (HTML_EVENT_ATTR.test(line)) {
       throw new PublishError(
-        `prohibited Markdown syntax: on*-event attribute in body line: ${line.trim()}`,
+        `prohibited Markdown syntax: HTML event attribute found: ${line.trim()}`,
       );
     }
   }
@@ -108,20 +111,20 @@ function validateSources(body: string): void {
   const lines = body.split(/\r?\n/);
   const sourceIdx = lines.findIndex((l) => SOURCE_HEADING.test(l));
   if (sourceIdx === -1) {
-    throw new PublishError("body must contain a heading matching '## 來源'");
+    throw new PublishError("body must contain a '## 來源' section");
   }
-  const sourceLines = lines.slice(sourceIdx + 1).filter((l) => l.trim().length > 0);
-  if (sourceLines.length === 0) {
-    throw new PublishError("## 來源 must contain at least one https:// list item URL");
-  }
-  let hasHttpsListItem = false;
-  for (const line of sourceLines) {
-    const m = line.match(/^-\s+https:\/\/\S+/);
-    if (m) {
-      hasHttpsListItem = true;
-      break;
+  const tail = lines.slice(sourceIdx + 1);
+  const hasHttpsListItem = tail.some((line) => {
+    const m = line.match(/^[\s\-\*]*(\S+)/);
+    if (!m) return false;
+    const token = m[1];
+    if (!HTTPS_URL.test(token)) return false;
+    try {
+      return new URL(token).protocol === "https:";
+    } catch {
+      return false;
     }
-  }
+  });
   if (!hasHttpsListItem) {
     throw new PublishError("## 來源 must contain at least one https:// list item URL");
   }
@@ -200,6 +203,7 @@ export async function publishDraft(input: PublishDraftInput): Promise<PublishDra
   // blogDir 必須已經含 src/content/blog;若沒有,Bun.write 會
   // 因為 parent dir 不存在而失敗。這是預期行為:Task 3 保證
   // 子目錄存在,publisher 不會自己建立。
+  //
   await Bun.write(targetPath, contentBytes);
   return { action: "created", targetPath };
 }
@@ -209,6 +213,7 @@ export async function publishDraft(input: PublishDraftInput): Promise<PublishDra
 //     --candidate <path> --blog-dir <path> --runtime-sha <sha>
 // 沒這個守門員的話,`bun run` 只會 import 模組、不跑任何程式、
 // 然後 exit 0 — 靜默地丟掉 publish。
+//
 function parseArgs(argv: string[]): { candidate?: string; blogDir?: string; runtimeSha?: string } {
   const out: { candidate?: string; blogDir?: string; runtimeSha?: string } = {};
   for (let i = 0; i < argv.length; i++) {
@@ -242,6 +247,7 @@ if (import.meta.main) {
       });
       // 單行機器可讀的摘要,輸出到 stdout。Dagu
       // step 會把 stdout 收下來,日誌可以確認實際動了哪個檔。
+      //
       console.log(JSON.stringify({ ok: true, ...result }));
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
