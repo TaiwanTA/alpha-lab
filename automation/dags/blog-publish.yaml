@@ -43,6 +43,18 @@ artifacts:
 timeout_sec: 900
 type: graph
 
+# 容器模式下 /bin/sh → dash,不支援 pipefail。用 bash 執行
+# 所有 step commands,跟 native 模式 (Fedora /bin/sh → bash)
+# 行為一致。
+
+shell: ["bash", "-e"]
+env:
+  - GIT_READ_TOKEN: "${GIT_READ_TOKEN}"
+  - HINDSIGHT_API_KEY: "${HINDSIGHT_API_KEY}"
+  - HINDSIGHT_BASE_URL: "${HINDSIGHT_BASE_URL}"
+  - LLM_API_KEY: "${LLM_API_KEY}"
+  - LLM_MODEL: "${LLM_MODEL}"
+  - LLM_BASE_URL: "${LLM_BASE_URL}"
 steps:
   - id: checkout
     run: bash /opt/alpha-lab/automation/scripts/clone-publish.sh

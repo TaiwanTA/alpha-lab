@@ -13,9 +13,10 @@
 #      內部就讀得到)
 #   4. systemctl reload alpha-lab-dagu.service (ExecReload =
 #      `docker compose ... up -d --force-recreate`,dagu 跟
-#      dags-sync 兩個 container 重建。dags named volume 內資料保留,
-#      dags-sync 第一次 container 起來後會 git clone 進 named volume,5-30s 內
-#      dags 出現)
+#      dags-sync 兩個 container 重建。dags 走 bind mount
+#      /var/lib/alpha-lab/dagu/dags,資料跨 restart 保留。
+#      dags-sync 第一次跑會 git clone 進 dags 子目錄,5-30s
+#      內 dags 出現)
 #   5. 等兩個 container 都 running (最多 30s)
 #   6. verify:systemd active + dagu http 200 + dags-sync log
 #
@@ -32,8 +33,8 @@
 #     /etc/systemd/system/alpha-lab-dagu.service (改為 compose
 #     wrapper)
 #   - systemctl daemon-reload + start alpha-lab-dagu.service
-#   - 確認 dags 從 /var/lib/alpha-lab/dagu/dags 搬到
-#     /var/lib/alpha-lab/dagu-dags (named volume 接管)
+#   - dags 不需要搬家:/var/lib/alpha-lab/dagu/dags 在
+#     native 跟 compose 模式都一樣 (bind mount 子目錄)
 # 切換流程見 automation/scripts/setup-vm.sh 跟 AGENTS.md。
 #
 # 用法:
@@ -99,7 +100,11 @@ echo "[5/6] wait for containers"
 "${SSH_CMD[@]}" --command 'set -e
 cd /opt/alpha-lab/automation/deploy/dagu
 for i in $(seq 1 30); do
-  if sudo /usr/bin/docker compose ps --status running 2>/dev/null | grep -qE "alpha-lab-dagu|alpha-lab-dags-sync"; then
+  # grep -cE count >= 2:兩個 container (alpha-lab-dagu +
+  # alpha-lab-dags-sync) 都要 running 才 break。原來的
+  # grep -qE 是 OR 邏輯,第一個起來就 break,沒等 dags-sync。
+  running=$(sudo /usr/bin/docker compose ps --status running 2>/dev/null | grep -cE "alpha-lab-dagu|alpha-lab-dags-sync")
+  if [ "${running}" -ge 2 ]; then
     echo "    containers up after ${i}s"
     break
   fi

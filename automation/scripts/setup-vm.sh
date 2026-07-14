@@ -63,7 +63,6 @@ SYSTEMD_UNIT_TARGET="/etc/systemd/system/alpha-lab-dagu.service"
 SSH_DIR="/var/lib/alpha-lab/dagu/.ssh"
 SSH_KEY="${SSH_DIR}/id_ed25519"
 DAGU_HOME="/var/lib/alpha-lab/dagu"
-DAGS_HOME="/var/lib/alpha-lab/dagu-dags"
 
 # === 步驟 1: user ===
 echo "[1/9] 建立 alpha-lab-dagu user (uid=999, gid=982)"
@@ -74,10 +73,10 @@ fi
 
 # === 步驟 2: dirs ===
 echo "[2/9] 建立 dagu state 跟 dags dirs"
-sudo mkdir -p "${DAGU_HOME}/data" "${DAGU_HOME}/logs" "${DAGS_HOME}"
-sudo chown -R alpha-lab-dagu:alpha-lab-dagu "${DAGU_HOME}" "${DAGS_HOME}"
+sudo mkdir -p "${DAGU_HOME}/data" "${DAGU_HOME}/logs" "${DAGU_HOME}/dags"
+sudo chown -R alpha-lab-dagu:alpha-lab-dagu "${DAGU_HOME}"
 sudo chmod 0750 "${DAGU_HOME}"
-sudo chmod 0755 "${DAGS_HOME}"
+sudo chmod 0755 "${DAGU_HOME}/dags"
 
 # === 步驟 3: SSH deploy key ===
 echo "[3/9] SSH deploy key (git@github.com:TaiwanTA/alpha-lab)"
@@ -124,9 +123,12 @@ if [ -f "${DAGU_ENV_TARGET}" ]; then
   echo "    既有 ${DAGU_ENV_TARGET} 保留 (刪除檔案後重跑才會重新生成)"
 else
   sudo mkdir -p /etc/alpha-lab
-  sudo touch "${DAGU_ENV_TARGET}"
-  sudo chmod 0640 "${DAGU_ENV_TARGET}"
-  sudo chown root:alpha-lab-dagu "${DAGU_ENV_TARGET}"
+  # 用 temp file 收集 secret 再 install 到目標路徑:
+  # 避免 `sudo tee -a` 把 secret value 放進 argv (會落到
+  # /var/log/audit/audit.log 的 EXECVE 記錄)。secret 只走
+  # file content,argv 只有 install 跟 temp file 路徑。
+  TMP_ENV=$(mktemp)
+  trap 'rm -f "${TMP_ENV}"' EXIT
   # 從 template 抓 keys,互動讀值
   while IFS= read -r line; do
     case "${line}" in
@@ -149,12 +151,14 @@ else
         # 一般 secret
         read -r -s -p "    ${key}= " value
         echo
-        echo "${key}=${value}" | sudo tee -a "${DAGU_ENV_TARGET}" >/dev/null
+        printf '%s=%s\n' "${key}" "${value}" >> "${TMP_ENV}"
         ;;
     esac
   done < "${DAGU_ENV_TEMPLATE}"
   # NAME 預設值
-  echo "NAME=alpha-lab-dagu" | sudo tee -a "${DAGU_ENV_TARGET}" >/dev/null
+  printf 'NAME=alpha-lab-dagu\n' >> "${TMP_ENV}"
+  sudo install -m 0640 -o root -g alpha-lab-dagu "${TMP_ENV}" "${DAGU_ENV_TARGET}"
+  rm -f "${TMP_ENV}"
 fi
 
 # === 步驟 5: systemd unit ===

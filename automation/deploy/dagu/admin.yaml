@@ -17,11 +17,14 @@
 #   - `secrets:` block in `admin.yaml` exists for external secret
 #     providers (Vault, file); it is not used here.
 #
-# dags_dir 拆出來:原本 `/var/lib/alpha-lab/dagu/dags` 跟 dagu
-# state 同 parent。在 docker-compose 模式下 dags 走 named
-# volume,跟 host bind mount `/var/lib/alpha-lab/dagu` 衝突
-# (volume shadowing)。拆到 `/var/lib/alpha-lab/dagu-dags` 解掉。
-# dags-sync sidecar 寫這個路徑,dagu 從這個路徑 load DAG。
+# dags_dir 跟 dagu state 同 parent (/var/lib/alpha-lab/dagu)。
+# 在 docker-compose 模式下,/var/lib/alpha-lab/dagu 整個走
+# bind mount,dags 子目錄跟 dagu state 共用同一個 mount。
+# 不需要拆出來 — 原本拆到 /var/lib/alpha-lab/dagu-dags 是
+# 為了避開 named volume shadowing,但 compose v2 不用 named
+# volume (dags 走 bind mount 子目錄),所以沒這問題。
+# dags-sync sidecar 寫 dags 子目錄,dagu 從 dags 子目錄
+# load DAG,跟 native 模式路徑一致。
 #
 # git_sync 維持 disabled:PR #23 實測 dagu v2.10.7 git_sync
 # interval tick 不觸發 (background sync 0 log),只有 on_startup
@@ -33,16 +36,14 @@
 #     fine-grained PAT Bearer,401
 #   - type: ssh 需明確 ssh_key_path
 #
-# 將來啟用 git_sync 需要:升 dagu 修 interval timer bug。
+# 將來啟用 git_sync 需要:升 dagu 修 interval timer bug.
 
 host: "127.0.0.1"
 port: 8080
 paths:
-  # dags_dir 拆出來到獨立路徑,搭配 docker-compose 的
-  # dags-sync sidecar 同步 automation/dags/。原本跟 dagu
-  # state 同 parent 的設計在 compose 下會跟 host bind
-  # mount 衝突 (named volume shadowing),拆出來比較乾淨。
-  dags_dir: /var/lib/alpha-lab/dagu-dags
+  # dags 跟 dagu state 同 parent (bind mount 子目錄),
+  # 跟 native 模式路徑一致,不需要 path migration。
+  dags_dir: /var/lib/alpha-lab/dagu/dags
   data_dir: /var/lib/alpha-lab/dagu/data
   log_dir: /var/lib/alpha-lab/dagu/logs
 

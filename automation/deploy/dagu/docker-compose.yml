@@ -4,100 +4,136 @@
 # setup-vm.sh 就能跑出跟現在 production 一樣的 dagu runtime
 # + DAG 同步機制,不需要再手動跑 deploy-dagu.sh。
 #
-# 兩個服務:
+# 三個服務:
 #   - `dagu`:Dagu 排程器,跑 999:982 (對應 host alpha-lab-dagu
-#     user)。Persistent state (data / logs / admin) 走 host
-#     bind mount /var/lib/alpha-lab/dagu。dags_dir 走獨立路徑
-#     /var/lib/alpha-lab/dagu-dags,搭配 named volume `dags`
-#     由 sidecar 寫入最新 main 版本。dags_dir 跟 dagu state
-#     不同 parent 是為了避免 named volume shadow host bind
-#     mount (見 admin.yaml `paths.dags_dir`)。
+#     user)。自建 image `Dockerfile.dagu` 在官方 dagu:2.10.7
+#     上補 git/node22/bun/ssh/rsync。Persistent state (data /
+#     logs / dags / ssh key / workspace) 走 host bind mount
+#     /var/lib/alpha-lab/dagu。DAG 引用的 scripts 走另一個
+#     bind mount /opt/alpha-lab/automation:ro。
 #   - `dags-sync`:sidecar 服務,alpine + git + openssh-client。
 #     Entry script `dags-sync.sh` 第一次跑 `git clone`,之後
-#     每 5 分鐘 `git pull`。使用 SSH deploy key 同步
-#     automation/dags/ 到 named volume。
+#     每 5 分鐘 `git pull`,rsync 到 dags_dir 子目錄。使用
+#     SSH deploy key 同步 automation/dags/。
+#
+# PUID/PGID 機制:
+#   官方 entrypoint.sh (/usr/local/bin/tini -g -- /entrypoint.sh)
+#   以 root 啟動,groupmod/usermod 把 dagu user 改成
+#   PUID/PGID,然後 `sudo -u #PUID -g #PGID` 降權執行 cmd。
+#   所以 compose 不設 `user:`,而是設 PUID=999 PGID=982
+#   環境變數讓 entrypoint 處理降權。
+#
+# HOME 覆蓋:
+#   entrypoint 的 `sudo -H` 會把 HOME 設成 dagu user 的
+#   home dir (/home/dagu,容器層,不持久)。設 HOME=
+#   /var/lib/alpha-lab/dagu 讓 npm/bun cache 寫進 bind mount,
+#   跨 container restart 持久化。
+#
+# DAGU_HOME:
+#   entrypoint.sh `mkdir -p ${DAGU_HOME}` + export。
+#   設 DAGU_HOME=/var/lib/alpha-lab/dagu 跟 bind mount 對齊,
+#   dagu state (data/logs/admin/dags) 全在 bind mount 上。
 #
 # 已拿掉的東西 (跟 PR #20/21 時代的差異):
 #   - docker.sock 拿掉 — 之前是為了 `docker exec hermes-hermes-1`
 #     (PR #20 移除 Hermes,不再需要)
-#   - /opt/alpha-lab/automation bind mount 拿掉 — dags 透過
-#     sidecar 從 git 拉,不是 host bind mount
-#   - 沒 read_only: true — dagu 內部在 dags_dir 寫 metadata
-#   - 沒 security_opt: no-new-privileges — 999:982 user 已是
-#     unprivileged,加上會跟 git pull 寫入衝突
-#
-# 注意:VM 上還沒切到這個 compose。切換流程見
-# automation/scripts/setup-vm.sh + AGENTS.md「部署流程」。
+#   - 沒 read_only: true — npm/bun/git 需要寫 $HOME/cache
+#   - 沒 named volume dags — dags 改走 bind mount 子目錄
+#     /var/lib/alpha-lab/dagu/dags,跟 production 一致,
+#     不需要 path migration
 
 name: alpha-lab-dagu
 
 services:
   dagu:
-    image: ghcr.io/dagu-org/dagu:2.10.7
+    build:
+      context: .
+      dockerfile: Dockerfile.dagu
+    image: alpha-lab-dagu:local
     container_name: alpha-lab-dagu
     restart: unless-stopped
-    user: "999:982"  # alpha-lab-dagu host uid:gid,避免 owner 變 root
-    command: ["start-all"]  # foreground so docker compose sees liveness
+    # 不設 `user:` — 官方 entrypoint.sh 以 root 啟動,透過
+    # PUID/PGID 環境變數降權到 999:982。
+    # 覆蓋官方 Cmd:entrypoint.sh 的 `sudo -u` 執行 command,
+    # sudo 不繼承 root 的 PATH,所以要用完整 binary path。
+    command: ["dagu", "start-all"]
     ports:
       - "127.0.0.1:8080:8080"
     env_file:
       # /etc/alpha-lab/dagu.env 是 mode 0440 root:alpha-lab-dagu。
-      # container 跑 999:982 對應 host user,可以讀。
+      # container 以 999:982 跑,對應 host group alpha-lab-dagu,
+      # 可以讀。env_file 注入變數到 process env,但檔案本身
+      # 不在 container 內 — DAG step 用 `. /etc/alpha-lab/dagu.env`
+      # 需要另掛 bind mount (見下方 volumes)。
       - /etc/alpha-lab/dagu.env
     environment:
+      # PUID/PGID 讓 entrypoint.sh groupmod/usermod + sudo 降權。
+      PUID: "999"
+      PGID: "982"
+      # HOME 覆蓋 sudo -H 的預設 /home/dagu,讓 npm/bun cache
+      # 寫進 bind mount (持久化,跨 container restart)。
+      HOME: "/var/lib/alpha-lab/dagu"
+      # DAGU_HOME 跟 bind mount 對齊,dagu state 全在
+      # host /var/lib/alpha-lab/dagu。
+      DAGU_HOME: "/var/lib/alpha-lab/dagu"
       # Override HINDSIGHT_BASE_URL: env file 內是 host-loopback
       # URL (給人用工具看),但 container 內 127.0.0.1 是 container
       # 自己的 loopback。Hindsight 跑在同一個 hindsight-net 上,
       # 用 container name 連。
       HINDSIGHT_BASE_URL: "http://hindsight-hindsight-1:8888"
+      # DAG step 做 `. /etc/alpha-lab/dagu.env` 會把上面的
+      # HINDSIGHT_BASE_URL 蓋回 host-loopback。這個 var 在
+      # source 後被用來覆蓋回 container-friendly URL。
+      HINDSIGHT_BASE_URL_DAGU: "http://hindsight-hindsight-1:8888"
     volumes:
-      # Persistent dagu state (runs, logs, admin) 走 host bind
-      # mount。dags_dir 完全由 named volume `dags` 提供,由
-      # sidecar 寫入;host 上不應有 /var/lib/alpha-lab/dagu-dags
-      # 實體目錄,容器內 dagu 跟 sidecar 透過 named volume 共享。
+      # Persistent dagu state (data, logs, admin, dags, .ssh,
+      # workspace) 全走這個 bind mount。
       - /var/lib/alpha-lab/dagu:/var/lib/alpha-lab/dagu
-      - dags:/var/lib/alpha-lab/dagu-dags:rw
+      # DAG step 引用 /opt/alpha-lab/automation/scripts/ —
+      # clone-fixture.sh, clone-publish.sh, git-askpass.sh,
+      # research-agent.ts, publish-draft.ts 都在這。:ro 因為
+      # DAG step 只讀不改。
+      - /opt/alpha-lab/automation:/opt/alpha-lab/automation:ro
+      # /etc/alpha-lab/dagu.env — env_file 只注入變數,檔案
+      # 不在 container fs。DAG step 做 `. /etc/alpha-lab/dagu.env`
+      # 需要這個 bind mount。
+      - /etc/alpha-lab/dagu.env:/etc/alpha-lab/dagu.env:ro
     networks:
       - hindsight-net
 
   dags-sync:
     # 用 repo 內 Dockerfile.dags-sync build image:USER 999:982、
-    # dags-sync.sh COPY 進 image 都已在 Dockerfile 內做。改
-    # dags-sync.sh / Dockerfile 需要 `docker compose build`
-    # 重 build;setup-vm.sh 跟 deploy-dagu.sh 都會跑。
+    # dags-sync.sh + git + openssh-client + rsync 都在 build
+    # 階段裝好。改 dags-sync.sh / Dockerfile 需要
+    # `docker compose build` 重 build;setup-vm.sh 跟
+    # deploy-dagu.sh 都會跑。
     build:
-      context: ./deploy/dagu
+      context: .
       dockerfile: Dockerfile.dags-sync
     container_name: alpha-lab-dags-sync
     restart: unless-stopped
     entrypoint: ["/usr/local/bin/dags-sync.sh"]
-    env_file:
-      - /etc/alpha-lab/dagu.env
     environment:
       # Sidecar 自己用的設定 (不影響 dagu)
       DAG_SYNC_REPO: "git@github.com:TaiwanTA/alpha-lab.git"
       DAG_SYNC_BRANCH: "main"
       DAG_SYNC_PATH: "automation/dags"
       DAG_SYNC_INTERVAL: "300"  # 5 min
-      DAG_SYNC_TARGET: "/var/lib/alpha-lab/dagu-dags"
+      # dags_dir 跟 dagu 一致,走 bind mount 子目錄
+      DAG_SYNC_TARGET: "/var/lib/alpha-lab/dagu/dags"
       GIT_SSH_COMMAND: "ssh -i /home/alpha-lab-dagu/.ssh/id_ed25519 -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new"
+      # HOME 對齊 SSH key bind mount 的路徑
+      HOME: "/home/alpha-lab-dagu"
     volumes:
+      # DAG state 走 bind mount,dags-sync 寫
+      # /var/lib/alpha-lab/dagu/dags 子目錄
+      - /var/lib/alpha-lab/dagu:/var/lib/alpha-lab/dagu
       # SSH key 跟 dagu 共享 host 上的 deploy key
       - /var/lib/alpha-lab/dagu/.ssh:/home/alpha-lab-dagu/.ssh:ro
-      # 寫入 dags named volume (跟 dagu 共享)
-      - dags:/var/lib/alpha-lab/dagu-dags:rw
     networks:
       - hindsight-net
-    tty: false
 
 networks:
   hindsight-net:
     external: true
     name: hindsight-net
-
-volumes:
-  dags:
-    # 沒有 driver 設定 = local driver。資料落在
-    # /var/lib/docker/volumes/alpha-lab-dagu_dags/_data/。
-    # 重現時 `docker compose up` 會自動建立,dags-sync 第一次
-    # 跑會 git clone 進去。

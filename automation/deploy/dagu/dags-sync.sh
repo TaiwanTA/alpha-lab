@@ -71,7 +71,13 @@ sync_once() {
   # rsync -a 保留 mode/mtime/owner,dagu 跟 sidecar 都用 999:982
   # 寫,owner 會一致;新檔案 owner 由 rsync 推導 = sidecar user
   # (999:982),跟 dagu 讀寫一致。
-  rsync -a --delete "${CLONE_DIR}/${PATH_IN_REPO}/" "${TARGET}/" || {
+  #
+  # --exclude='.dagu' --exclude='.git' 保護 dags_dir 內既有的
+  # dagu metadata 跟其他非 source 檔,避免 rsync --delete 砍掉。
+  rsync -a --delete \
+   --exclude='.dagu' \
+   --exclude='.git' \
+   "${CLONE_DIR}/${PATH_IN_REPO}/" "${TARGET}/" || {
     log "ERROR: rsync to ${TARGET} failed"
     return 1
   }
@@ -80,15 +86,6 @@ sync_once() {
 }
 
 log "starting dags-sync (repo=${REPO} branch=${BRANCH} path=${PATH_IN_REPO} interval=${INTERVAL}s target=${TARGET})"
-
-# 安裝 git + openssh-client + rsync。alpine 預設沒這些。
-# `apk add` 在 image 第一次跑時會 install,後續 restart 因為
-# container 重建會重裝 (除非用 named volume 保存 /var/cache/
-# apk,但 alpine 的 /var/cache/apk 在 image layer 內)。
-if ! command -v git >/dev/null 2>&1; then
-  log "installing git openssh-client rsync via apk"
-  apk add --no-cache git openssh-client rsync
-fi
 
 while true; do
   sync_once || true
