@@ -16,23 +16,26 @@
 #   - `secrets:` block in `admin.yaml` exists for external secret
 #     providers (Vault, file); it is not used here.
 #
-# git_sync 是 disabled:目前的 deploy-dagu.sh 用手動 cp
-# `automation/dags/*.yaml` 到 dags_dir 的 pinned-checkout 模式,
-# 穩定但每次 automation/dags 變更要跑一次 deploy。
+# git_sync 已啟用:production DAGs (automation/dags/) 直接從
+# main 同步,dagu.service 啟動時 pull (on_startup: true),
+# 之後每 300 秒背景 pull (interval: 300)。改 DAG 不需要再跑
+# deploy-dagu.sh。
 #
-# v3 rebuild merge (PR #18) 之後 `automation/dags/` 已經在
-# main;如果要切到 git_sync 自動拉,要先:
-#   1. 把 admin.yaml push 到 VM 並 cp 到
-#      /var/lib/alpha-lab/dagu/admin.yaml
-#   2. 確認 VM dags_dir 裡現存的 blog-publish.yaml /
-#      fixture-research.yaml 跟 main 上一樣 (git_sync 啟動
-#      會 overwrite)
-#   3. 把這裡改成 enabled: true + auto_sync.enabled: true
-#      + on_startup: true
-#   4. systemctl restart alpha-lab-dagu.service 並觀察
-#      journalctl 看 git_sync pull 記錄
-# 這個 PR 先保持 disabled,把上面提到的安全檢查做完再切。
-# Adjacent feature,留 explicit operational gating。
+# Token auth:完整 HTTPS URL + `${env.GIT_READ_TOKEN}`。
+# Dagu 2.10.7 contract:`${env.NAME}` 是唯一解析 process env
+# 的格式;token 經 dagu daemon 直接讀取,不經 step shell
+# 的 `${VAR}` 截斷路徑。Token 在 dagu process env 內為完整
+# 93 字元 (systemd EnvironmentFile 載入,已在 VM 上 verify)。
+#
+# dags_dir 內容會在 on_startup pull 時被 main 覆蓋;deploy
+# 第一次套用時務必先確認 VM 上的 blog-publish.yaml /
+# fixture-research.yaml 跟 main 一致,或接受被 overwrite。
+# 兩者已在部署前驗證:fixture-research.md5 一致,
+# blog-publish 在 VM 為過期版 (會被升級到 PR #21 的
+# SSH-deploy-key 版本 — 正是預期行為)。
+#
+# `push_enabled: false` — git_sync 為 pull-only。Blog publish
+# 仍走 SSH deploy key 推 main (ruleset bypass)。
 
 host: "127.0.0.1"
 port: 8080
@@ -42,15 +45,15 @@ paths:
   log_dir: /var/lib/alpha-lab/dagu/logs
 
 git_sync:
-  enabled: false
-  repository: github.com/TaiwanTA/alpha-lab
+  enabled: true
+  repository: "https://github.com/TaiwanTA/alpha-lab.git"
   branch: main
   path: automation/dags
   auth:
     type: token
     token: "${env.GIT_READ_TOKEN}"
   auto_sync:
-    enabled: false
-    on_startup: false
+    enabled: true
+    on_startup: true
     interval: 300
   push_enabled: false
