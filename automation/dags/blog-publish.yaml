@@ -129,7 +129,7 @@ steps:
       # 用 SSH deploy key push,不走 HTTPS + askpass。
       # deploy key 在 VM 上 alpha-lab-dagu 的 ~/.ssh/id_ed25519,
       # GitHub repo settings 裡加了對應的 write deploy key。
-      export GIT_SSH_COMMAND="ssh -i /var/lib/alpha-lab/dagu/.ssh/id_ed25519 -o StrictHostKeyChecking=accept-new"
+      export GIT_SSH_COMMAND="ssh -i /var/lib/alpha-lab/dagu/.ssh/id_ed25519 -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new"
       git -C "${WORKDIR}" push "git@github.com:TaiwanTA/alpha-lab.git" HEAD:main
     retry_policy:
       limit: 1
