@@ -2,13 +2,14 @@
 #
 # Non-secret configuration only. The bootstrap admin credential is
 # supplied through Dagu's first-run loopback UI and is stored in
-# the VM secret store, never in this file. `GIT_READ_TOKEN` is
-# injected as a process environment variable by the dagu container's
-# `env_file:` entry (see docker-compose.yml) and referenced here as
-# `${env.GIT_READ_TOKEN}`. The legacy `${secrets.X}` form is not a
-# v2.10.7 strict-binding namespace and would be stored as a literal
-# string, which `git_sync` would then send to GitHub as the
-# BasicAuth password.
+# the VM secret store, never in this file. `GIT_READ_TOKEN` 是
+# git-pull automation/dags/ 用的 fine-grained PAT,放在
+# /etc/alpha-lab/dagu.env (mode 0440 root:alpha-lab-dagu)。
+# 注意:dagu 內部 `${env.NAME}` 解析在 dagu 2.10.7 已實測可
+# 用 — 跟舊註解講的「token 經 env_file 注入」不同,目前
+# git_sync 是 disabled,所以這個 token 沒被 dagu 自己使用,
+# 而是給 dags-sync sidecar 的 git pull 走 HTTPS BasicAuth
+# (`oauth2:<token>`) 用。
 #
 # Verified Dagu v2.10.7 contract:
 #   - `${env.NAME}` is the only form that resolves to the process
@@ -16,28 +17,32 @@
 #   - `secrets:` block in `admin.yaml` exists for external secret
 #     providers (Vault, file); it is not used here.
 #
-# git_sync 是 disabled:目前的 deploy-dagu.sh 用手動 cp
-# `automation/dags/*.yaml` 到 dags_dir 的 pinned-checkout 模式,
-# 穩定但每次 automation/dags 變更要跑一次 deploy。
+# dags_dir 拆出來:原本 `/var/lib/alpha-lab/dagu/dags` 跟 dagu
+# state 同 parent。在 docker-compose 模式下 dags 走 named
+# volume,跟 host bind mount `/var/lib/alpha-lab/dagu` 衝突
+# (volume shadowing)。拆到 `/var/lib/alpha-lab/dagu-dags` 解掉。
+# dags-sync sidecar 寫這個路徑,dagu 從這個路徑 load DAG。
 #
-# v3 rebuild merge (PR #18) 之後 `automation/dags/` 已經在
-# main;如果要切到 git_sync 自動拉,要先:
-#   1. 把 admin.yaml push 到 VM 並 cp 到
-#      /var/lib/alpha-lab/dagu/admin.yaml
-#   2. 確認 VM dags_dir 裡現存的 blog-publish.yaml /
-#      fixture-research.yaml 跟 main 上一樣 (git_sync 啟動
-#      會 overwrite)
-#   3. 把這裡改成 enabled: true + auto_sync.enabled: true
-#      + on_startup: true
-#   4. systemctl restart alpha-lab-dagu.service 並觀察
-#      journalctl 看 git_sync pull 記錄
-# 這個 PR 先保持 disabled,把上面提到的安全檢查做完再切。
-# Adjacent feature,留 explicit operational gating。
+# git_sync 維持 disabled:PR #23 實測 dagu v2.10.7 git_sync
+# interval tick 不觸發 (background sync 0 log),只有 on_startup
+# pull。DAG 同步改由外部 dags-sync sidecar 處理,跟 dagu 內部
+# git_sync 解耦。已驗證的 v2.10.7 git_sync 限制保留供未來
+# 參考:
+#   - auth.type 限定 'token' 或 'ssh' (basic 觸發 init 失敗)
+#   - type: token 走 go-git Bearer header,GitHub HTTPS 拒絕
+#     fine-grained PAT Bearer,401
+#   - type: ssh 需明確 ssh_key_path
+#
+# 將來啟用 git_sync 需要:升 dagu 修 interval timer bug。
 
 host: "127.0.0.1"
 port: 8080
 paths:
-  dags_dir: /var/lib/alpha-lab/dagu/dags
+  # dags_dir 拆出來到獨立路徑,搭配 docker-compose 的
+  # dags-sync sidecar 同步 automation/dags/。原本跟 dagu
+  # state 同 parent 的設計在 compose 下會跟 host bind
+  # mount 衝突 (named volume shadowing),拆出來比較乾淨。
+  dags_dir: /var/lib/alpha-lab/dagu-dags
   data_dir: /var/lib/alpha-lab/dagu/data
   log_dir: /var/lib/alpha-lab/dagu/logs
 

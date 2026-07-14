@@ -1,22 +1,33 @@
-# Dagu runtime as a Docker compose service on the alpha-lab VM.
+# Dagu runtime as a Docker compose stack on the alpha-lab VM.
 #
-# NOTE: This compose file is NOT yet active on the VM — dagu
-# currently runs as a bare systemd service on the host (see
-# alpha-lab-dagu.service). Switching to compose is tracked as a
-# P2 housekeeping item. Hermes was removed from the pipeline
-# (replaced by research-agent.ts, a self-contained TypeScript
-# agent that calls LLM + Hindsight APIs directly). The
-# docker.sock mount and hindsight-net membership below were
-# originally needed for `docker exec hermes-hermes-1 ...`;
-# after Hermes removal, docker.sock can likely be dropped when
-# this compose is activated (pending review).
+# 設計目標:在另一台 VM 上還原這份 compose + automation/scripts/
+# setup-vm.sh 就能跑出跟現在 production 一樣的 dagu runtime
+# + DAG 同步機制,不需要再手動跑 deploy-dagu.sh。
 #
-# Topology (when activated):
-#   - joins the shared `hindsight-net` external network so it
-#     can reach `hindsight-hindsight-1:8888` for Hindsight API
-#     calls from research-agent.ts (if running inside container);
-#   - mounts the host's `/opt/alpha-lab/automation` so DAG
-#     scripts work without rebuilding the image.
+# 兩個服務:
+#   - `dagu`:Dagu 排程器,跑 999:982 (對應 host alpha-lab-dagu
+#     user)。Persistent state (data / logs / admin) 走 host
+#     bind mount /var/lib/alpha-lab/dagu。dags_dir 走獨立路徑
+#     /var/lib/alpha-lab/dagu-dags,搭配 named volume `dags`
+#     由 sidecar 寫入最新 main 版本。dags_dir 跟 dagu state
+#     不同 parent 是為了避免 named volume shadow host bind
+#     mount (見 admin.yaml `paths.dags_dir`)。
+#   - `dags-sync`:sidecar 服務,alpine + git + openssh-client。
+#     Entry script `dags-sync.sh` 第一次跑 `git clone`,之後
+#     每 5 分鐘 `git pull`。使用 SSH deploy key 同步
+#     automation/dags/ 到 named volume。
+#
+# 已拿掉的東西 (跟 PR #20/21 時代的差異):
+#   - docker.sock 拿掉 — 之前是為了 `docker exec hermes-hermes-1`
+#     (PR #20 移除 Hermes,不再需要)
+#   - /opt/alpha-lab/automation bind mount 拿掉 — dags 透過
+#     sidecar 從 git 拉,不是 host bind mount
+#   - 沒 read_only: true — dagu 內部在 dags_dir 寫 metadata
+#   - 沒 security_opt: no-new-privileges — 999:982 user 已是
+#     unprivileged,加上會跟 git pull 寫入衝突
+#
+# 注意:VM 上還沒切到這個 compose。切換流程見
+# automation/scripts/setup-vm.sh + AGENTS.md「部署流程」。
 
 name: alpha-lab-dagu
 
@@ -25,57 +36,67 @@ services:
     image: ghcr.io/dagu-org/dagu:2.10.7
     container_name: alpha-lab-dagu
     restart: unless-stopped
-    user: "0:0"  # docker.sock access requires root in the container
-    command: ["start-all"]  # foreground so systemd sees liveness; legacy unit ran `start-all`
-    # docker.sock mount was originally for `docker exec
-    # hermes-hermes-1 ...`. Hermes is now removed; this mount
-    # can be dropped when compose is activated. Left in place
-    # for now to avoid breaking other potential docker calls.
-    # Mitigations below are best-effort:
-    #   - no-new-privileges: blocks setuid binary abuse
-    #   - read_only rootfs: blocks in-container persistence
-    #     (dagu still writes via the dagu_data tmpfs mount)
-    security_opt:
-      - no-new-privileges:true
-    read_only: true
-    tmpfs:
-      # 可寫 scratch。read_only rootfs 下,/tmp 跟 /var/tmp
-      # 是 dagu 跑 step 的 process working dir 跟 run
-      # artifact 落地點。持久狀態 (/var/lib/alpha-lab/dagu
-      # 底下的 dag-runs / logs / admin) 走 host bind mount
-      # 而不是 tmpfs,reboot 之後資料還在。
-      - /tmp
-      - /var/tmp
+    user: "999:982"  # alpha-lab-dagu host uid:gid,避免 owner 變 root
+    command: ["start-all"]  # foreground so docker compose sees liveness
     ports:
       - "127.0.0.1:8080:8080"
     env_file:
-      # /etc/alpha-lab/dagu.env is mode 0440 root:alpha-lab-dagu.
-      # dagu's container runs as root so it can read the file.
-      # Tighten to `user: "999:982"` after adding the alpha-lab-dagu
-      # host user to the docker group and switching to a non-root
-      # container user.
+      # /etc/alpha-lab/dagu.env 是 mode 0440 root:alpha-lab-dagu。
+      # container 跑 999:982 對應 host user,可以讀。
       - /etc/alpha-lab/dagu.env
     environment:
-      # Override HINDSIGHT_BASE_URL: the env file records the
-      # host-loopback URL (useful for human-facing tooling on the
-      # VM), but from inside this container `127.0.0.1` is the
-      # container's own loopback, not the host. The Hindsight
-      # service is on the same `hindsight-net`; reach it by its
-      # container name.
+      # Override HINDSIGHT_BASE_URL: env file 內是 host-loopback
+      # URL (給人用工具看),但 container 內 127.0.0.1 是 container
+      # 自己的 loopback。Hindsight 跑在同一個 hindsight-net 上,
+      # 用 container name 連。
       HINDSIGHT_BASE_URL: "http://hindsight-hindsight-1:8888"
     volumes:
-      # Persistent dagu state (dags, runs, logs).
+      # Persistent dagu state (runs, logs, admin) 走 host bind
+      # mount。dags_dir 完全由 named volume `dags` 提供,由
+      # sidecar 寫入;host 上不應有 /var/lib/alpha-lab/dagu-dags
+      # 實體目錄,容器內 dagu 跟 sidecar 透過 named volume 共享。
       - /var/lib/alpha-lab/dagu:/var/lib/alpha-lab/dagu
-      # Live source for the DAGs and helper scripts. Read-only so
-      # steps cannot accidentally mutate the deployed automation.
-      - /opt/alpha-lab/automation:/opt/alpha-lab/automation:ro
-      # docker.sock — originally for `docker exec hermes-hermes-1`.
-      # Hermes removed; can likely be dropped when compose is
-      # activated. Left for now to avoid surprises.
+      - dags:/var/lib/alpha-lab/dagu-dags:rw
     networks:
       - hindsight-net
+
+  dags-sync:
+    image: alpine:3.20
+    container_name: alpha-lab-dags-sync
+    restart: unless-stopped
+    # 跟 dagu 同 user 999:982 寫 named volume,跟 host
+    # /var/lib/alpha-lab/dagu owner 一致,避免 permission 不一致。
+    user: "999:982"
+    entrypoint: ["/usr/local/bin/dags-sync.sh"]
+    env_file:
+      - /etc/alpha-lab/dagu.env
+    environment:
+      # Sidecar 自己用的設定 (不影響 dagu)
+      DAG_SYNC_REPO: "git@github.com:TaiwanTA/alpha-lab.git"
+      DAG_SYNC_BRANCH: "main"
+      DAG_SYNC_PATH: "automation/dags"
+      DAG_SYNC_INTERVAL: "300"  # 5 min
+      DAG_SYNC_TARGET: "/var/lib/alpha-lab/dagu-dags"
+      GIT_SSH_COMMAND: "ssh -i /home/alpha-lab-dagu/.ssh/id_ed25519 -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new"
+    volumes:
+      # dags-sync.sh bind mount 進 container (不用自建 image)
+      - ./dags-sync.sh:/usr/local/bin/dags-sync.sh:ro
+      # SSH key 跟 dagu 共享 host 上的 deploy key
+      - /var/lib/alpha-lab/dagu/.ssh:/home/alpha-lab-dagu/.ssh:ro
+      # 寫入 dags named volume (跟 dagu 共享)
+      - dags:/var/lib/alpha-lab/dagu-dags:rw
+    networks:
+      - hindsight-net
+    tty: false
 
 networks:
   hindsight-net:
     external: true
     name: hindsight-net
+
+volumes:
+  dags:
+    # 沒有 driver 設定 = local driver。資料落在
+    # /var/lib/docker/volumes/alpha-lab-dagu_dags/_data/。
+    # 重現時 `docker compose up` 會自動建立,dags-sync 第一次
+    # 跑會 git clone 進去。

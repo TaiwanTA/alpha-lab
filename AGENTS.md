@@ -9,21 +9,59 @@
 
 ## 兩個環境
 - **local workspace** — commit 跟 dev 用,看 `research/AGENTS.md` 跟 `blog/AGENTS.md`
-  - `research/` — pipeline 程式碼 + raw + tests
+  - `research/` — v2 pipeline 程式碼 (workflow server + raw
+    + tests);已被 v3 取代但 v2 部署仍在 VM 上跑,程式碼
+    暫不刪
+  - `automation/` — v3 dagu runtime (DAGs + 部署腳本
+    + research-agent.ts + dags-sync sidecar + setup-vm.sh
+    + docker-compose.yml)
   - `blog/` — 對外發表,已上線(Cloudflare Pages auto-deploy from git push)
-- **VM** — 部署目標,跑 workflow server + Postgres + Hindsight
+- **VM** — 部署目標,v2 + v3 兩套 codebase 並存
   - `gcloud compute ssh --zone "asia-east1-b" "alpha-lab" --project "g6online-352310"`
-  - 部署路徑:`/opt/alpha-lab/research/`(VM 上不是 git repo,用 `research/scripts/deploy-vm.sh` 部署)
+  - v2 路徑:`/opt/alpha-lab/research/`(用
+    `research/scripts/deploy-vm.sh` 部署;systemd
+    `alpha-lab-workflow.service` + 4 個 timer
+    `alpha-lab-{a,b,d-pre,d-post}.timer` 仍在 active)
+  - v3 路徑:`/opt/alpha-lab/automation/`(用
+    `automation/ops/deploy-dagu.sh` 部署;systemd
+    `alpha-lab-dagu.service` 跑 dagu runtime,目前仍是
+    **native binary** mode 跑 production)
   - bun 在 `~/.bun/bin`(沒加進系統 PATH,跑命令前 `export PATH=$HOME/.bun/bin:$PATH`;systemd unit 內有顯式 `Environment="PATH=..."` cover)
   - Postgres 跑在 docker container `alpha-lab-postgres`,绑 `127.0.0.1:5432`
   - Hindsight 跑在 docker container `hermes-hindsight-1`(沿用 hermes 既有 instance),绑 `127.0.0.1:8888`;bank ID `alpha-lab`
-  - workflow server:`alpha-lab-workflow.service`(systemd active)+ 4 個 timer(`alpha-lab-{a,b,d-pre,d-post}.timer`)
+  - **v3 待切換**(本 PR follow-up):v3 dagu 從 native binary
+    切到 docker compose 模式(具體切換流程見 commit
+    message 跟 handoff)。切換後 dagu 跟 dags-sync 變成
+    docker container 跑,systemd unit
+    `alpha-lab-dagu.service`(v3)變成 compose wrapper。v3
+    切換且 end-to-end DAG 跑通後,視為 v3 production 完成。
+  - **v2 待除役**(v3 切換且驗證完成後):v2 systemd units
+    `alpha-lab-workflow.service` + 4 個 timer
+    `alpha-lab-{a,b,d-pre,d-post}.timer` 待手動
+    `systemctl disable --now` 除役,連同
+    `/opt/alpha-lab/research/` 目錄跟 `research/` repo
+    程式碼一併清掉(具體刪除時機由 user 確認)。
 
 ## 路徑規則
-- local 工作目錄:`/home/joker/alpha-lab`(讀 `research/AGENTS.md` 跟 `blog/AGENTS.md`)
+- 部署流程(兩個 codebase 各自):
+  - **v2 research**:`commit 到 main → 推 GitHub → 在 local 跑
+    `cd research && ./scripts/deploy-vm.sh``(script 自動 tar
+    + scp + 解開 + 復原 .env + bun install + migrate +
+    workflow:setup + workflow:build + patch systemd unit +
+    restart server + verify /health)
+  - **v3 automation**:`commit 到 main → 推 GitHub → 在 local
+    跑 `cd automation && bash ops/deploy-dagu.sh``(script
+    自動 tar + scp + 解開 /opt/alpha-lab/automation + 部署
+    admin.yaml 到 /var/lib/alpha-lab/dagu/admin.yaml +
+    `systemctl reload alpha-lab-dagu.service` (ExecReload =
+    `docker compose ... up -d --force-recreate`)+ verify
+    systemd active / 兩個 container running / dagu http 200)
+- 新 VM 設置:用一般 user (非 root) 跑 `cd
+  /opt/alpha-lab/automation && bash scripts/setup-vm.sh`
+  (互動讀 SSH deploy key 來源 / secrets 寫入
+  /etc/alpha-lab/dagu.env / 預建 hindsight-net / `docker
+  compose up -d` / verify)
 - VM 部署:`/opt/alpha-lab/...`
-- 部署流程:**commit 到 main → 推 GitHub → 在 local 跑 `cd research && ./scripts/deploy-vm.sh`**(script 自動 tar + scp + 解開 + 復原 .env + bun install + migrate + workflow:setup + workflow:build + patch systemd unit + restart server + verify /health)
-
 ## 進度
 
 > Phase 1-3 全部完成 + VM 上線 production。Phase 4 還沒開始。
@@ -64,6 +102,16 @@
      DAG 端到端全綠,自動 push 了一篇 blog post 到 main
      (commit `cc8c035`)。
 4. ⏳ Phase 4:真實工作(投資人清單最後才決定 + 模擬下注 + 反思校準)
+
+5. ✅ Dagu runtime 切到 docker compose 模式(可重現性):新增
+   `automation/deploy/dagu/dags-sync.sh`(sidecar 從 main 拉
+   automation/dags/ 到 named volume)跟
+   `automation/scripts/setup-vm.sh`(在新 VM 一鍵重現
+   dagu runtime);改 `admin.yaml` 把 `dags_dir` 拆出來到
+   `/var/lib/alpha-lab/dagu-dags` 避免跟 host bind mount
+   衝突;改 `ops/deploy-dagu.sh` 用 `systemctl reload`
+   (走 ExecReload)取代直接 `cp dags` + `systemctl restart`。
+   **VM 實際切換留 follow-up PR**(本 PR 只備齊工具)。
 
 > 不要搶進。做一步停一步等 user 確認。
 > 不要自認階段完成:必須 user 確認才算階段結,特別是風格這類主觀判定。
