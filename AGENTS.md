@@ -57,8 +57,12 @@
      簡化為 6 步(retain + recall + hermes 合併為 1 步 `research`)。
      `hermes-call.sh` / `hindsight-retain.sh` /
      `hindsight-recall.sh` 移到 `.delete/`。local smoke test:
-     assembleCandidate + publishDraft 13/13 pass + 7 個
-     failure-path 全正確 reject。VM e2e 待跑。
+     failure-path 全正確 reject。VM e2e 全綠(PR #20)。
+   - ✅ push step 改用 SSH deploy key(PR #21):
+     dagu `${env.X}` 截斷長 token + repo ruleset 擋 direct
+     push。改用 SSH deploy key + ruleset bypass。fixture
+     DAG 端到端全綠,自動 push 了一篇 blog post 到 main
+     (commit `cc8c035`)。
 4. ⏳ Phase 4:真實工作(投資人清單最後才決定 + 模擬下注 + 反思校準)
 
 > 不要搶進。做一步停一步等 user 確認。
@@ -121,7 +125,9 @@ candidate 組裝)。
   Hermes 移除後可以評估是否仍需要。
 - **v2 systemd units**:5 個 v2 unit(`alpha-lab-workflow.service`
   + 4 個 timer)仍在 active,等 v3 完全驗證後退役。
-- **VM e2e**:部署新版 DAG + research-agent.ts 後跑一輪
-  fixture-research DAG,確認全步驟全綠。需要先在
-  `/etc/alpha-lab/dagu.env` 加 `LLM_API_KEY` /
-  `LLM_MODEL` / `LLM_BASE_URL`(如果還沒)。
+- **~~VM e2e~~**:已完成 — fixture-research DAG 全步驟
+  全綠(run `033pEGNOXMR7nuXYwROzwa`,1m32s)。push step
+  改用 SSH deploy key + repo ruleset bypass(PR #21)。
+  LLM env vars (`LLM_API_KEY` / `LLM_MODEL` /
+  `LLM_BASE_URL`)已加入 `/etc/alpha-lab/dagu.env`
+  (MiniMax native API, key from backup .env)。
