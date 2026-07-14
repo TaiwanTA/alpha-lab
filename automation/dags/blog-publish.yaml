@@ -126,11 +126,11 @@ steps:
     working_dir: ./workspace/publish
     run: |
       set -euo pipefail
-      export GIT_ASKPASS=/opt/alpha-lab/automation/scripts/git-askpass.sh
-      # URL 只放 username,密碼走 GIT_ASKPASS。
-      git -C "${WORKDIR}" push "https://x-access-token@github.com/TaiwanTA/alpha-lab.git" HEAD:main
-    env:
-      - GIT_READ_TOKEN=${env.GIT_READ_TOKEN}
+      # 用 SSH deploy key push,不走 HTTPS + askpass。
+      # deploy key 在 VM 上 alpha-lab-dagu 的 ~/.ssh/id_ed25519,
+      # GitHub repo settings 裡加了對應的 write deploy key。
+      export GIT_SSH_COMMAND="ssh -i /var/lib/alpha-lab/dagu/.ssh/id_ed25519 -o StrictHostKeyChecking=accept-new"
+      git -C "${WORKDIR}" push "git@github.com:TaiwanTA/alpha-lab.git" HEAD:main
     retry_policy:
       limit: 1
       interval_sec: 30
