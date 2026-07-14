@@ -1,21 +1,22 @@
 # Dagu runtime as a Docker compose service on the alpha-lab VM.
 #
-# Topology:
-#   - joins the shared `hindsight-net` external network so it can
-#     reach `hindsight-hindsight-1:8888` and (via container name
-#     resolution) other services on that network;
-#   - mounts `/var/run/docker.sock` so dagu's `run:` steps can
-#     `docker exec` into the `hermes-hermes-1` container, where the
-#     hermes CLI lives. hermes v0.18.0 has no OpenAI-compatible
-#     HTTP endpoint, so the CLI is the only path to the configured
-#     `MiniMax-M3` model.
-#   - mounts the host's `/opt/alpha-lab` so the DAG scripts that
-#     reference `/opt/alpha-lab/automation/scripts/*` work without
-#     rebuilding the image on every change.
+# NOTE: This compose file is NOT yet active on the VM — dagu
+# currently runs as a bare systemd service on the host (see
+# alpha-lab-dagu.service). Switching to compose is tracked as a
+# P2 housekeeping item. Hermes was removed from the pipeline
+# (replaced by research-agent.ts, a self-contained TypeScript
+# agent that calls LLM + Hindsight APIs directly). The
+# docker.sock mount and hindsight-net membership below were
+# originally needed for `docker exec hermes-hermes-1 ...`;
+# after Hermes removal, docker.sock can likely be dropped when
+# this compose is activated (pending review).
 #
-# Replace the legacy systemd unit (`alpha-lab-dagu.service`). After
-# this compose is in place, `systemctl start alpha-lab-dagu` should
-# exec `docker compose -f /opt/alpha-lab/automation/deploy/dagu/docker-compose.yml up -d`.
+# Topology (when activated):
+#   - joins the shared `hindsight-net` external network so it
+#     can reach `hindsight-hindsight-1:8888` for Hindsight API
+#     calls from research-agent.ts (if running inside container);
+#   - mounts the host's `/opt/alpha-lab/automation` so DAG
+#     scripts work without rebuilding the image.
 
 name: alpha-lab-dagu
 
@@ -26,10 +27,11 @@ services:
     restart: unless-stopped
     user: "0:0"  # docker.sock access requires root in the container
     command: ["start-all"]  # foreground so systemd sees liveness; legacy unit ran `start-all`
-    # Mounting /var/run/docker.sock grants the container host-root
-    # equivalent docker access — there is no fully isolating fix
-    # without breaking the `docker exec hermes-hermes-1 ...`
-    # step. Mitigations below are best-effort:
+    # docker.sock mount was originally for `docker exec
+    # hermes-hermes-1 ...`. Hermes is now removed; this mount
+    # can be dropped when compose is activated. Left in place
+    # for now to avoid breaking other potential docker calls.
+    # Mitigations below are best-effort:
     #   - no-new-privileges: blocks setuid binary abuse
     #   - read_only rootfs: blocks in-container persistence
     #     (dagu still writes via the dagu_data tmpfs mount)
@@ -67,9 +69,9 @@ services:
       # Live source for the DAGs and helper scripts. Read-only so
       # steps cannot accidentally mutate the deployed automation.
       - /opt/alpha-lab/automation:/opt/alpha-lab/automation:ro
-      # docker.sock for `docker exec hermes-hermes-1 ...` calls
-      # from the hermes step.
-      - /var/run/docker.sock:/var/run/docker.sock
+      # docker.sock — originally for `docker exec hermes-hermes-1`.
+      # Hermes removed; can likely be dropped when compose is
+      # activated. Left for now to avoid surprises.
     networks:
       - hindsight-net
 
