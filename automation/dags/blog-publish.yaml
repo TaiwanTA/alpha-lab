@@ -49,12 +49,12 @@ type: graph
 
 shell: ["bash", "-e"]
 env:
-  - GIT_READ_TOKEN: "${GIT_READ_TOKEN}"
-  - HINDSIGHT_API_KEY: "${HINDSIGHT_API_KEY}"
-  - HINDSIGHT_BASE_URL: "${HINDSIGHT_BASE_URL}"
-  - LLM_API_KEY: "${LLM_API_KEY}"
-  - LLM_MODEL: "${LLM_MODEL}"
-  - LLM_BASE_URL: "${LLM_BASE_URL}"
+  - GIT_READ_TOKEN=${GIT_READ_TOKEN}
+  - HINDSIGHT_API_KEY=${HINDSIGHT_API_KEY}
+  - HINDSIGHT_BASE_URL=${HINDSIGHT_BASE_URL}
+  - LLM_API_KEY=${LLM_API_KEY}
+  - LLM_MODEL=${LLM_MODEL}
+  - LLM_BASE_URL=${LLM_BASE_URL}
 steps:
   - id: checkout
     run: bash /opt/alpha-lab/automation/scripts/clone-publish.sh

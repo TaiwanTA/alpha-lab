@@ -40,12 +40,12 @@ type: graph
 
 shell: ["bash", "-e"]
 env:
-  - GIT_READ_TOKEN: "${GIT_READ_TOKEN}"
-  - HINDSIGHT_API_KEY: "${HINDSIGHT_API_KEY}"
-  - HINDSIGHT_BASE_URL: "${HINDSIGHT_BASE_URL}"
-  - LLM_API_KEY: "${LLM_API_KEY}"
-  - LLM_MODEL: "${LLM_MODEL}"
-  - LLM_BASE_URL: "${LLM_BASE_URL}"
+  - GIT_READ_TOKEN=${GIT_READ_TOKEN}
+  - HINDSIGHT_API_KEY=${HINDSIGHT_API_KEY}
+  - HINDSIGHT_BASE_URL=${HINDSIGHT_BASE_URL}
+  - LLM_API_KEY=${LLM_API_KEY}
+  - LLM_MODEL=${LLM_MODEL}
+  - LLM_BASE_URL=${LLM_BASE_URL}
 steps:
   - id: checkout
     # Dagu 2.10.7 的 git.checkout action 用 go-git,token 模式下

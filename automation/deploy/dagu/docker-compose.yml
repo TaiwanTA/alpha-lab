@@ -81,10 +81,6 @@ services:
       # 自己的 loopback。Hindsight 跑在同一個 hindsight-net 上,
       # 用 container name 連。
       HINDSIGHT_BASE_URL: "http://hindsight-hindsight-1:8888"
-      # DAG step 做 `. /etc/alpha-lab/dagu.env` 會把上面的
-      # HINDSIGHT_BASE_URL 蓋回 host-loopback。這個 var 在
-      # source 後被用來覆蓋回 container-friendly URL。
-      HINDSIGHT_BASE_URL_DAGU: "http://hindsight-hindsight-1:8888"
     volumes:
       # Persistent dagu state (data, logs, admin, dags, .ssh,
       # workspace) 全走這個 bind mount。

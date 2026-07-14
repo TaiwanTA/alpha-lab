@@ -47,7 +47,6 @@ INSTANCE="alpha-lab"
 PROJECT="g6online-352310"
 SSH_CMD=(gcloud compute ssh --zone "${ZONE}" "${INSTANCE}" --project "${PROJECT}")
 LOCAL_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
-COMPOSE_FILE="/opt/alpha-lab/automation/deploy/dagu/docker-compose.yml"
 
 cd "${LOCAL_ROOT}"
 

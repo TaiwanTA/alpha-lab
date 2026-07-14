@@ -113,8 +113,12 @@ else
 fi
 # 預先放 github.com host key,避免 dags-sync 第一次 git pull
 # 卡在 "authenticity of host" prompt。
-sudo -u alpha-lab-dagu ssh-keyscan -t ed25519,rsa,ecdsa github.com 2>/dev/null \
-  | sudo -u alpha-lab-dagu tee "${SSH_DIR}/known_hosts" >/dev/null
+# 用 >> (append) 避免 ssh-keyscan 失敗 (DNS/網路) 時清空
+# 既有 known_hosts。只在 ssh-keyscan 有輸出時才寫入。
+if ! sudo -u alpha-lab-dagu ssh-keyscan -t ed25519,rsa,ecdsa github.com 2>/dev/null \
+  | sudo -u alpha-lab-dagu tee -a "${SSH_DIR}/known_hosts" >/dev/null; then
+  echo "    WARNING: ssh-keyscan 失敗,known_hosts 未更新" >&2
+fi
 sudo chmod 0644 "${SSH_DIR}/known_hosts"
 
 # === 步驟 4: dagu.env ===
@@ -127,8 +131,9 @@ else
   # 避免 `sudo tee -a` 把 secret value 放進 argv (會落到
   # /var/log/audit/audit.log 的 EXECVE 記錄)。secret 只走
   # file content,argv 只有 install 跟 temp file 路徑。
-  TMP_ENV=$(mktemp)
+  TMP_ENV=""
   trap 'rm -f "${TMP_ENV}"' EXIT
+  TMP_ENV=$(mktemp)
   # 從 template 抓 keys,互動讀值
   while IFS= read -r line; do
     case "${line}" in
@@ -149,7 +154,9 @@ else
           continue
         fi
         # 一般 secret
-        read -r -s -p "    ${key}= " value
+        # < /dev/tty:while 迴圈 stdin 被 template file 佔用,
+        # read 需要從 terminal 讀使用者輸入
+        read -r -s -p "    ${key}= " value < /dev/tty
         echo
         printf '%s=%s\n' "${key}" "${value}" >> "${TMP_ENV}"
         ;;

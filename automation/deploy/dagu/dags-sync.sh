@@ -54,6 +54,10 @@ sync_once() {
       }
     git -C "${CLONE_DIR}" sparse-checkout set "${PATH_IN_REPO}" || {
       log "ERROR: sparse-checkout set ${PATH_IN_REPO} failed"
+       # 清掉殘留的 .git 目錄,讓下次 sync 重新 clone
+       # (否則 git clone 成功但 sparse-checkout 失敗時,
+        # 下次會走 git pull 分支但 sparse-checkout 未設定)
+       rm -rf "${CLONE_DIR}"
       return 1
     }
   else
