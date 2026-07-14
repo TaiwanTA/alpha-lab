@@ -38,21 +38,27 @@
    - ✅ Vercel Workflow 整合(`workflow/{a,b,c,d}.ts` + `workflow-server.ts` + `bunfig.toml` SWC plugin + `scripts/workflow-build.mjs`)
    - ✅ systemd timer 排程(A 6h / B 1h / D pre+post Mon-Fri ET)
    - ✅ publish.ts:C/D 的 markdown draft → `blog/src/content/blog/`(tag:盤前報告 / 盤後報告 / 事件追蹤)
-   - ✅ v3 rebuild(Dagu + Hermes + Hindsight pipeline,PR #18)
+   - ✅ v3 rebuild(Dagu + Hindsight pipeline,PR #18)
      — 取代 v2 Vercel Workflow + 研究端獨立流程;VM 上以
-     systemd-managed Docker compose (`alpha-lab-dagu`) 跑
-     7 步 fixture-research DAG,結果 → blog。
+     systemd service (`alpha-lab-dagu`) 跑 6 步
+     fixture-research DAG,結果 → blog。
    - ✅ housekeeping after v3 merge (PR #19):clone ref /
-     push ref 從 `rebuild/integrate` 切回 `main`(blog-publish
-     push step line 131 + clone-*.sh `-b` + admin.yaml
-     narrative);`admin.yaml` `git_sync.enabled` **保持 false**
-     (等 migration checklist 完成再啟用,見 admin.yaml
-     註解);deploy script 從 `automation/scripts/` 搬到
-     `automation/ops/`;blog-publish diff gate 嚴格 scope 到
-     `*.md`;docker-compose 加 `no-new-privileges` +
-     `read_only`(docker-compose 尚未 active,目前 VM 仍
-     systemd unit);移除 dead dep `zod`;意外發現並修
-     checkout step 的 env passthrough bug。
+     push ref 從 `rebuild/integrate` 切回 `main`;deploy
+     script 從 `automation/scripts/` 搬到
+     `automation/ops/`;blog-publish diff gate 嚴格 scope
+     到 `*.md`;docker-compose 加 hardening(尚未 active);
+     移除 dead dep `zod`;修 checkout env passthrough bug。
+   - ✅ Hermes 替換為自建 research-agent.ts(P0 fix):
+     Hermes 容器的 UID mismatch + Hindsight "Server
+     disconnected" 兩個 P0 無法在不改 hermes source 的情況下
+     修復。改用 self-contained TypeScript agent(直接 fetch
+     LLM API + Hindsight API,不經過 Docker 容器),同一個
+     MiniMax-M3 模型,同一個 Hindsight endpoint。7 步 DAG
+     簡化為 6 步(retain + recall + hermes 合併為 1 步 `research`)。
+     `hermes-call.sh` / `hindsight-retain.sh` /
+     `hindsight-recall.sh` 移到 `.delete/`。local smoke test:
+     assembleCandidate + publishDraft 13/13 pass + 7 個
+     failure-path 全正確 reject。VM e2e 待跑。
 4. ⏳ Phase 4:真實工作(投資人清單最後才決定 + 模擬下注 + 反思校準)
 
 > 不要搶進。做一步停一步等 user 確認。
@@ -83,6 +89,39 @@
 - `deploy-dagu.sh` chmod 用 nullglob guard,`scripts/*.sh` 或 `ops/*.sh` 空目錄不會 abort deploy。
 - `docker-compose.yml`:加 `security_opt: [no-new-privileges:true]` + `read_only: true` + 必要 tmpfs;docker.sock mount 帶來的 host-root 等價風險是 structural limit(為了 `docker exec hermes-hermes-1 ...` 不能拿掉),只能用 best-effort mitigation。**注意**:`/opt/alpha-lab/automation` host bind mount 是 `:ro`,加上 `read_only: true` 之後 `mkdir ./workspace` 仍會 fail;切到 docker-compose 部署前需要把 workspace 移到 bind mount 上(例如 `/var/lib/alpha-lab/dagu/workspace`)。
 - `package.json` 移除 dead dep `zod`(沒有任何 import site),跟著 `bun.lock` 一起更新;`bun test automation/tests` 13/13 pass。
-- `automation/scripts/deploy-dagu.sh` → `automation/ops/deploy-dagu.sh`(ops script 不是 dagu runtime 的一部分;`chmod +x scripts/*.sh` 加上 `ops/*.sh` 才能讓 deploy 過去有 +x)。
+VM e2e step 6-7 原先失敗(Hermes 容器 UID mismatch +
+Hindsight "Server disconnected")。Root cause:Hermes 容器內
+`write_file` 走 `/workspace/.hermes-tmp.X` 暫存,但 hermes
+process (UID 10000) 對 bind mount 目錄沒寫入權限;Hindsight
+recall 在容器內也 fail(TCP connect OK 但 API 回 disconnect)。
+這些是 Hermes 作為 Docker 容器黑盒的根本問題。
 
-VM deploy 跑完 `sudo -u alpha-lab-dagu dagu start /var/lib/alpha-lab/dagu/dags/fixture-research.yaml` 看 7 步全綠才算收尾。
+**決策**:移除 Hermes,改用自建 `research-agent.ts`(self-
+contained TypeScript,直接 fetch LLM + Hindsight API)。同一個
+MiniMax-M3 模型,同一個 Hindsight endpoint,零容器層。把
+`hermes-call.sh` / `hindsight-retain.sh` / `hindsight-recall.sh`
+移到 `.delete/`;DAG 從 7 步(retain → recall → hermes)簡化
+為 6 步(一步 `research` 完成 retain + recall + LLM call +
+candidate 組裝)。
+
+### 待辦(VM)
+
+- **~~Hermes write guard / UID mismatch~~**:已解決 — Hermes
+  已移除,不再使用 Docker 容器。
+- **~~Hindsight recall 在容器內 "Server disconnected"~~**:已
+  解決 — research-agent.ts 直接在 host 上呼叫 Hindsight
+  (`127.0.0.1:8888`),不跨容器。
+- **`git_sync.enabled` enable**:見 admin.yaml migration
+  checklist(需要先確認 VM dags_dir 跟 main 一致,再
+  `enabled: true` + `auto_sync.enabled: true` + restart)。
+- **docker-compose 切到 active**:需要把 workspace path 從
+  `/opt/alpha-lab/automation` 移到 bind mount 上(`:ro` +
+  `read_only: true` 下 `mkdir ./workspace` 會 fail)。
+  docker.sock mount 原本為了 `docker exec hermes-hermes-1`;
+  Hermes 移除後可以評估是否仍需要。
+- **v2 systemd units**:5 個 v2 unit(`alpha-lab-workflow.service`
+  + 4 個 timer)仍在 active,等 v3 完全驗證後退役。
+- **VM e2e**:部署新版 DAG + research-agent.ts 後跑一輪
+  fixture-research DAG,確認全步驟全綠。需要先在
+  `/etc/alpha-lab/dagu.env` 加 `LLM_API_KEY` /
+  `LLM_MODEL` / `LLM_BASE_URL`(如果還沒)。
