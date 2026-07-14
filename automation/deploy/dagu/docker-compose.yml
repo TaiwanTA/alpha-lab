@@ -25,7 +25,25 @@ services:
     container_name: alpha-lab-dagu
     restart: unless-stopped
     user: "0:0"  # docker.sock access requires root in the container
-    command: ["start-all"]
+    command: ["start-all"]  # foreground so systemd sees liveness; legacy unit ran `start-all`
+    # Mounting /var/run/docker.sock grants the container host-root
+    # equivalent docker access — there is no fully isolating fix
+    # without breaking the `docker exec hermes-hermes-1 ...`
+    # step. Mitigations below are best-effort:
+    #   - no-new-privileges: blocks setuid binary abuse
+    #   - read_only rootfs: blocks in-container persistence
+    #     (dagu still writes via the dagu_data tmpfs mount)
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      # 可寫 scratch。read_only rootfs 下,/tmp 跟 /var/tmp
+      # 是 dagu 跑 step 的 process working dir 跟 run
+      # artifact 落地點。持久狀態 (/var/lib/alpha-lab/dagu
+      # 底下的 dag-runs / logs / admin) 走 host bind mount
+      # 而不是 tmpfs,reboot 之後資料還在。
+      - /tmp
+      - /var/tmp
     ports:
       - "127.0.0.1:8080:8080"
     env_file:
