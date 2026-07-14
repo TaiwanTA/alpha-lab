@@ -1,0 +1,53 @@
+# 自建 dagu runtime image — 補齊 DAG step 需要的工具鏈。
+#
+# 官方 image `ghcr.io/dagucloud/dagu:2.10.7` (Ubuntu 24.04)
+# 只含 dagu binary + tini + sudo + bash + jq。DAG step 需要
+# git / ssh / node >=22 / npm / bun,這裡一層裝進去。
+#
+# build context 是 `.` (跟 compose file 同層)。
+# build 完 image tag = `alpha-lab-dagu:local` (見
+# docker-compose.yml `build` block)。
+#
+# Entry point 不動:沿用官方 `/usr/local/bin/tini -g -- /entrypoint.sh`。
+# entrypoint.sh 以 root 跑 groupmod/usermod 把 dagu user
+# 改成 PUID/PGID,最後 `sudo -u #PUID` 降權執行 cmd。compose
+# 設 PUID=999 PGID=982 對齊 host alpha-lab-dagu user。
+#
+# dagu user 預設 HOME = /home/dagu (官方 image 已建)。但
+# compose bind mount 掛在 /var/lib/alpha-lab/dagu,所以
+# entrypoint.sh 的 `mkdir -p ${DAGU_HOME}` 跟 DAGU_HOME
+# env var 需要對齊這個路徑。entrypoint 會把 DAGU_HOME
+# export 出去,dagu binary 以 DAGU_HOME 為 state root。
+# 我們在 compose 設 DAGU_HOME=/var/lib/alpha-lab/dagu。
+#
+# npm/bun cache 寫 $HOME — entrypoint `sudo -H` 會把 HOME
+# 設成 dagu user 的 home dir (/home/dagu)。但 /home/dagu
+# 是容器層,不持久。解法:在 compose 設 HOME=/var/lib/alpha-lab/dagu
+# 覆蓋 entrypoint 的 sudo -H,讓 cache 寫進 bind mount。
+
+FROM ghcr.io/dagucloud/dagu:2.10.7
+
+# apt 裝 git + openssh-client + rsync + unzip。Node 22 LTS 走
+# NodeSource deb repo (Ubuntu 24.04 noble)。
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+      ca-certificates \
+      curl \
+      git \
+      openssh-client \
+      rsync \
+      unzip && \
+    curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \
+    apt-get install -y --no-install-recommends nodejs && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
+# bun 裝到 /usr/local/bin (全域),所有 user 可用。
+# 直接從 GitHub releases 下載 binary (不用 install script,
+# 因為 `bash -s "bun"` 會把 "bun" 當 version tag 導致 404)。
+RUN curl -fsSL -o /tmp/bun.zip \
+      "https://github.com/oven-sh/bun/releases/download/bun-v1.3.14/bun-linux-x64.zip" && \
+    unzip -o /tmp/bun.zip -d /tmp/bun && \
+    mv /tmp/bun/bun-linux-x64/bun /usr/local/bin/bun && \
+    chmod 0755 /usr/local/bin/bun && \
+    rm -rf /tmp/bun /tmp/bun.zip

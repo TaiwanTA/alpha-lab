@@ -1,77 +1,131 @@
-# Dagu runtime as a Docker compose service on the alpha-lab VM.
+# Dagu runtime as a Docker compose stack on the alpha-lab VM.
 #
-# NOTE: This compose file is NOT yet active on the VM — dagu
-# currently runs as a bare systemd service on the host (see
-# alpha-lab-dagu.service). Switching to compose is tracked as a
-# P2 housekeeping item. Hermes was removed from the pipeline
-# (replaced by research-agent.ts, a self-contained TypeScript
-# agent that calls LLM + Hindsight APIs directly). The
-# docker.sock mount and hindsight-net membership below were
-# originally needed for `docker exec hermes-hermes-1 ...`;
-# after Hermes removal, docker.sock can likely be dropped when
-# this compose is activated (pending review).
+# 設計目標:在另一台 VM 上還原這份 compose + automation/scripts/
+# setup-vm.sh 就能跑出跟現在 production 一樣的 dagu runtime
+# + DAG 同步機制,不需要再手動跑 deploy-dagu.sh。
 #
-# Topology (when activated):
-#   - joins the shared `hindsight-net` external network so it
-#     can reach `hindsight-hindsight-1:8888` for Hindsight API
-#     calls from research-agent.ts (if running inside container);
-#   - mounts the host's `/opt/alpha-lab/automation` so DAG
-#     scripts work without rebuilding the image.
+# 三個服務:
+#   - `dagu`:Dagu 排程器,跑 999:982 (對應 host alpha-lab-dagu
+#     user)。自建 image `Dockerfile.dagu` 在官方 dagu:2.10.7
+#     上補 git/node22/bun/ssh/rsync。Persistent state (data /
+#     logs / dags / ssh key / workspace) 走 host bind mount
+#     /var/lib/alpha-lab/dagu。DAG 引用的 scripts 走另一個
+#     bind mount /opt/alpha-lab/automation:ro。
+#   - `dags-sync`:sidecar 服務,alpine + git + openssh-client。
+#     Entry script `dags-sync.sh` 第一次跑 `git clone`,之後
+#     每 5 分鐘 `git pull`,rsync 到 dags_dir 子目錄。使用
+#     SSH deploy key 同步 automation/dags/。
+#
+# PUID/PGID 機制:
+#   官方 entrypoint.sh (/usr/local/bin/tini -g -- /entrypoint.sh)
+#   以 root 啟動,groupmod/usermod 把 dagu user 改成
+#   PUID/PGID,然後 `sudo -u #PUID -g #PGID` 降權執行 cmd。
+#   所以 compose 不設 `user:`,而是設 PUID=999 PGID=982
+#   環境變數讓 entrypoint 處理降權。
+#
+# HOME 覆蓋:
+#   entrypoint 的 `sudo -H` 會把 HOME 設成 dagu user 的
+#   home dir (/home/dagu,容器層,不持久)。設 HOME=
+#   /var/lib/alpha-lab/dagu 讓 npm/bun cache 寫進 bind mount,
+#   跨 container restart 持久化。
+#
+# DAGU_HOME:
+#   entrypoint.sh `mkdir -p ${DAGU_HOME}` + export。
+#   設 DAGU_HOME=/var/lib/alpha-lab/dagu 跟 bind mount 對齊,
+#   dagu state (data/logs/admin/dags) 全在 bind mount 上。
+#
+# 已拿掉的東西 (跟 PR #20/21 時代的差異):
+#   - docker.sock 拿掉 — 之前是為了 `docker exec hermes-hermes-1`
+#     (PR #20 移除 Hermes,不再需要)
+#   - 沒 read_only: true — npm/bun/git 需要寫 $HOME/cache
+#   - 沒 named volume dags — dags 改走 bind mount 子目錄
+#     /var/lib/alpha-lab/dagu/dags,跟 production 一致,
+#     不需要 path migration
 
 name: alpha-lab-dagu
 
 services:
   dagu:
-    image: ghcr.io/dagu-org/dagu:2.10.7
+    build:
+      context: .
+      dockerfile: Dockerfile.dagu
+    image: alpha-lab-dagu:local
     container_name: alpha-lab-dagu
     restart: unless-stopped
-    user: "0:0"  # docker.sock access requires root in the container
-    command: ["start-all"]  # foreground so systemd sees liveness; legacy unit ran `start-all`
-    # docker.sock mount was originally for `docker exec
-    # hermes-hermes-1 ...`. Hermes is now removed; this mount
-    # can be dropped when compose is activated. Left in place
-    # for now to avoid breaking other potential docker calls.
-    # Mitigations below are best-effort:
-    #   - no-new-privileges: blocks setuid binary abuse
-    #   - read_only rootfs: blocks in-container persistence
-    #     (dagu still writes via the dagu_data tmpfs mount)
-    security_opt:
-      - no-new-privileges:true
-    read_only: true
-    tmpfs:
-      # 可寫 scratch。read_only rootfs 下,/tmp 跟 /var/tmp
-      # 是 dagu 跑 step 的 process working dir 跟 run
-      # artifact 落地點。持久狀態 (/var/lib/alpha-lab/dagu
-      # 底下的 dag-runs / logs / admin) 走 host bind mount
-      # 而不是 tmpfs,reboot 之後資料還在。
-      - /tmp
-      - /var/tmp
+    # 不設 `user:` — 官方 entrypoint.sh 以 root 啟動,透過
+    # PUID/PGID 環境變數降權到 999:982。
+    # 覆蓋官方 Cmd:entrypoint.sh 的 `sudo -u` 執行 command,
+    # sudo 不繼承 root 的 PATH,所以要用完整 binary path。
+    command: ["dagu", "start-all"]
     ports:
       - "127.0.0.1:8080:8080"
     env_file:
-      # /etc/alpha-lab/dagu.env is mode 0440 root:alpha-lab-dagu.
-      # dagu's container runs as root so it can read the file.
-      # Tighten to `user: "999:982"` after adding the alpha-lab-dagu
-      # host user to the docker group and switching to a non-root
-      # container user.
+      # /etc/alpha-lab/dagu.env 是 mode 0440 root:alpha-lab-dagu。
+      # container 以 999:982 跑,對應 host group alpha-lab-dagu,
+      # 可以讀。env_file 注入變數到 process env,但檔案本身
+      # 不在 container 內 — DAG step 用 `. /etc/alpha-lab/dagu.env`
+      # 需要另掛 bind mount (見下方 volumes)。
       - /etc/alpha-lab/dagu.env
     environment:
-      # Override HINDSIGHT_BASE_URL: the env file records the
-      # host-loopback URL (useful for human-facing tooling on the
-      # VM), but from inside this container `127.0.0.1` is the
-      # container's own loopback, not the host. The Hindsight
-      # service is on the same `hindsight-net`; reach it by its
-      # container name.
+      # PUID/PGID 讓 entrypoint.sh groupmod/usermod + sudo 降權。
+      PUID: "999"
+      PGID: "982"
+      # HOME 覆蓋 sudo -H 的預設 /home/dagu,讓 npm/bun cache
+      # 寫進 bind mount (持久化,跨 container restart)。
+      HOME: "/var/lib/alpha-lab/dagu"
+      # DAGU_HOME 跟 bind mount 對齊,dagu state 全在
+      # host /var/lib/alpha-lab/dagu。
+      DAGU_HOME: "/var/lib/alpha-lab/dagu"
+      # Override HINDSIGHT_BASE_URL: env file 內是 host-loopback
+      # URL (給人用工具看),但 container 內 127.0.0.1 是 container
+      # 自己的 loopback。Hindsight 跑在同一個 hindsight-net 上,
+      # 用 container name 連。
       HINDSIGHT_BASE_URL: "http://hindsight-hindsight-1:8888"
     volumes:
-      # Persistent dagu state (dags, runs, logs).
+      # Persistent dagu state (data, logs, admin, dags, .ssh,
+      # workspace) 全走這個 bind mount。
       - /var/lib/alpha-lab/dagu:/var/lib/alpha-lab/dagu
-      # Live source for the DAGs and helper scripts. Read-only so
-      # steps cannot accidentally mutate the deployed automation.
+      # DAG step 引用 /opt/alpha-lab/automation/scripts/ —
+      # clone-fixture.sh, clone-publish.sh, git-askpass.sh,
+      # research-agent.ts, publish-draft.ts 都在這。:ro 因為
+      # DAG step 只讀不改。
       - /opt/alpha-lab/automation:/opt/alpha-lab/automation:ro
-      # docker.sock — originally for `docker exec hermes-hermes-1`.
-      # Hermes removed; can likely be dropped when compose is
-      # activated. Left for now to avoid surprises.
+      # /etc/alpha-lab/dagu.env — env_file 只注入變數,檔案
+      # 不在 container fs。DAG step 做 `. /etc/alpha-lab/dagu.env`
+      # 需要這個 bind mount。
+      - /etc/alpha-lab/dagu.env:/etc/alpha-lab/dagu.env:ro
+    networks:
+      - hindsight-net
+
+  dags-sync:
+    # 用 repo 內 Dockerfile.dags-sync build image:USER 999:982、
+    # dags-sync.sh + git + openssh-client + rsync 都在 build
+    # 階段裝好。改 dags-sync.sh / Dockerfile 需要
+    # `docker compose build` 重 build;setup-vm.sh 跟
+    # deploy-dagu.sh 都會跑。
+    build:
+      context: .
+      dockerfile: Dockerfile.dags-sync
+    container_name: alpha-lab-dags-sync
+    restart: unless-stopped
+    entrypoint: ["/usr/local/bin/dags-sync.sh"]
+    environment:
+      # Sidecar 自己用的設定 (不影響 dagu)
+      DAG_SYNC_REPO: "git@github.com:TaiwanTA/alpha-lab.git"
+      DAG_SYNC_BRANCH: "main"
+      DAG_SYNC_PATH: "automation/dags"
+      DAG_SYNC_INTERVAL: "300"  # 5 min
+      # dags_dir 跟 dagu 一致,走 bind mount 子目錄
+      DAG_SYNC_TARGET: "/var/lib/alpha-lab/dagu/dags"
+      GIT_SSH_COMMAND: "ssh -i /home/alpha-lab-dagu/.ssh/id_ed25519 -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new"
+      # HOME 對齊 SSH key bind mount 的路徑
+      HOME: "/home/alpha-lab-dagu"
+    volumes:
+      # DAG state 走 bind mount,dags-sync 寫
+      # /var/lib/alpha-lab/dagu/dags 子目錄
+      - /var/lib/alpha-lab/dagu:/var/lib/alpha-lab/dagu
+      # SSH key 跟 dagu 共享 host 上的 deploy key
+      - /var/lib/alpha-lab/dagu/.ssh:/home/alpha-lab-dagu/.ssh:ro
     networks:
       - hindsight-net
 

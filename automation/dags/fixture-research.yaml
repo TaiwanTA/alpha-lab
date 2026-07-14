@@ -34,6 +34,18 @@ artifacts:
 timeout_sec: 900
 type: graph
 
+# 容器模式下 /bin/sh → dash,不支援 pipefail。用 bash 執行
+# 所有 step commands,跟 native 模式 (Fedora /bin/sh → bash)
+# 行為一致。
+
+shell: ["bash", "-e"]
+env:
+  - GIT_READ_TOKEN=${GIT_READ_TOKEN}
+  - HINDSIGHT_API_KEY=${HINDSIGHT_API_KEY}
+  - HINDSIGHT_BASE_URL=${HINDSIGHT_BASE_URL}
+  - LLM_API_KEY=${LLM_API_KEY}
+  - LLM_MODEL=${LLM_MODEL}
+  - LLM_BASE_URL=${LLM_BASE_URL}
 steps:
   - id: checkout
     # Dagu 2.10.7 的 git.checkout action 用 go-git,token 模式下
@@ -66,7 +78,6 @@ steps:
     working_dir: ./workspace/app
     run: |
       set -euo pipefail
-      set +u; . /etc/alpha-lab/dagu.env; set -u
       export PATH="$HOME/.bun/bin:$PATH"
       export ALPHA_LAB_RUN_ID="${DAG_RUN_ID}"
       export ALPHA_LAB_WORKSPACE="$PWD"
