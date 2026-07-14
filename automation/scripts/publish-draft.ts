@@ -207,3 +207,52 @@ export async function publishDraft(input: PublishDraftInput): Promise<PublishDra
   await Bun.write(targetPath, contentBytes);
   return { action: "created", targetPath };
 }
+
+// CLI entry point. The Dagu `blog-publish` sub-DAG invokes
+// this script as `bun run scripts/publish-draft.ts
+// --candidate <path> --blog-dir <path> --runtime-sha <sha>`.
+// Without this guard, `bun run` would import the module, run
+// nothing (no top-level side effects), and exit 0 — silently
+// dropping the publish.
+function parseArgs(argv: string[]): { candidate?: string; blogDir?: string; runtimeSha?: string } {
+  const out: { candidate?: string; blogDir?: string; runtimeSha?: string } = {};
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    if (a === "--candidate") out.candidate = argv[++i];
+    else if (a === "--blog-dir") out.blogDir = argv[++i];
+    else if (a === "--runtime-sha") out.runtimeSha = argv[++i];
+    else if (a === "--help" || a === "-h") {
+      console.log("usage: publish-draft.ts --candidate <path> --blog-dir <path> --runtime-sha <sha>");
+      process.exit(0);
+    } else {
+      throw new PublishError(`unknown argument: ${a}`);
+    }
+  }
+  return out;
+}
+
+if (import.meta.main) {
+  (async () => {
+    try {
+      const args = parseArgs(process.argv.slice(2));
+      if (!args.candidate || !args.blogDir || !args.runtimeSha) {
+        throw new PublishError(
+          "missing required flags: --candidate, --blog-dir, --runtime-sha",
+        );
+      }
+      const result = await publishDraft({
+        candidatePath: args.candidate,
+        blogDir: args.blogDir,
+        runtimeSha: args.runtimeSha,
+      });
+      // Single-line machine-readable summary on stdout. The Dagu
+      // step captures this so logs can confirm which file was
+      // touched.
+      console.log(JSON.stringify({ ok: true, ...result }));
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`publish-draft failed: ${message}`);
+      process.exit(1);
+    }
+  })();
+}

@@ -45,26 +45,38 @@ echo "    $(du -h "${TAR_FILE}" | cut -f1) packaged"
 
 echo "[2/5] scp tar to VM + extract"
 # Capture the timestamp once so the bak dir and its removal use
-# the same value. `|| true` on the mv is intentional: the very
-# first deploy has no prior /opt/alpha-lab/automation to back up,
-# and a parallel deploy from a CI race would race on the timestamp
-# (two `date +%s` calls in the same second collide).
-"${SSH_CMD[@]}" --command "TS=\$(date +%s); sudo rm -rf /opt/alpha-lab/automation.bak.\$TS 2>/dev/null; sudo mv /opt/alpha-lab/automation /opt/alpha-lab/automation.bak.\$TS 2>/dev/null || true; sudo mkdir -p /opt/alpha-lab/automation && sudo chown \$(whoami):\$(id -gn) /opt/alpha-lab/automation"
+# the same value. The first deploy has no prior
+# /opt/alpha-lab/automation to back up, in which case the mv
+# fails with "No such file or directory" — that's the legitimate
+# first-deploy path, not a deploy error. After the first deploy
+# any mv failure (disk full, SELinux, container holding the old
+# tree) IS a deploy error and must abort before we extract on
+# top of a half-moved tree.
+#
+# To distinguish the two cases, the remote probe checks for the
+# source dir first; mv is only attempted if the dir exists.
+"${SSH_CMD[@]}" --command "TS=\$(date +%s); sudo rm -rf /opt/alpha-lab/automation.bak.\$TS 2>/dev/null; if [ -d /opt/alpha-lab/automation ]; then sudo mv /opt/alpha-lab/automation /opt/alpha-lab/automation.bak.\$TS; fi; sudo mkdir -p /opt/alpha-lab/automation && sudo chown \$(whoami):\$(id -gn) /opt/alpha-lab/automation"
 gcloud compute scp --zone "${ZONE}" "${TAR_FILE}" "${INSTANCE}:/tmp/dagu-deploy.tar.gz" --project "${PROJECT}"
 rm -f "${TAR_FILE}"
 "${SSH_CMD[@]}" --command "cd /opt/alpha-lab/automation && sudo tar -xzf /tmp/dagu-deploy.tar.gz --strip-components=1 --no-same-owner && sudo chown -R \$(whoami):\$(id -gn) . && sudo chmod +x scripts/*.sh && rm -f /tmp/dagu-deploy.tar.gz && echo '    extracted'"
 
 echo "[3/5] cp DAGs + perms for git-askpass.sh"
-# shopt -s nullglob so a missing dags/*.yaml surfaces as an
-# empty loop (not a literal "/opt/.../dags/*.yaml" cp attempt).
+# Scope shopt -s nullglob to the `for` loop only (via a subshell
+# with `set +o nullglob` on exit), so the subsequent chown/chmod
+# `*.yaml` lines still see the literal pattern if the dir is
+# empty (in which case they should fail loudly under set -e,
+# not silently chmod the empty string).
 "${SSH_CMD[@]}" --command 'set -e
+DAGS_SRC=/opt/alpha-lab/automation/dags
+DAGS_DST=/var/lib/alpha-lab/dagu/dags
 shopt -s nullglob
-for f in /opt/alpha-lab/automation/dags/*.yaml; do
-  sudo cp -f "$f" /var/lib/alpha-lab/dagu/dags/
+for f in "$DAGS_SRC"/*.yaml; do
+  sudo cp -f "$f" "$DAGS_DST/"
+  sudo chown alpha-lab-dagu:alpha-lab-dagu "$DAGS_DST/$(basename "$f")"
+  sudo chmod 0644 "$DAGS_DST/$(basename "$f")"
 done
-sudo chown alpha-lab-dagu:alpha-lab-dagu /var/lib/alpha-lab/dagu/dags/*.yaml
-sudo chmod 0644 /var/lib/alpha-lab/dagu/dags/*.yaml
-ls -la /var/lib/alpha-lab/dagu/dags/ | head -20
+shopt -u nullglob
+ls -la "$DAGS_DST/" | head -20
 echo "    dags copied"
 # git-askpass.sh must be readable+executable by alpha-lab-dagu
 # (git forks it as the calling user) and by no one else.

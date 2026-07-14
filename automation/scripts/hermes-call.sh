@@ -33,8 +33,9 @@
 #
 # Exit-code handling: hermes's safety guard may reject
 # `write_file` to certain paths and exit non-zero even after the
-# model produces a valid response. We capture the exit code and
-# keep it for the post-run check:
+# model produces a valid response. We capture the exit code via
+# `... || HERMES_EXIT=$?` so `set -e` does not abort before the
+# post-run check; then we distinguish three exit paths:
 #   - exit 0                  → success
 #   - exit != 0 AND candidate on disk and non-empty
 #                            → soft fail (write-guard refused the
@@ -44,7 +45,7 @@
 #                              on disk for debug.
 #   - exit != 0 AND no candidate
 #                            → hard fail. The dagu step fails.
-# Stderr is redirected to `${WORKDIR}/.hermes-stderr.log` (mode
+# Stderr is redirected to `${HOST_DIR}/.hermes-stderr.log` (mode
 # 0600) so it's available for postmortem without polluting the
 # contract stdout.
 #
@@ -82,9 +83,16 @@ HERMES_STDERR="${HOST_DIR}/.hermes-stderr.log"
 chmod 0600 "$HERMES_STDERR" 2>/dev/null || true
 
 # `--user 0:0` runs the agent as root in the container so the
-# :rw bind mount is fully usable. stdout goes to the dagu
+# :rw bind mount is fully usable. Stdout goes to the dagu
 # step's stdout (which dagu captures as the `candidate.md`
 # artifact via `stdout: { artifact: ... }` in the YAML).
+#
+# The trailing `|| HERMES_EXIT=$?` swallows the failure under
+# `set -e` so the post-run check can inspect $HERMES_EXIT
+# instead of the script aborting. Without this, any non-zero
+# docker/hermes exit would skip the soft-fail-vs-hard-fail
+# branch below.
+HERMES_EXIT=0
 docker run --rm \
   --user 0:0 \
   --entrypoint "" \
@@ -101,8 +109,7 @@ docker run --rm \
   -w /workspace \
   "$HERMES_IMAGE" \
   /opt/hermes/bin/hermes -p "$HERMES_PROFILE" -z "$HERMES_PROMPT" \
-  > "$ALPHA_LAB_CANDIDATE_PATH" 2> "$HERMES_STDERR"
-HERMES_EXIT=$?
+  > "$ALPHA_LAB_CANDIDATE_PATH" 2> "$HERMES_STDERR" || HERMES_EXIT=$?
 
 # Empty candidate + non-zero exit → hard fail.
 if [ ! -s "$ALPHA_LAB_CANDIDATE_PATH" ]; then

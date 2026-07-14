@@ -20,7 +20,8 @@
 #   1. a fresh `rebuild/integrate` checkout into a NEW worktree
 #      (never the one that produced the candidate);
 #   2. materialization of the candidate into the new worktree;
-#   3. the pure draft publisher;
+#   3. the pure draft publisher (CLI entry added in this
+#      iteration — see scripts/publish-draft.ts);
 #   4. Astro `npm ci` / `npm run lint` / `npm run build`;
 #   5. a deterministic diff-count gate (exactly one new Markdown file);
 #   6. a single `git commit` + `git push` to `rebuild/integrate`
@@ -92,7 +93,10 @@ steps:
     working_dir: ./workspace/publish
     run: |
       set -euo pipefail
-      git -C "${WORKDIR}" add -- blog/src/content/blog || true
+      # `git add` returns 0 on no-op (path with no changes) and
+      # non-zero on real failure (index lock, permission, missing
+      # path). Surface the failure; do not mask it with || true.
+      git -C "${WORKDIR}" add -- blog/src/content/blog
       git -C "${WORKDIR}" diff --cached --name-only -- 'blog/src/content/blog/*.md' | wc -l
     output: DIFF_COUNT
 
@@ -121,7 +125,6 @@ steps:
     run: |
       set -euo pipefail
       export GIT_ASKPASS=/opt/alpha-lab/automation/scripts/git-askpass.sh
-      export GIT_ASKPASS_REQUIRE_FORCE=1
       # Username only in URL; password flows through GIT_ASKPASS.
       git -C "${WORKDIR}" push "https://x-access-token@github.com/TaiwanTA/alpha-lab.git" HEAD:rebuild/integrate
     env:
