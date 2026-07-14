@@ -16,26 +16,31 @@
 #   - `secrets:` block in `admin.yaml` exists for external secret
 #     providers (Vault, file); it is not used here.
 #
-# git_sync 已啟用:production DAGs (automation/dags/) 直接從
-# main 同步,dagu.service 啟動時 pull (on_startup: true),
-# 之後每 300 秒背景 pull (interval: 300)。改 DAG 不需要再跑
-# deploy-dagu.sh。
+# git_sync 是 disabled:曾嘗試在 PR #23 啟用,實測 dagu v2.10.7
+# git_sync 只有 on_startup pull 會把 `data/gitsync/repo/<path>`
+# 同步到 `dags_dir`,**interval: 300 的 background tick 在
+# 2.10.7 沒有實際觸發** (dagu.service 啟動後 journalctl 0 條
+# sync log,5 分鐘後 dags_dir 髒資料未被覆寫回 main)。所以
+# 啟用 git_sync 不會比 deploy-dagu.sh 省事 — 改 DAG 後仍要
+# `systemctl restart alpha-lab-dagu.service`,反而比 deploy
+# 流程多了人為操作。留 disabled,等 dagu 修好 interval timer。
 #
-# Token auth:完整 HTTPS URL + `${env.GIT_READ_TOKEN}`。
-# Dagu 2.10.7 contract:`${env.NAME}` 是唯一解析 process env
-# 的格式;token 經 dagu daemon 直接讀取,不經 step shell
-# 的 `${VAR}` 截斷路徑。Token 在 dagu process env 內為完整
-# 93 字元 (systemd EnvironmentFile 載入,已在 VM 上 verify)。
+# 已驗證的 v2.10.7 git_sync 限制 (保留供未來參考):
+#   - `auth.type` 限定 `token` 或 `ssh` — `basic` 觸發
+#     `git sync auth type must be 'token' or 'ssh' (got: "basic")`
+#     初始化失敗。
+#   - `type: token` 走 go-git Bearer header,GitHub HTTPS 不接受
+#     fine-grained PAT 走 Bearer,401。
+#   - `type: ssh` 需明確指定 `ssh_key_path` (不能依賴
+#     `~/.ssh/id_ed25519` 自動找)。
+#   - `path: <subpath>` 在 startup pull 時會把 subpath 底下的
+#     YAML 同步到 `dags_dir` 根目錄 (實測 fixture-research +
+#     blog-publish 都正確同步)。
+#   - `interval: 300` 不觸發 (v2.10.7 已知行為或 bug)。
 #
-# dags_dir 內容會在 on_startup pull 時被 main 覆蓋;deploy
-# 第一次套用時務必先確認 VM 上的 blog-publish.yaml /
-# fixture-research.yaml 跟 main 一致,或接受被 overwrite。
-# 兩者已在部署前驗證:fixture-research.md5 一致,
-# blog-publish 在 VM 為過期版 (會被升級到 PR #21 的
-# SSH-deploy-key 版本 — 正是預期行為)。
-#
-# `push_enabled: false` — git_sync 為 pull-only。Blog publish
-# 仍走 SSH deploy key 推 main (ruleset bypass)。
+# 將來啟用時需要:`type: ssh` + `ssh_key_path` + 接受
+# 「改 DAG 後要 `systemctl restart alpha-lab-dagu.service`」
+# 的限制,或先升 dagu 修 interval timer。
 
 host: "127.0.0.1"
 port: 8080
@@ -45,15 +50,15 @@ paths:
   log_dir: /var/lib/alpha-lab/dagu/logs
 
 git_sync:
-  enabled: true
-  repository: "https://github.com/TaiwanTA/alpha-lab.git"
+  enabled: false
+  repository: "github.com/TaiwanTA/alpha-lab"
   branch: main
   path: automation/dags
   auth:
     type: token
     token: "${env.GIT_READ_TOKEN}"
   auto_sync:
-    enabled: true
-    on_startup: true
+    enabled: false
+    on_startup: false
     interval: 300
   push_enabled: false
