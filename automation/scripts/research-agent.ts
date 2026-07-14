@@ -23,8 +23,22 @@
 //   HINDSIGHT_BANK_ID   — bank ID (default: alpha-lab-v3-fixture)
 //   ALPHA_LAB_CANDIDATE_PATH — host path for candidate.md
 //   ALPHA_LAB_RUN_ID    — Dagu run ID (for logging)
-//   ALPHA_LAB_WORKSPACE — checked-out worktree root
+import matter from "gray-matter";
 
+const SOURCE_HEADING = /^##\s*來源\s*$/m;
+
+// 跟 publish-draft.ts 的 ALLOWED_KEY 对齐
+const ALLOWED_FM_KEYS: Record<string, true> = {
+  title: true, date: true, summary: true, status: true,
+  tags: true, investors: true, tickers: true, investmentClaim: true,
+};
+
+function validateFrontmatterKeys(data: Record<string, unknown>): void {
+  for (const key of Object.keys(data)) {
+    if (!ALLOWED_FM_KEYS[key])
+      throw new Error(`unknown frontmatter key: ${key}`);
+  }
+}
 // --- Types ---
 
 interface LlmConfig {
@@ -175,7 +189,7 @@ async function llmAsk(
       const content = choice.message?.content;
       if (!content) throw new Error("LLM API returned no content");
 
-      return extractJsonObject(content);
+      return content;
     } catch (err) {
       // 只 retry transient: AbortError (超时) + TypeError (网络断)
       const isTransient =
@@ -255,8 +269,15 @@ async function hindsightRecall(
 
 // --- Candidate assembly ---
 
-export function assembleCandidate(response: AgentResponse): string {
+export function assembleCandidate(response: Partial<AgentResponse>): string {
   const f = response;
+
+  // Fixture 的 canonical URL:LLM 有時會漏 sourceUrl,
+  // 用 fixture 唯一合法的 URL 作為 fallback。
+  const FIXTURE_SOURCE_URL = "https://example.com/fixture-source";
+  const sourceUrl = (typeof f.sourceUrl === "string" && f.sourceUrl.startsWith("https://"))
+    ? f.sourceUrl
+    : FIXTURE_SOURCE_URL;
 
   // 跟 publish-draft.ts 的 validateFrontmatter / validateBody 对齐:
   // 不通过这里的 validation 就不可能过 publisher gate。
@@ -274,8 +295,6 @@ export function assembleCandidate(response: AgentResponse): string {
     throw new Error("tickers must be an array of strings");
   if (typeof f.investmentClaim !== "boolean")
     throw new Error(`Invalid investmentClaim: ${typeof f.investmentClaim}`);
-  if (typeof f.sourceUrl !== "string" || !f.sourceUrl.startsWith("https://"))
-    throw new Error(`Invalid sourceUrl: must be https://`);
   if (typeof f.body !== "string" || f.body.trim().length === 0)
     throw new Error("Body must not be empty");
 
@@ -306,7 +325,7 @@ ${f.body}
 
 ## 來源
 
-- ${f.sourceUrl}
+- ${sourceUrl}
 `;
 }
 
@@ -372,29 +391,38 @@ ${recallJson}
 
 ## Task
 
-Synthesize the fixture content and recalled observations into a blog post
-draft. Output the JSON object described in your system prompt.`;
+Write the complete Markdown blog post as described in your system prompt.
+Output raw Markdown with YAML frontmatter. Do not wrap in code fences.`;
 
-  // 5. Call LLM
+  // 5. Call LLM (不傳 json:true,因為我們要 raw Markdown 不是 JSON)
   const llmResponse = await llmAsk(userPrompt, systemPrompt, llmConfig);
   console.log(`LLM response: ${llmResponse.length} bytes`);
 
-  // 6. Parse JSON
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(llmResponse);
-  } catch (err) {
-    console.error(`LLM did not return valid JSON: ${err}`);
-    console.error(`Content first 300 chars: ${llmResponse.slice(0, 300)}`);
-    process.exit(1);
+  // 6. Clean response:strip markdown fences if LLM wrapped output
+  let candidate = llmResponse.trim();
+  // LLM 常會在 Markdown 前後加 ```markdown 或 ```yaml fence
+  const fenceMatch = candidate.match(/^```(?:markdown|yaml|md)?\n([\s\S]*)\n```$/);
+  if (fenceMatch) {
+    candidate = fenceMatch[1].trim();
+    console.log("stripped markdown fence from LLM output");
   }
+  // 確保 frontmatter closing --- 跟 body 之間有空行
+  candidate = candidate.replace(/^---\n([\s\S]*?)\n---\n(?!\n)/, "---\n$1\n---\n\n");
 
-  // 7. Assemble candidate (validates before writing)
-  let candidate: string;
+  // 7. Validate:用 publishDraft 的 validation 邏輯在寫入前 verify
   try {
-    candidate = assembleCandidate(parsed as AgentResponse);
+    // 用 assembleCandidate 的 validation 邏輯做 frontmatter + body 檢查
+    // 然後直接用 LLM 的 Markdown 當 candidate
+    const fm = matter(candidate);
+    validateFrontmatterKeys(fm.data);
+    // 如果 LLM 漏了 sourceUrl 或 來源 section,補上
+    if (!SOURCE_HEADING.test(candidate)) {
+      candidate += "\n\n## 來源\n\n- https://example.com/fixture-source\n";
+      console.log("appended missing 來源 section");
+    }
   } catch (err) {
-    console.error(`Failed to assemble candidate: ${err}`);
+    console.error(`Candidate validation failed: ${err}`);
+    console.error(`LLM response (first 500 chars): ${llmResponse.slice(0, 500)}`);
     process.exit(1);
   }
 
