@@ -76,7 +76,7 @@ function sleep(ms: number): Promise<void> {
 // 从 LLM content 内 extract JSON object:
 //   - 若 content 已是纯 JSON (以 { 开头), 直接回整个 content
 //   - 若 content 含 markdown ```json{...}``` 或夹杂 reasoning 文字,
-//     抓最后一个 {...} 区块
+//     从第一个 { 开始用 brace matching 找完整 JSON object
 // 思考模型 (thinking model) 常会在 JSON 前面输出 reasoning, 造成
 // consumer 的 JSON.parse 在 content 开头就失败; 这个 helper 把那段剥掉。
 export function extractJsonObject(raw: string): string {
@@ -87,12 +87,14 @@ export function extractJsonObject(raw: string): string {
   } catch {
     // 继续尝试 extract
   }
-  const lastOpen = trimmed.lastIndexOf("{");
-  if (lastOpen === -1) return raw;
+  // 从第一个 { 开始往后匹配, 而非 lastIndexOf — 否则巢状 JSON
+  // 或 body 内含 { 时会定位到错误位置。
+  const firstOpen = trimmed.indexOf("{");
+  if (firstOpen === -1) return raw;
   let depth = 0;
   let inString = false;
   let escape = false;
-  for (let i = lastOpen; i < trimmed.length; i++) {
+  for (let i = firstOpen; i < trimmed.length; i++) {
     const ch = trimmed[i];
     if (escape) { escape = false; continue; }
     if (ch === "\\") { escape = true; continue; }
@@ -102,12 +104,12 @@ export function extractJsonObject(raw: string): string {
     else if (ch === "}") {
       depth--;
       if (depth === 0) {
-        const candidate = trimmed.slice(lastOpen, i + 1);
+        const candidate = trimmed.slice(firstOpen, i + 1);
         try {
           JSON.parse(candidate);
           return candidate;
         } catch {
-          // 不是合法 JSON, 继续找下一个 }
+          // 不是合法 JSON, 继续往后找
         }
       }
     }
@@ -115,9 +117,11 @@ export function extractJsonObject(raw: string): string {
   return raw;
 }
 
-// YAML double-quoted string escape: 反斜杠, 双引号, 换行
+// YAML double-quoted string escape: 先正规化换行符 (Windows \r\n → \n),
+// 再转义反斜杠, 双引号, 换行
 function yamlString(s: string): string {
-  return `"${s.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\n/g, "\\n")}"`;
+  const normalized = s.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  return `"${normalized.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\n/g, "\\n")}"`;
 }
 
 function yamlArray(arr: string[]): string {
@@ -150,7 +154,6 @@ async function llmAsk(
   if (isMiniMax) {
     body.thinking = { type: "disabled" };
   }
-
   const maxAttempts = 3;
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     try {
@@ -161,6 +164,7 @@ async function llmAsk(
           "Content-Type": "application/json",
         },
         body: JSON.stringify(body),
+        signal: AbortSignal.timeout(120_000),
       });
 
       if (res.status === 408 || res.status === 429 || res.status >= 500) {
@@ -191,10 +195,10 @@ async function llmAsk(
 
       return content;
     } catch (err) {
-      // 只 retry transient: AbortError (超时) + TypeError (网络断)
+      // 只 retry transient: AbortError (手动中断) + TimeoutError (AbortSignal.timeout) + TypeError (网络断)
       const isTransient =
         err instanceof Error &&
-        (err.name === "AbortError" || err instanceof TypeError);
+        (err.name === "AbortError" || err.name === "TimeoutError" || err instanceof TypeError);
       if (!isTransient) throw err;
       if (attempt >= maxAttempts - 1) {
         throw new Error(
@@ -271,6 +275,8 @@ async function hindsightRecall(
 
 export function assembleCandidate(response: Partial<AgentResponse>): string {
   const f = response;
+  if (!f || typeof f !== "object" || Array.isArray(f))
+    throw new Error("Response must be a non-null object");
 
   // Fixture 的 canonical URL:LLM 有時會漏 sourceUrl,
   // 用 fixture 唯一合法的 URL 作為 fallback。
