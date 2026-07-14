@@ -83,6 +83,9 @@ sudo chmod 0755 "${DAGS_HOME}"
 echo "[3/9] SSH deploy key (git@github.com:TaiwanTA/alpha-lab)"
 sudo mkdir -p "${SSH_DIR}"
 sudo chmod 0700 "${SSH_DIR}"
+# chown 給 alpha-lab-dagu:sudo mkdir 預設是 root:root,後續
+# ssh-keygen / ssh-keyscan 要用 alpha-lab-dagu 跑會被擋。
+sudo chown alpha-lab-dagu:alpha-lab-dagu "${SSH_DIR}"
 if [ -f "${SSH_KEY}" ]; then
   echo "    既有 ${SSH_KEY} 保留"
 else

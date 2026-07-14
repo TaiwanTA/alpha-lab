@@ -61,12 +61,15 @@ services:
       - hindsight-net
 
   dags-sync:
-    image: alpine:3.20
+    # 用 repo 內 Dockerfile.dags-sync build image:USER 999:982、
+    # dags-sync.sh COPY 進 image 都已在 Dockerfile 內做。改
+    # dags-sync.sh / Dockerfile 需要 `docker compose build`
+    # 重 build;setup-vm.sh 跟 deploy-dagu.sh 都會跑。
+    build:
+      context: ./deploy/dagu
+      dockerfile: Dockerfile.dags-sync
     container_name: alpha-lab-dags-sync
     restart: unless-stopped
-    # 跟 dagu 同 user 999:982 寫 named volume,跟 host
-    # /var/lib/alpha-lab/dagu owner 一致,避免 permission 不一致。
-    user: "999:982"
     entrypoint: ["/usr/local/bin/dags-sync.sh"]
     env_file:
       - /etc/alpha-lab/dagu.env
@@ -79,8 +82,6 @@ services:
       DAG_SYNC_TARGET: "/var/lib/alpha-lab/dagu-dags"
       GIT_SSH_COMMAND: "ssh -i /home/alpha-lab-dagu/.ssh/id_ed25519 -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new"
     volumes:
-      # dags-sync.sh bind mount 進 container (不用自建 image)
-      - ./dags-sync.sh:/usr/local/bin/dags-sync.sh:ro
       # SSH key 跟 dagu 共享 host 上的 deploy key
       - /var/lib/alpha-lab/dagu/.ssh:/home/alpha-lab-dagu/.ssh:ro
       # 寫入 dags named volume (跟 dagu 共享)

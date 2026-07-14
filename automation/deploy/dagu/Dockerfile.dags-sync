@@ -1,0 +1,42 @@
+# Dockerfile for dags-sync sidecar — 跟 docker-compose.yml 一起用。
+#
+# 為什麼要自建:alpine 預設沒 git/openssh-client/rsync;但
+# 容器以 user 999:982 跑不能 apk add。要在 build 階段 (root)
+# 裝好,執行期 user 999:982 直接用。
+#
+# image 名:`alpha-lab-dags-sync:local`,從 compose build 生成。
+# setup-vm.sh 跟 deploy-dagu.sh 都會跑 `docker compose build`
+# 確保 image 跟當前 source 對齊。
+#
+# Build context 是 `./deploy/dagu/` (跟 compose file 同層) —
+# COPY 只參考 context 內檔案。
+
+FROM alpine:3.20
+
+# 必要工具:git (clone/pull)、openssh-client (deploy key 認證)、
+# rsync (把 clone 內容 sync 到 named volume)。--no-cache 避免
+# 留 apk index,image 較小。
+RUN apk add --no-cache \
+      git \
+      openssh-client \
+      rsync
+
+# 跑 dags-sync 的 user 999:982 (跟 host alpha-lab-dagu user 對齊,
+# 跟 dagu container 對齊 — 寫入 named volume 保持 owner 一致)
+RUN addgroup -g 982 -S alpha-lab-dagu && \
+    adduser -u 999 -G alpha-lab-dagu -S -h /home/alpha-lab-dagu alpha-lab-dagu
+
+# HOME 預設 /home/alpha-lab-dagu (跟 adduser -h 對齊),跟 compose
+# 的 bind mount /var/lib/alpha-lab/dagu/.ssh →
+# /home/alpha-lab-dagu/.ssh 跟 GIT_SSH_COMMAND 的
+# /home/alpha-lab-dagu/.ssh/id_ed25519 對齊
+
+# dags-sync.sh COPY 進 image (見下方),不靠 compose bind
+# mount。改 script 需要 rebuild image;trade-off 是 image
+# 自帶 deps (git/openssh-client/rsync),不需要 runtime
+# apk add (alpine:3.20 user 999 不能 apk add)。
+COPY dags-sync.sh /usr/local/bin/dags-sync.sh
+RUN chmod 0755 /usr/local/bin/dags-sync.sh
+
+USER 999:982
+ENTRYPOINT ["/usr/local/bin/dags-sync.sh"]
