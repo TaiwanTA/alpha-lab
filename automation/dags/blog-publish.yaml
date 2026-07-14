@@ -24,7 +24,8 @@
 #   4. Astro `npm ci` / `npm run lint` / `npm run build`;
 #   5. a deterministic diff-count gate (exactly one new Markdown file);
 #   6. a single `git commit` + `git push` to `rebuild/integrate`
-#      with `GIT_READ_TOKEN`.
+#      with `GIT_READ_TOKEN` (provided via the shared askpass
+#      helper, never embedded in the URL).
 #
 # It NEVER executes any script from the parent's worktree; the
 # checkout here is independent of the parent's `workspace/app`.
@@ -32,7 +33,7 @@
 # Checkout is delegated to `clone-publish.sh` because Dagu
 # 2.10.7's `git.checkout` action uses go-git which fails on
 # fine-grained PATs. The wrapper uses the same x-access-token
-# trick as clone-fixture.sh.
+# trick (via GIT_ASKPASS, not argv) as clone-fixture.sh.
 
 params:
   candidate_path: ""
@@ -119,7 +120,10 @@ steps:
     working_dir: ./workspace/publish
     run: |
       set -euo pipefail
-      git -C "${WORKDIR}" push "https://x-access-token:${GIT_READ_TOKEN}@github.com/TaiwanTA/alpha-lab.git" HEAD:rebuild/integrate
+      export GIT_ASKPASS=/opt/alpha-lab/automation/scripts/git-askpass.sh
+      export GIT_ASKPASS_REQUIRE_FORCE=1
+      # Username only in URL; password flows through GIT_ASKPASS.
+      git -C "${WORKDIR}" push "https://x-access-token@github.com/TaiwanTA/alpha-lab.git" HEAD:rebuild/integrate
     env:
       - GIT_READ_TOKEN=${env.GIT_READ_TOKEN}
     retry_policy:

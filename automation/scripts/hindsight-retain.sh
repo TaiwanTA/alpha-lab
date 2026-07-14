@@ -14,11 +14,15 @@
 # Env resolution: this wrapper runs as a child of the dagu process
 # (which is on the host's network namespace). The dagu service
 # unit's EnvironmentFile is /etc/alpha-lab/dagu.env; we source it
-# here to get HINDSIGHT_BASE_URL etc.  dagu v2.10.7 does not
+# here to get HINDSIGHT_BASE_URL etc.  dagu 2.10.7 does not
 # propagate process env into run-step shells, so the source is
 # explicit.
 set -eo pipefail
 set +u
+if [[ ! -f /etc/alpha-lab/dagu.env ]]; then
+  echo "/etc/alpha-lab/dagu.env not found" >&2
+  exit 2
+fi
 . /etc/alpha-lab/dagu.env
 set -u
 
@@ -32,9 +36,18 @@ if [ ! -f "$INPUT" ]; then
   exit 2
 fi
 
-echo "=== hindsight-retain === bank=$HINDSIGHT_BANK_ID file=$INPUT"
-curl -fsS -X POST \
-  -H "Content-Type: application/json" \
-  ${HINDSIGHT_API_KEY:+-H "Authorization: Bearer $HINDSIGHT_API_KEY"} \
-  --data-binary "@${INPUT}" \
+# Diagnostic on stderr; stdout is the contract (Hindsight JSON
+# response).
+echo "=== hindsight-retain === bank=$HINDSIGHT_BANK_ID file=$INPUT" >&2
+
+# Bash array avoids word-splitting if HINDSIGHT_API_KEY ever
+# contains whitespace or shell metacharacters (the env file is
+# root:alpha-lab-dagu 0440; defensive all the same).
+CURL_ARGS=(-fsS -X POST -H "Content-Type: application/json")
+if [[ -n "${HINDSIGHT_API_KEY}" ]]; then
+  CURL_ARGS+=(-H "Authorization: Bearer ${HINDSIGHT_API_KEY}")
+fi
+CURL_ARGS+=(--data-binary "@${INPUT}")
+
+curl "${CURL_ARGS[@]}" \
   "${HINDSIGHT_BASE_URL}/v1/default/banks/${HINDSIGHT_BANK_ID}/memories"

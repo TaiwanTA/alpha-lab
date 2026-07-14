@@ -9,9 +9,11 @@
 #      previous deploy);
 #   4. Copies the DAG files to
 #      /var/lib/alpha-lab/dagu/dags/ (which dagu watches);
-#   5. Updates the admin.yaml on the VM (the systemd unit itself
+#   5. Sets mode 0750 root:alpha-lab-dagu on git-askpass.sh
+#      (so alpha-lab-dagu can read+execute it; no other user can);
+#   6. Updates the admin.yaml on the VM (the systemd unit itself
 #      is already in place from the first deploy);
-#   6. daemon-reload + restart if the unit changed.
+#   7. daemon-reload + restart.
 #
 # It does NOT push the git branch to origin; the user does that
 # separately.
@@ -42,22 +44,35 @@ tar --exclude='node_modules' \
 echo "    $(du -h "${TAR_FILE}" | cut -f1) packaged"
 
 echo "[2/5] scp tar to VM + extract"
-"${SSH_CMD[@]}" --command "sudo rm -rf /opt/alpha-lab/automation.bak.\$(date +%s) 2>/dev/null; sudo mv /opt/alpha-lab/automation /opt/alpha-lab/automation.bak.\$(date +%s) 2>/dev/null || true; sudo mkdir -p /opt/alpha-lab/automation && sudo chown \$(whoami):\$(id -gn) /opt/alpha-lab/automation"
+# Capture the timestamp once so the bak dir and its removal use
+# the same value. `|| true` on the mv is intentional: the very
+# first deploy has no prior /opt/alpha-lab/automation to back up,
+# and a parallel deploy from a CI race would race on the timestamp
+# (two `date +%s` calls in the same second collide).
+"${SSH_CMD[@]}" --command "TS=\$(date +%s); sudo rm -rf /opt/alpha-lab/automation.bak.\$TS 2>/dev/null; sudo mv /opt/alpha-lab/automation /opt/alpha-lab/automation.bak.\$TS 2>/dev/null || true; sudo mkdir -p /opt/alpha-lab/automation && sudo chown \$(whoami):\$(id -gn) /opt/alpha-lab/automation"
 gcloud compute scp --zone "${ZONE}" "${TAR_FILE}" "${INSTANCE}:/tmp/dagu-deploy.tar.gz" --project "${PROJECT}"
 rm -f "${TAR_FILE}"
 "${SSH_CMD[@]}" --command "cd /opt/alpha-lab/automation && sudo tar -xzf /tmp/dagu-deploy.tar.gz --strip-components=1 --no-same-owner && sudo chown -R \$(whoami):\$(id -gn) . && sudo chmod +x scripts/*.sh && rm -f /tmp/dagu-deploy.tar.gz && echo '    extracted'"
 
-echo "[3/5] cp DAGs to /var/lib/alpha-lab/dagu/dags/"
-# Use single-quoted remote heredoc to keep globs and
-# dollar-signs literal until they execute on the VM.
+echo "[3/5] cp DAGs + perms for git-askpass.sh"
+# shopt -s nullglob so a missing dags/*.yaml surfaces as an
+# empty loop (not a literal "/opt/.../dags/*.yaml" cp attempt).
 "${SSH_CMD[@]}" --command 'set -e
+shopt -s nullglob
 for f in /opt/alpha-lab/automation/dags/*.yaml; do
   sudo cp -f "$f" /var/lib/alpha-lab/dagu/dags/
 done
 sudo chown alpha-lab-dagu:alpha-lab-dagu /var/lib/alpha-lab/dagu/dags/*.yaml
 sudo chmod 0644 /var/lib/alpha-lab/dagu/dags/*.yaml
 ls -la /var/lib/alpha-lab/dagu/dags/ | head -20
-echo "    dags copied"'
+echo "    dags copied"
+# git-askpass.sh must be readable+executable by alpha-lab-dagu
+# (git forks it as the calling user) and by no one else.
+if [ -f /opt/alpha-lab/automation/scripts/git-askpass.sh ]; then
+  sudo chown root:alpha-lab-dagu /opt/alpha-lab/automation/scripts/git-askpass.sh
+  sudo chmod 0750 /opt/alpha-lab/automation/scripts/git-askpass.sh
+  echo "    git-askpass.sh perms set"
+fi'
 
 echo "[4/5] update admin.yaml + restart dagu"
 "${SSH_CMD[@]}" --command 'set -e
