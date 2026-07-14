@@ -1,0 +1,43 @@
+# Dagu admin configuration for the alpha-lab VM.
+#
+# Non-secret configuration only. The bootstrap admin credential is
+# supplied through Dagu's first-run loopback UI and is stored in
+# the VM secret store, never in this file. `GIT_READ_TOKEN` is
+# injected as a process environment variable by the dagu container's
+# `env_file:` entry (see docker-compose.yml) and referenced here as
+# `${env.GIT_READ_TOKEN}`. The legacy `${secrets.X}` form is not a
+# v2.10.7 strict-binding namespace and would be stored as a literal
+# string, which `git_sync` would then send to GitHub as the
+# BasicAuth password.
+#
+# Verified Dagu v2.10.7 contract:
+#   - `${env.NAME}` is the only form that resolves to the process
+#     environment. There is no `${secrets.X}` namespace.
+#   - `secrets:` block in `admin.yaml` exists for external secret
+#     providers (Vault, file); it is not used here.
+#
+# git_sync is disabled: the canonical DAGs live on the
+# `rebuild/integrate` branch and the VM uses a pinned checkout.
+# Re-enable after `rebuild/integrate` merges to `main` and the
+# automation directory exists there.
+
+host: "127.0.0.1"
+port: 8080
+paths:
+  dags_dir: /var/lib/alpha-lab/dagu/dags
+  data_dir: /var/lib/alpha-lab/dagu/data
+  log_dir: /var/lib/alpha-lab/dagu/logs
+
+git_sync:
+  enabled: false
+  repository: github.com/TaiwanTA/alpha-lab
+  branch: main
+  path: automation/dags
+  auth:
+    type: token
+    token: "${env.GIT_READ_TOKEN}"
+  auto_sync:
+    enabled: false
+    on_startup: false
+    interval: 300
+  push_enabled: false

@@ -1,0 +1,142 @@
+# Dagu safe-publish rebuild 的根 DAG。
+#
+# 已驗證 Dagu v2.10.7 語法:
+#   - `${env.NAME}` 是唯一能解析到 process env 變數的 namespace。
+#   - `stdout: { artifact: ... }` 是唯一能註冊 immutable per-run
+#     artifact 的形式。
+#   - `output: VARNAME` 把 step 的 stdout 收成字串變數,在下游
+#     用 `${VARNAME}` 取。
+#   - `working_dir:` (不是 `dir:`);`DAG_RUN_ID` (不是 `DAGU_RUN_ID`)。
+#   - `action: dag.run` 用 `with.params` 傳命名參數;子 DAG 用
+#     `${params.NAME}` 讀。
+#   - `dag.run` 在 v2.10.7 不會把 `${step_id.outputs.*}` 暴露給
+#     父 DAG;子 DAG 透過標準 RunStatus JSON 發布自己的結果,
+#     在 Dagu UI 看得到,但這裡的 control flow 不需要。
+#
+# 這個 DAG 負責:
+#   - 一次全新的 Hermes session,profile = alpha-lab-fixture
+#   - 一次 `git rev-parse HEAD` 抓 runtime SHA
+#   - 一次同步的 `blog-publish` 子 DAG 呼叫
+# 它不負責 publish 步驟本身;publisher 跟 git push 都在
+# `blog-publish.yaml`。
+#
+# VM 上的 runtime topology:
+#   - dagu 是 systemd service (alpha-lab-dagu user 的 PID 1),
+#     不在 Docker container 裡。目前部署用
+#     /usr/local/bin/dagu start-all。改用 docker compose 另開
+#     一個追蹤項目;現在 dagu process 跟 host 共用 network
+#     namespace。
+#   - Hindsight 走 `http://127.0.0.1:8888` (host 的 loopback
+#     binding)。wrapper script 自己 source /etc/alpha-lab/dagu.env
+#     拿到 URL。
+#   - hermes CLI 住在 `nousresearch/hermes-agent:latest` image 裡;
+#     wrapper 用 `docker run --rm` (一次性) 配合 bind mount,
+#     讓 dagu step 的 workspace 對 agent 可見。hermes v0.18.0
+#     沒有 OpenAI-compatible HTTP endpoint,不換 image 升級就
+#     沒辦法走 HTTP。
+#
+# Hindsight v0.8.4 retain schema:request body 是
+# `{"items": [{"content": "...", "context": "..."}, ...]}`。
+# `facts` 別名不接受;欄位叫 `items`。
+
+artifacts:
+  enabled: true
+timeout_sec: 900
+type: graph
+
+steps:
+  - id: checkout
+    # Dagu 2.10.7 的 git.checkout action 用 go-git,token 模式下
+    # 會送 username="git" 的 Basic Auth,GitHub 從 2021-08 起
+    # 拒絕 fine-grained PAT。即使給 username/password,go-git
+    # 對 fine-grained PAT 還是會壞。確認過的解法:用 shell
+    # `git clone` + URL 裡放 x-access-token。這裡用 run step
+    # 保持 DAG-only state。dagu 2.10.7 不會在 run script body
+    # 內展開 ${env.X},只在 YAML 結構值內展開,所以委派給
+    # wrapper script,它從 process env (systemd unit 的
+    # EnvironmentFile=/etc/alpha-lab/dagu.env 設的) 讀 token。
+    run: bash /opt/alpha-lab/automation/scripts/clone-fixture.sh
+
+  - id: record_runtime_sha
+    depends: [checkout]
+    working_dir: ./workspace/app
+    run: git rev-parse HEAD
+    output: RUNTIME_SHA
+
+  - id: record_workdir
+    depends: [checkout]
+    working_dir: ./workspace/app
+    run: pwd
+    output: WORKDIR
+
+  - id: hindsight_retain
+    depends: [record_workdir]
+    working_dir: ./workspace/app
+    # 用 offline fixture 組 retain payload,POST 到隔離的
+    # `alpha-lab-v3-fixture` bank。生產的 `alpha-lab` bank
+    # fixture DAG 永遠不會碰到。
+    run: |
+      set -euo pipefail
+      jq -nc --rawfile body automation/fixtures/safe-publish.md \
+        '{items: [{content: $body, context: "fixture:safe-publish"}]}' \
+        > .hindsight-retain.json
+      bash /opt/alpha-lab/automation/scripts/hindsight-retain.sh .hindsight-retain.json
+    env:
+      - HINDSIGHT_BANK_ID=alpha-lab-v3-fixture
+      - HINDSIGHT_API_KEY=${env.HINDSIGHT_API_KEY}
+    retry_policy:
+      limit: 1
+      interval_sec: 10
+      exit_code: [1]
+
+  - id: hindsight_recall
+    depends: [hindsight_retain]
+    working_dir: ./workspace/app
+    run: |
+      set -euo pipefail
+      bash /opt/alpha-lab/automation/scripts/hindsight-recall.sh "alpha-lab offline fixture research" \
+        | tee .hindsight-recall.json
+      test -s .hindsight-recall.json
+    env:
+      - HINDSIGHT_BANK_ID=alpha-lab-v3-fixture
+      - HINDSIGHT_API_KEY=${env.HINDSIGHT_API_KEY}
+
+  - id: hermes
+    depends: [hindsight_recall, record_runtime_sha, record_workdir]
+    working_dir: ./workspace/app
+    run: |
+      set -euo pipefail
+      export ALPHA_LAB_RUN_ID="${DAG_RUN_ID}"
+      export ALPHA_LAB_WORKSPACE="$PWD"
+      export ALPHA_LAB_CANDIDATE_PATH="$PWD/candidate.md"
+      # 把 prompt 內容讀進 HERMES_PROMPT。wrapper 把它傳給
+      # 一次性容器內的 hermes。
+      export HERMES_PROMPT="$(cat automation/prompts/fixture-research.md)"
+      bash /opt/alpha-lab/automation/scripts/hermes-call.sh
+      cat "$ALPHA_LAB_CANDIDATE_PATH"
+    env:
+      - HINDSIGHT_BANK_ID=alpha-lab-v3-fixture
+      - HINDSIGHT_API_KEY=${env.HINDSIGHT_API_KEY}
+    stdout:
+      artifact: candidate.md
+    timeout_sec: 600
+    retry_policy:
+      limit: 1
+      interval_sec: 30
+      exit_code: [1]
+
+  - id: publish
+    depends: [hermes]
+    action: dag.run
+    with:
+      # 絕對路徑:dagu 2.10.7 的 `action: dag.run` 用 dagu
+      # server 的 CWD 解析子 DAG,不是設定的 dags_dir。子檔
+      # 在 dags_dir,用絕對路徑繞過 CWD 問題。
+      dag: /var/lib/alpha-lab/dagu/dags/blog-publish.yaml
+      params:
+        candidate_path: "${WORKDIR}/candidate.md"
+        runtime_sha: "${RUNTIME_SHA}"
+    retry_policy:
+      limit: 1
+      interval_sec: 30
+      exit_code: [1]

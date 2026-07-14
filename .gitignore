@@ -27,3 +27,16 @@ research/_staging/
 
 # Hermes agent state
 .hermes/
+
+# SDD local progress / reviews
+.superpowers/
+
+# Superpowers working docs (plans / playbooks / sdd / specs):
+# these are personal working notes, not public repo material.
+docs/superpowers/
+
+# Automation runtime scratch / Dagu local cache
+automation/.dagu/
+automation/.run-logs/
+automation/outbox/
+automation/candidates/

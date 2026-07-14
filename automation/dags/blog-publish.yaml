@@ -1,0 +1,133 @@
+# 子 DAG,由 `fixture-research` 在 candidate 產出後呼叫。
+# push 目標是 `rebuild/integrate` (不是 main),這樣整個 round
+# trip 留在 integration 分支上,等使用者 review v3 PR。
+# `rebuild/integrate` merge 到 main 之後,把這裡的 push ref
+# 改回 `main`。
+#
+# 已驗證 Dagu v2.10.7 語法:
+#   - `${env.NAME}` 是唯一能解析 process env 變數的 namespace。
+#   - `output: VARNAME` 把 step 的 stdout 收成字串變數。
+#   - `preconditions: [...]` 用 shell condition 或 value 比對
+#     gate step;這就是 diff-count gate 的實作方式。
+#   - `working_dir:` (不是 `dir:`);`DAG_RUN_ID` (不是 `DAGU_RUN_ID`)。
+#
+# 子 DAG 接收兩個參數:
+#   - `candidate_path` (candidate Markdown 的絕對路徑)
+#   - `runtime_sha` (產生 candidate 的 commit SHA)
+#
+# 流程:
+#   1. 重新 checkout `rebuild/integrate` 到一個新的 worktree
+#      (絕對不是產出 candidate 的那個)
+#   2. 把 candidate 放到新 worktree
+#   3. 跑純函式的 draft publisher (本輪加了 CLI 入口 ——
+#      見 scripts/publish-draft.ts)
+#   4. Astro `npm ci` / `npm run lint` / `npm run build`
+#   5. 決定論的 diff-count gate (恰好一個新增的 Markdown 檔)
+#   6. 一次 `git commit` + `git push` 到 `rebuild/integrate`,
+#      用 `GIT_READ_TOKEN` (走 askpass helper,不嵌在 URL 裡)
+#
+# 不會跑父 worktree 的任何 script;這裡的 checkout 跟父的
+# `workspace/app` 完全獨立。
+#
+# checkout 委派給 `clone-publish.sh`,因為 Dagu 2.10.7 的
+# `git.checkout` 用 go-git,對 fine-grained PAT 會壞。wrapper
+# 用跟 clone-fixture.sh 一樣的 x-access-token 技巧
+# (GIT_ASKPASS,不走 argv)。
+
+params:
+  candidate_path: ""
+  runtime_sha: ""
+
+artifacts:
+  enabled: true
+timeout_sec: 900
+type: graph
+
+steps:
+  - id: checkout
+    run: bash /opt/alpha-lab/automation/scripts/clone-publish.sh
+
+  - id: record_workdir
+    depends: [checkout]
+    working_dir: ./workspace/publish
+    run: pwd
+    output: WORKDIR
+
+  - id: materialize_candidate
+    depends: [record_workdir]
+    working_dir: ./workspace/publish
+    run: |
+      set -euo pipefail
+      cp "${params.candidate_path}" "${WORKDIR}/candidate.md"
+      test -s "${WORKDIR}/candidate.md"
+      echo "Materialized candidate from ${params.candidate_path}"
+      echo "Runtime SHA: ${params.runtime_sha}"
+
+  - id: publish_draft
+    depends: [materialize_candidate]
+    working_dir: ./workspace/publish
+    run: |
+      set -euo pipefail
+      cd "${WORKDIR}/automation"
+      bun install --frozen-lockfile
+      bun run scripts/publish-draft.ts \
+        --candidate "${WORKDIR}/candidate.md" \
+        --blog-dir "${WORKDIR}/blog" \
+        --runtime-sha "${params.runtime_sha}"
+    env:
+
+  - id: site_lint_build
+    depends: [publish_draft]
+    working_dir: ./workspace/publish
+    run: |
+      set -euo pipefail
+      cd "${WORKDIR}/blog"
+      npm ci
+      npm run lint
+      npm run build
+
+  - id: diff_gate_count
+    depends: [site_lint_build]
+    working_dir: ./workspace/publish
+    run: |
+      set -euo pipefail
+      # `git add` 在 path 沒變化時回 0,在真的有錯時 (index
+      # lock、權限、路徑不存在) 回非零。讓錯浮上來,不要
+      # 用 || true 吞掉。
+      git -C "${WORKDIR}" add -- blog/src/content/blog
+      git -C "${WORKDIR}" diff --cached --name-only -- 'blog/src/content/blog/*.md' | wc -l
+    output: DIFF_COUNT
+
+  - id: diff_gate_publish_path
+    depends: [diff_gate_count]
+    preconditions:
+      - condition: "[ ${DIFF_COUNT:-0} -eq 1 ]"
+    working_dir: ./workspace/publish
+    run: |
+      set -euo pipefail
+      git -C "${WORKDIR}" diff --cached --name-only -- 'blog/src/content/blog/*.md' | tr -d '\n'
+    output: DIFF_PATH
+
+  - id: commit
+    depends: [diff_gate_publish_path]
+    working_dir: ./workspace/publish
+    run: |
+      set -euo pipefail
+      git -C "${WORKDIR}" config user.email "alpha-lab-bot@users.noreply.github.com"
+      git -C "${WORKDIR}" config user.name "alpha-lab-bot"
+      git -C "${WORKDIR}" commit -m "feat(blog): publish draft from fixture-research (${DAG_RUN_ID})"
+
+  - id: push
+    depends: [commit]
+    working_dir: ./workspace/publish
+    run: |
+      set -euo pipefail
+      export GIT_ASKPASS=/opt/alpha-lab/automation/scripts/git-askpass.sh
+      # URL 只放 username,密碼走 GIT_ASKPASS。
+      git -C "${WORKDIR}" push "https://x-access-token@github.com/TaiwanTA/alpha-lab.git" HEAD:rebuild/integrate
+    env:
+      - GIT_READ_TOKEN=${env.GIT_READ_TOKEN}
+    retry_policy:
+      limit: 1
+      interval_sec: 30
+      exit_code: [128]
