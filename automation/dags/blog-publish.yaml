@@ -46,6 +46,8 @@ type: graph
 steps:
   - id: checkout
     run: bash /opt/alpha-lab/automation/scripts/clone-publish.sh
+    env:
+      - GIT_READ_TOKEN=${env.GIT_READ_TOKEN}
 
   - id: record_workdir
     depends: [checkout]
@@ -94,7 +96,9 @@ steps:
       # `git add` 在 path 沒變化時回 0,在真的有錯時 (index
       # lock、權限、路徑不存在) 回非零。讓錯浮上來,不要
       # 用 || true 吞掉。
-      git -C "${WORKDIR}" add -- blog/src/content/blog
+      # 嚴格 scope `git add` 只到 *.md:只 stage Markdown,不
+      # 把 build 之後的 package-lock / dist / .astro 一併 commit。
+      git -C "${WORKDIR}" add -- 'blog/src/content/blog/*.md'
       git -C "${WORKDIR}" diff --cached --name-only -- 'blog/src/content/blog/*.md' | wc -l
     output: DIFF_COUNT
 
@@ -124,7 +128,7 @@ steps:
       set -euo pipefail
       export GIT_ASKPASS=/opt/alpha-lab/automation/scripts/git-askpass.sh
       # URL 只放 username,密碼走 GIT_ASKPASS。
-      git -C "${WORKDIR}" push "https://x-access-token@github.com/TaiwanTA/alpha-lab.git" HEAD:rebuild/integrate
+      git -C "${WORKDIR}" push "https://x-access-token@github.com/TaiwanTA/alpha-lab.git" HEAD:main
     env:
       - GIT_READ_TOKEN=${env.GIT_READ_TOKEN}
     retry_policy:

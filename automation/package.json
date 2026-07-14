@@ -8,8 +8,7 @@
     "publish-draft": "bun run scripts/publish-draft.ts"
   },
   "dependencies": {
-    "gray-matter": "^4.0.3",
-    "zod": "^3.24.2"
+    "gray-matter": "^4.0.3"
   },
   "devDependencies": {
     "@types/bun": "latest",

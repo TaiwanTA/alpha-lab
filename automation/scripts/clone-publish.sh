@@ -7,13 +7,10 @@
 # 子 DAG 用這個 wrapper 取代 Dagu 內建的 git.checkout,因為
 # Dagu 2.10.7 的 go-git 不支援 fine-grained PAT。
 #
-# 分支說明:這裡 clone `rebuild/integrate` 而不是 main,因為
-# `automation/` 目錄 (含 automation/scripts/publish-draft.ts
-# 跟 publish 端測試 fixtures) 目前只存在 integration 分支。
-# main 有 blog 但沒有 publisher。blog-publish.yaml 的 push
-# 步驟也對應到 rebuild/integrate,讓整個 round trip 都在
-# 同一個分支上。merge 之後把這裡的 clone ref 跟 push ref 同步
-# 改回 main 即可。
+# 分支說明:v3 rebuild (PR #18) 之後,automation/
+# (含 scripts/publish-draft.ts + fixtures) 跟著 publish 端
+# 測試 fixtures 一起進 main;blog-publish.yaml 的 push ref
+# 也同步指向 main,整個 round trip 都在同一個分支。
 #
 # 認證處理:見 clone-fixture.sh。
 set -eo pipefail
@@ -28,9 +25,9 @@ set -u
 export GIT_TERMINAL_PROMPT=0
 export GIT_ASKPASS=/opt/alpha-lab/automation/scripts/git-askpass.sh
 export GIT_ASKPASS_REQUIRE_FORCE=1
-echo "=== publish-clone === GIT_READ_TOKEN length: ${#GIT_READ_TOKEN} ref=rebuild/integrate"
+echo "=== publish-clone === GIT_READ_TOKEN length: ${#GIT_READ_TOKEN} ref=main"
 rm -rf ./workspace
 mkdir -p ./workspace
-git clone --depth 1 -b rebuild/integrate \
+git clone --depth 1 -b main \
   "https://x-access-token@github.com/TaiwanTA/alpha-lab.git" \
   ./workspace/publish

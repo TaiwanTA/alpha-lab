@@ -59,7 +59,7 @@ echo "[2/5] scp tar to VM + extract"
 "${SSH_CMD[@]}" --command "TS=\$(date +%s); sudo rm -rf /opt/alpha-lab/automation.bak.\$TS 2>/dev/null; if [ -d /opt/alpha-lab/automation ]; then sudo mv /opt/alpha-lab/automation /opt/alpha-lab/automation.bak.\$TS; fi; sudo mkdir -p /opt/alpha-lab/automation && sudo chown \$(whoami):\$(id -gn) /opt/alpha-lab/automation"
 gcloud compute scp --zone "${ZONE}" "${TAR_FILE}" "${INSTANCE}:/tmp/dagu-deploy.tar.gz" --project "${PROJECT}"
 rm -f "${TAR_FILE}"
-"${SSH_CMD[@]}" --command "cd /opt/alpha-lab/automation && sudo tar -xzf /tmp/dagu-deploy.tar.gz --strip-components=1 --no-same-owner && sudo chown -R \$(whoami):\$(id -gn) . && sudo chmod +x scripts/*.sh ops/*.sh && rm -f /tmp/dagu-deploy.tar.gz && echo '    extracted'"
+"${SSH_CMD[@]}" --command "cd /opt/alpha-lab/automation && sudo tar -xzf /tmp/dagu-deploy.tar.gz --strip-components=1 --no-same-owner && sudo chown -R \$(whoami):\$(id -gn) . && (shopt -s nullglob; for f in scripts/*.sh ops/*.sh; do [ -e \"\$f\" ] && sudo chmod +x \"\$f\" || true; done) && rm -f /tmp/dagu-deploy.tar.gz && echo '    extracted'"
 
 echo "[3/5] cp DAGs + perms for git-askpass.sh"
 # 把 shopt -s nullglob 的範圍限在 for 迴圈內 (開 + 關),讓

@@ -9,10 +9,9 @@
 # 自己 source 一次。
 #
 # 分支說明:fixture 內容 (automation/fixtures/safe-publish.md
-# 與 automation/prompts/fixture-research.md) 目前只放在
-# `rebuild/integrate`,還沒合併到 `main`。merge 之前先固定
-# 在這個分支;merge 之後把 `-b rebuild/integrate` 改回
-# `-b main` 重新部署即可。
+# 與 automation/prompts/fixture-research.md) 在 v3 rebuild
+# merge (PR #18) 之後已經跟著 automation/ 一起進 main,
+# clone ref 直接跟 main。
 #
 # 認證處理:token 透過 git-askpass.sh 傳給 git,URL 只放
 # username `x-access-token`,密碼走 git 的 credential
@@ -30,11 +29,11 @@ set -u
 export GIT_TERMINAL_PROMPT=0
 export GIT_ASKPASS=/opt/alpha-lab/automation/scripts/git-askpass.sh
 export GIT_ASKPASS_REQUIRE_FORCE=1  # only ask when needed; never block on stdin
-echo "=== clone === GIT_READ_TOKEN length: ${#GIT_READ_TOKEN} ref=rebuild/integrate"
+echo "=== clone === GIT_READ_TOKEN length: ${#GIT_READ_TOKEN} ref=main"
 # 清掉前次失敗 run 留下來的 stale workspace;否則 git clone
 # 會因為 destination path 已經存在而中斷。
 rm -rf ./workspace
 mkdir -p ./workspace
-git clone --depth 1 -b rebuild/integrate \
+git clone --depth 1 -b main \
   "https://x-access-token@github.com/TaiwanTA/alpha-lab.git" \
   ./workspace/app

@@ -56,6 +56,8 @@ steps:
     # wrapper script,它從 process env (systemd unit 的
     # EnvironmentFile=/etc/alpha-lab/dagu.env 設的) 讀 token。
     run: bash /opt/alpha-lab/automation/scripts/clone-fixture.sh
+    env:
+      - GIT_READ_TOKEN=${env.GIT_READ_TOKEN}
 
   - id: record_runtime_sha
     depends: [checkout]
