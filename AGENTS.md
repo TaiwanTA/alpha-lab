@@ -135,7 +135,7 @@
 - `fixture-research.yaml` / `blog-publish.yaml` 的 checkout step 修 env passthrough bug:dagu 2.10.7 step 子進程不會 inherit systemd `EnvironmentFile` 到 step subprocess,需要 `env: GIT_READ_TOKEN: ${env.GIT_READ_TOKEN}` block。
 - `blog-publish.yaml` diff gate 修正:`git add -- blog/src/content/blog` → `git add -- 'blog/src/content/blog/*.md'`,避免 build artifact (`package-lock.json`、`.astro/`、`dist/`) 被偷偷 stage 進來。
 - `deploy-dagu.sh` chmod 用 nullglob guard,`scripts/*.sh` 或 `ops/*.sh` 空目錄不會 abort deploy。
-- `docker-compose.yml`:PR #19 加了 `security_opt: [no-new-privileges:true]` + `read_only: true` + 必要 tmpfs,但 PR #25 compose 切換時未採用(npm/bun/git 需要寫 cache 到 $HOME,`read_only` 會 fail)。workspace 已经在 bind mount `/var/lib/alpha-lab/dagu/data/dag-runs/` 上;將來重新 enable hardening 需要把 $HOME/cache 也指向 bind mount。docker.sock mount 在 Hermes 移除後已拿掉。
+- `docker-compose.yml`:PR #19 加了 `security_opt: [no-new-privileges:true]` + `read_only: true` + 必要 tmpfs,但 PR #25 compose 切換時未採用(npm/bun/git 需要寫 cache 到 $HOME,`read_only` 會 fail)。workspace 已經在 bind mount `/var/lib/alpha-lab/dagu/data/dag-runs/` 上;將來重新 enable hardening 需要把 $HOME/cache 也指向 bind mount。docker.sock mount 在 Hermes 移除後已拿掉。
 - `package.json` 移除 dead dep `zod`(沒有任何 import site),跟著 `bun.lock` 一起更新;`bun test automation/tests` 13/13 pass。
 
 ### 2026-07-14 — Hermes 移除 + research-agent.ts (PR #20)
