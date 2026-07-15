@@ -209,6 +209,8 @@ function buildPrompt(event: SignalEventRow): string {
     "   investmentClaim MUST be the unquoted YAML boolean true or false,",
     "   exactly `investmentClaim: true` or `investmentClaim: false`, never",
     "   a quoted string.",
+    "   The body MUST include a `## 來源` heading followed by at least",
+    "   one URL list item; use the first sourceCitations URL there.",
     "   After the closing --- provide the article body in Markdown.",
     "   The CLI forwards your arguments verbatim — thesis, ticker,",
     "   direction, confidence, rationale, and sourceCitations must be",

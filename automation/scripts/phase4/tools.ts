@@ -25,22 +25,43 @@ import type {
 } from "@earendil-works/pi-agent-core";
 
 import type { HindsightClient } from "./hindsight.ts";
+import type { TwelveDataClient } from "./twelve-data.ts";
 
-function normalizeInvestmentClaim(markdown: string): string {
+// ---------------------------------------------------------------------------
+// Candidate normalization keeps the persisted markdown compatible with the
+// publisher's strict frontmatter and source-section contract.
+// ---------------------------------------------------------------------------
+
+function normalizeCandidateMarkdown(
+  markdown: string,
+  sourceUrl: string,
+): string {
   const opening = markdown.match(/^---\r?\n/);
   if (!opening) return markdown;
   const closingOffset = markdown.indexOf("\n---", opening[0].length);
   if (closingOffset < 0) return markdown;
   const frontmatter = markdown.slice(0, closingOffset);
-  const normalized = frontmatter.replace(
+  const normalizedFrontmatter = frontmatter.replace(
     /^investmentClaim:\s*(['"])(true|false)\1\s*$/m,
     "investmentClaim: $2",
   );
-  return normalized === frontmatter
-    ? markdown
-    : `${normalized}${markdown.slice(closingOffset)}`;
+  let normalized = `${normalizedFrontmatter}${markdown.slice(closingOffset)}`;
+  const bodyStart = normalized.indexOf("\n", closingOffset + 1) + 1;
+  const body = normalized.slice(bodyStart);
+  const heading = body.match(/^##\s*來源\s*$/m);
+  if (!heading) {
+    normalized = `${normalized.trimEnd()}\n\n## 來源\n\n- ${sourceUrl}\n`;
+  } else {
+    const headingOffset = body.indexOf(heading[0]);
+    const afterHeading = body.slice(headingOffset + heading[0].length);
+    if (!/^\s*[-*]\s+https?:\/\//m.test(afterHeading)) {
+      const insertAt = bodyStart + headingOffset + heading[0].length;
+      normalized = `${normalized.slice(0, insertAt)}\n\n- ${sourceUrl}${normalized.slice(insertAt)}`;
+    }
+  }
+  return normalized;
 }
-import type { TwelveDataClient } from "./twelve-data.ts";
+
 
 // ---------------------------------------------------------------------------
 // External surfaces — Hindsight and Twelve Data are injected so the
@@ -369,8 +390,9 @@ export function createResearchToolkit(ctx: ResearchToolContext): ResearchToolkit
             );
           }
         }
-        const candidateMarkdown = normalizeInvestmentClaim(
+        const candidateMarkdown = normalizeCandidateMarkdown(
           requireString(obj, "candidateMarkdown", "record_research"),
+          sourceCitations[0]!,
         );
         const input: RecordResearchInput = {
           eventId: ctx.eventId,

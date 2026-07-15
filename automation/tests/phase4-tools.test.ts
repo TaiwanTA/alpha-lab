@@ -244,6 +244,9 @@ describe("record_research gate", () => {
     expect(recordResearchCalls).toHaveLength(1);
     expect(recordResearchCalls[0]?.eventId).toBe("evt-1");
     expect(recordResearchCalls[0]?.candidateMarkdown).toContain("investmentClaim: true");
+    expect(recordResearchCalls[0]?.candidateMarkdown).toContain(
+      "## 來源\n\n- https://x.com/a/status/1",
+    );
     expect(result.details).toEqual({ id: "run-1" });
   });
 
