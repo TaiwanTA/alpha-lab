@@ -268,11 +268,22 @@ export const EventRecord = {
   ): Promise<string> {
     const id = crypto.randomUUID();
     await db`
-      INSERT INTO signal_events ${db({
-        id,
-        status: "active" as const,
-        ...input,
-      })}
+      INSERT INTO signal_events (
+        id, source_key, investor, signal_type, source_url, published_at,
+        content_hash, raw_content, payload, status, supersedes_event_id
+      ) VALUES (
+        ${id},
+        ${input.source_key},
+        ${input.investor},
+        ${input.signal_type},
+        ${input.source_url},
+        ${input.published_at},
+        ${input.content_hash},
+        ${input.raw_content},
+        ${input.payload},
+        ${"active"},
+        ${input.supersedes_event_id}
+      )
     `;
     return id;
   },
@@ -337,7 +348,23 @@ export const ResearchRun = {
   ): Promise<string> {
     const id = crypto.randomUUID();
     await db`
-      INSERT INTO research_runs ${db({ id, ...input })}
+      INSERT INTO research_runs (
+        id, event_id, model, prompt_version, thesis, ticker, direction,
+        confidence, rationale, source_citations, candidate_markdown, status
+      ) VALUES (
+        ${id},
+        ${input.event_id},
+        ${input.model},
+        ${input.prompt_version},
+        ${input.thesis},
+        ${input.ticker},
+        ${input.direction},
+        ${input.confidence},
+        ${input.rationale},
+        ${input.source_citations},
+        ${input.candidate_markdown},
+        ${input.status}
+      )
     `;
     return id;
   },
@@ -553,11 +580,21 @@ export const PaperBet = {
   ): Promise<string> {
     const id = crypto.randomUUID();
     await db`
-      INSERT INTO paper_bets ${db({
-        id,
-        status: "open" as const,
-        ...input,
-      })}
+      INSERT INTO paper_bets (
+        id, research_run_id, event_id, ticker, direction, confidence,
+        entry_session_date, entry_price, entry_price_source, status
+      ) VALUES (
+        ${id},
+        ${input.research_run_id},
+        ${input.event_id},
+        ${input.ticker},
+        ${input.direction},
+        ${input.confidence},
+        ${input.entry_session_date},
+        ${input.entry_price},
+        ${input.entry_price_source},
+        ${"open"}
+      )
     `;
     return id;
   },
@@ -576,11 +613,21 @@ export const PaperBet = {
       `;
       if (claims.length !== 1) throw new Error("paper-bet opening claim is not owned");
       await transaction`
-        INSERT INTO paper_bets ${transaction({
-          id,
-          status: "open" as const,
-          ...input,
-        })}
+        INSERT INTO paper_bets (
+          id, research_run_id, event_id, ticker, direction, confidence,
+          entry_session_date, entry_price, entry_price_source, status
+        ) VALUES (
+          ${id},
+          ${input.research_run_id},
+          ${input.event_id},
+          ${input.ticker},
+          ${input.direction},
+          ${input.confidence},
+          ${input.entry_session_date},
+          ${input.entry_price},
+          ${input.entry_price_source},
+          ${"open"}
+        )
       `;
       await transaction`
         DELETE FROM paper_bet_opening_claims
@@ -598,11 +645,18 @@ export const PaperBet = {
     const id = crypto.randomUUID();
     await db.begin(async (transaction) => {
       await transaction`
-        INSERT INTO bet_outcomes ${transaction({
-          id,
-          paper_bet_id: paperBetId,
-          ...input,
-        })}
+        INSERT INTO bet_outcomes (
+          id, paper_bet_id, exit_price, exit_price_source, return_pct,
+          outcome, reason
+        ) VALUES (
+          ${id},
+          ${paperBetId},
+          ${input.exit_price},
+          ${input.exit_price_source},
+          ${input.return_pct},
+          ${input.outcome},
+          ${input.reason}
+        )
       `;
       await transaction`
         UPDATE paper_bets
@@ -636,7 +690,18 @@ export const BetOutcome = {
   ): Promise<string> {
     const id = crypto.randomUUID();
     await db`
-      INSERT INTO bet_outcomes ${db({ id, ...input })}
+      INSERT INTO bet_outcomes (
+        id, paper_bet_id, exit_price, exit_price_source, return_pct,
+        outcome, reason
+      ) VALUES (
+        ${id},
+        ${input.paper_bet_id},
+        ${input.exit_price},
+        ${input.exit_price_source},
+        ${input.return_pct},
+        ${input.outcome},
+        ${input.reason}
+      )
     `;
     return id;
   },
