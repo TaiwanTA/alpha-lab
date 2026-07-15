@@ -41,6 +41,19 @@
 #   - 沒 named volume dags — dags 改走 bind mount 子目錄
 #     /var/lib/alpha-lab/dagu/dags,跟 production 一致,
 #     不需要 path migration
+#   - extra_hosts: host.docker.internal:host-gateway 拿掉 —
+#     DATABASE_URL 改成走容器 DNS alias `alpha-lab-postgres`,
+#     所以 dagu 必須跟 postgres 同 network。下面在 dagu
+#     service 加了 `research_default` external network。
+#
+# Networks:
+#   - hindsight-net:本 stack 自有,連 Hindsight
+#     (`hindsight-hindsight-1:8888`)。dags-sync 也在這。
+#   - research_default:由另一個 compose project 擁有,
+#     `alpha-lab-postgres` 在裡面。Dagu 為了連 postgres
+#     也 join 這個 external network(用 container name
+#     `alpha-lab-postgres` 當 DATABASE_URL host)。dags-sync
+#     不需要(dags-sync 只跟 GitHub 用 SSH 講話)。
 
 name: alpha-lab-dagu
 
@@ -66,13 +79,6 @@ services:
       # 不在 container 內 — DAG step 用 `. /etc/alpha-lab/dagu.env`
       # 需要另掛 bind mount (見下方 volumes)。
       - /etc/alpha-lab/dagu.env
-    # host.docker.internal → host gateway IP so the dagu container can
-    # reach the host-loopback PostgreSQL binding via DATABASE_URL.
-    # 127.0.0.1 inside the container would resolve to the container's
-    # own loopback, not the host. dags-sync sidecar does NOT need this
-    # because it only talks to GitHub over SSH.
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
     environment:
       # PUID/PGID 讓 entrypoint.sh groupmod/usermod + sudo 降權。
       PUID: "999"
@@ -102,7 +108,12 @@ services:
       # 需要這個 bind mount。
       - /etc/alpha-lab/dagu.env:/etc/alpha-lab/dagu.env:ro
     networks:
+      # 兩個 network 都要 join — hindsight-net 連 Hindsight,
+      # research_default 連 postgres(透過容器 DNS alias
+      # `alpha-lab-postgres`)。DB 連線不再用
+      # host.docker.internal。
       - hindsight-net
+      - research_default
 
   dags-sync:
     # 用 repo 內 Dockerfile.dags-sync build image:USER 999:982、
@@ -110,6 +121,8 @@ services:
     # 階段裝好。改 dags-sync.sh / Dockerfile 需要
     # `docker compose build` 重 build;setup-vm.sh 跟
     # deploy-dagu.sh 都會跑。
+    # 注意:dags-sync 不 join research_default — 它只跟
+    # GitHub 用 SSH 講話,不需要接 DB。
     build:
       context: .
       dockerfile: Dockerfile.dags-sync
@@ -140,3 +153,6 @@ networks:
   hindsight-net:
     external: true
     name: hindsight-net
+  research_default:
+    external: true
+    name: research_default

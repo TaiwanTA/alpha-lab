@@ -155,11 +155,13 @@ else
         fi
         # Phase 4 event-ledger runtime contract — Phase 4
         # workers (capture / research / settlement) read these.
-        # DATABASE_URL 必須用 host.docker.internal,不能是
-        # 127.0.0.1 — 容器內 127.0.0.1 是 container 自己的
-        # loopback,連不到 host PostgreSQL。docker-compose
-        # 的 dagu service 已加 extra_hosts 把 host.docker.internal
-        # 指向 host-gateway。
+        # DATABASE_URL 必須用容器 DNS alias `alpha-lab-postgres`,
+        # 不是 host.docker.internal — dagu container 已 join
+        # `research_default` external docker network(見
+        # deploy/dagu/docker-compose.yml 的 dagu.networks),
+        # 所以容器內 alpha-lab-postgres 解析到 postgres
+        # container 的 IP。docker-compose 不再需要
+        # extra_hosts:host-gateway。
         # 一般 secret
         # < /dev/tty:while 迴圈 stdin 被 template file 佔用,
         # read 需要從 terminal 讀使用者輸入

@@ -55,8 +55,12 @@ export async function applyMigration(): Promise<void> {
     import.meta.url,
   ).pathname;
   await db.file(path);
+  // Use parameterized values — Bun's `db(obj)` interpolation inside a
+  // tagged template is unsafe on bun 1.3.14 (verified empirically: the
+  // unquoted string spills into SQL text, and Postgres rejected the
+  // non-integer literal against `version text`/numeric columns).
   await db`
-    INSERT INTO schema_migrations ${db({ version: MIGRATION_VERSION })}
+    INSERT INTO schema_migrations (version) VALUES (${MIGRATION_VERSION})
     ON CONFLICT (version) DO NOTHING
   `;
 }
