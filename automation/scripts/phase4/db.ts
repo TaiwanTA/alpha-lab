@@ -280,6 +280,7 @@ export const EventRecord = {
         ${input.published_at},
         ${input.content_hash},
         ${input.raw_content},
+        ${input.payload},
         ${input.status ?? "active"},
         ${input.supersedes_event_id}
       )
