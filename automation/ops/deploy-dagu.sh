@@ -125,7 +125,7 @@ code=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8080/)
 if [ "${code}" != "200" ]; then
   echo "    ERROR: dagu http ${code}"
   echo "    dagu container tail (debug):"
-  sudo docker logs --tail 30 alpha-lab-dagu 2>&1 | sed 's/^/      /'
+  sudo docker logs --tail 30 alpha-lab-dagu 2>&1 | sed "s/^/      /"
   exit 1
 fi
 echo "    dagu http: 200"
