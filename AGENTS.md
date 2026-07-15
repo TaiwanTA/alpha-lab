@@ -14,33 +14,32 @@
     暫不刪
   - `automation/` — v3 dagu runtime (DAGs + 部署腳本
     + research-agent.ts + dags-sync sidecar + setup-vm.sh
-    + docker-compose.yml)
+    + docker-compose.yml + Dockerfile.dagu + Dockerfile.dags-sync
+    + alpha-lab-dagu.service)
   - `blog/` — 對外發表,已上線(Cloudflare Pages auto-deploy from git push)
-- **VM** — 部署目標,v2 + v3 兩套 codebase 並存
+- **VM** — 部署目標,v3 compose stack 跑 production(v2 已除役)
   - `gcloud compute ssh --zone "asia-east1-b" "alpha-lab" --project "g6online-352310"`
-  - v2 路徑:`/opt/alpha-lab/research/`(用
-    `research/scripts/deploy-vm.sh` 部署;systemd
-    `alpha-lab-workflow.service` + 4 個 timer
-    `alpha-lab-{a,b,d-pre,d-post}.timer` 仍在 active)
+  - v2 路徑:`/opt/alpha-lab/research/`(已除役;
+    systemd units 已 `disable --now`)
   - v3 路徑:`/opt/alpha-lab/automation/`(用
     `automation/ops/deploy-dagu.sh` 部署;systemd
-    `alpha-lab-dagu.service` 跑 dagu runtime,目前仍是
-    **native binary** mode 跑 production)
+    `alpha-lab-dagu.service` 跑 docker compose stack
+    — dagu 跟 dags-sync 兩個 container,compose
+    wrapper unit,已切換為 production)
   - bun 在 `~/.bun/bin`(沒加進系統 PATH,跑命令前 `export PATH=$HOME/.bun/bin:$PATH`;systemd unit 內有顯式 `Environment="PATH=..."` cover)
   - Postgres 跑在 docker container `alpha-lab-postgres`,绑 `127.0.0.1:5432`
   - Hindsight 跑在 docker container `hermes-hindsight-1`(沿用 hermes 既有 instance),绑 `127.0.0.1:8888`;bank ID `alpha-lab`
-  - **v3 待切換**(本 PR follow-up):v3 dagu 從 native binary
-    切到 docker compose 模式(具體切換流程見 commit
-    message 跟 handoff)。切換後 dagu 跟 dags-sync 變成
-    docker container 跑,systemd unit
-    `alpha-lab-dagu.service`(v3)變成 compose wrapper。v3
-    切換且 end-to-end DAG 跑通後,視為 v3 production 完成。
-  - **v2 待除役**(v3 切換且驗證完成後):v2 systemd units
+  - **v3 切換已完成**(PR #25):v3 dagu 從 native binary
+    切到 docker compose 模式。dagu 跟 dags-sync 為兩個
+    docker container,systemd unit `alpha-lab-dagu.service`
+    變成 compose wrapper。VM e2e 全綠:fixture-research DAG
+    在 compose stack 上端到端跑通,成功 push blog post 到
+    main。v3 production 完成。
+  - **v2 已除役**:v2 systemd units 已 `disable --now`:
     `alpha-lab-workflow.service` + 4 個 timer
-    `alpha-lab-{a,b,d-pre,d-post}.timer` 待手動
-    `systemctl disable --now` 除役,連同
-    `/opt/alpha-lab/research/` 目錄跟 `research/` repo
-    程式碼一併清掉(具體刪除時機由 user 確認)。
+    `alpha-lab-{a,b,d-pre,d-post}.timer` 全部 inactive +
+    disabled。`/opt/alpha-lab/research/` 目錄跟 `research/`
+    repo 程式碼暫保留(等 user 確認後清掉)。
 
 ## 路徑規則
 - 部署流程(兩個 codebase 各自):
@@ -103,15 +102,21 @@
      (commit `cc8c035`)。
 4. ⏳ Phase 4:真實工作(投資人清單最後才決定 + 模擬下注 + 反思校準)
 
-5. ✅ Dagu runtime 切到 docker compose 模式(可重現性):新增
+5. ✅ Dagu runtime 切到 docker compose 模式(PR #25):新增
    `automation/deploy/dagu/dags-sync.sh`(sidecar 從 main 拉
-   automation/dags/ 到 named volume)跟
+   automation/dags/ 到 dags_dir bind mount 子目錄)跟
    `automation/scripts/setup-vm.sh`(在新 VM 一鍵重現
-   dagu runtime);改 `admin.yaml` 把 `dags_dir` 拆出來到
-   `/var/lib/alpha-lab/dagu-dags` 避免跟 host bind mount
-   衝突;改 `ops/deploy-dagu.sh` 用 `systemctl reload`
-   (走 ExecReload)取代直接 `cp dags` + `systemctl restart`。
-   **VM 實際切換留 follow-up PR**(本 PR 只備齊工具)。
+   dagu runtime);自建 `automation/deploy/dagu/Dockerfile.dagu`
+   (官方 dagu:2.10.7 + git/node22/bun/ssh/rsync)跟
+   `Dockerfile.dags-sync`(alpine + git/openssh/rsync);
+   `admin.yaml` `dags_dir` 維持 `/var/lib/alpha-lab/dagu/dags`
+   (bind mount 子目錄,跟 native 模式一致,不拆 named volume);
+   `ops/deploy-dagu.sh` 用 `systemctl reload`(走 ExecReload =
+   `docker compose up -d --force-recreate`)取代直接 `cp dags` +
+   `systemctl restart`。VM 切換已完成:systemd unit 改為 compose
+   wrapper,dagu + dags-sync 兩個 container 跑 production,
+   e2e 全綠(fixture-research DAG 成功 push blog post 到 main,
+   commit `1918f48`)。
 
 > 不要搶進。做一步停一步等 user 確認。
 > 不要自認階段完成:必須 user 確認才算階段結,特別是風格這類主觀判定。
@@ -166,16 +171,24 @@ candidate 組裝)。
 - **`git_sync.enabled` enable**:見 admin.yaml migration
   checklist(需要先確認 VM dags_dir 跟 main 一致,再
   `enabled: true` + `auto_sync.enabled: true` + restart)。
-- **docker-compose 切到 active**:需要把 workspace path 從
-  `/opt/alpha-lab/automation` 移到 bind mount 上(`:ro` +
-  `read_only: true` 下 `mkdir ./workspace` 會 fail)。
-  docker.sock mount 原本為了 `docker exec hermes-hermes-1`;
-  Hermes 移除後可以評估是否仍需要。
-- **v2 systemd units**:5 個 v2 unit(`alpha-lab-workflow.service`
-  + 4 個 timer)仍在 active,等 v3 完全驗證後退役。
-- **~~VM e2e~~**:已完成 — fixture-research DAG 全步驟
-  全綠(run `033pEGNOXMR7nuXYwROzwa`,1m32s)。push step
-  改用 SSH deploy key + repo ruleset bypass(PR #21)。
+- **~~docker-compose 切到 active~~**:已解決 — PR #25 切換
+  完成。compose stack (dagu + dags-sync) 跑 production,
+  systemd unit 改為 compose wrapper。workspace 寫入
+  `/var/lib/alpha-lab/dagu/data/dag-runs/`(bind mount,
+  非 `:ro` 的 automation dir),`read_only` hardening 在
+  PR #19 提出但 compose 模式未採用(需要 npm/bun/git 寫
+  cache)。docker.sock mount 已移除(Hermes 移除後不需要)。
+- **~~v2 systemd units~~**:已除役 — 5 個 v2 unit
+  (`alpha-lab-workflow.service` + 4 個 timer)已
+  `disable --now`,全部 inactive + disabled。
+  `/opt/alpha-lab/research/` 跟 `research/` 程式碼暫保留。
+- **~~VM e2e~~**:已完成 —
+  native 模式:fixture-research DAG 全步驟全綠
+  (run `033pEGNOXMR7nuXYwROzwa`,1m32s;PR #21)。
+  compose 模式:fixture-research DAG 在 compose stack 上
+  端到端跑通(push blog post 到 main,commit `1918f48`)。
   LLM env vars (`LLM_API_KEY` / `LLM_MODEL` /
-  `LLM_BASE_URL`)已加入 `/etc/alpha-lab/dagu.env`
+  `LLM_BASE_URL`)在 `/etc/alpha-lab/dagu.env`
   (MiniMax native API, key from backup .env)。
+  GitHub ruleset:org-level (6159190) + repo-level
+  (18699827) 都已加 DeployKey bypass (always mode)。
