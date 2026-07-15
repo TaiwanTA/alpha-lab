@@ -1,8 +1,8 @@
 # 子 DAG,由 `fixture-research` 在 candidate 產出後呼叫。
-# push 目標是 `rebuild/integrate` (不是 main),這樣整個 round
-# trip 留在 integration 分支上,等使用者 review v3 PR。
-# `rebuild/integrate` merge 到 main 之後,把這裡的 push ref
-# 改回 `main`。
+# push 目標是 `main`,用 SSH deploy key (GitHub ruleset
+# DeployKey bypass)。Prerequisites:ruleset 18699827
+# (repo-level) + 6159190 (org-level) 都已加 DeployKey
+# bypass (always mode)。
 #
 # 已驗證 Dagu v2.10.7 語法:
 #   - `${env.NAME}` 是唯一能解析 process env 變數的 namespace。
@@ -16,15 +16,15 @@
 #   - `runtime_sha` (產生 candidate 的 commit SHA)
 #
 # 流程:
-#   1. 重新 checkout `rebuild/integrate` 到一個新的 worktree
+#   1. 重新 checkout `main` 到一個新的 worktree
 #      (絕對不是產出 candidate 的那個)
 #   2. 把 candidate 放到新 worktree
 #   3. 跑純函式的 draft publisher (本輪加了 CLI 入口 ——
 #      見 scripts/publish-draft.ts)
 #   4. Astro `npm ci` / `npm run lint` / `npm run build`
 #   5. 決定論的 diff-count gate (恰好一個新增的 Markdown 檔)
-#   6. 一次 `git commit` + `git push` 到 `rebuild/integrate`,
-#      用 `GIT_READ_TOKEN` (走 askpass helper,不嵌在 URL 裡)
+#   6. 一次 `git commit` + `git push` 到 `main`,
+#      用 SSH deploy key (見 push step 的 GIT_SSH_COMMAND)
 #
 # 不會跑父 worktree 的任何 script;這裡的 checkout 跟父的
 # `workspace/app` 完全獨立。

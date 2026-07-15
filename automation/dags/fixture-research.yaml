@@ -16,18 +16,24 @@
 #   - 一次 LLM research agent (retain + recall + LLM call + candidate 組裝)
 #   - 一次同步的 `blog-publish` 子 DAG 呼叫
 #
-# VM 上的 runtime topology:
-#   - dagu 是 systemd service (alpha-lab-dagu user), 跑在 host
-#     上 (不在 Docker container 裡)。bun 在 ~/.bun/bin。
-#   - Hindsight 走 `http://127.0.0.1:8888` (host loopback)。
-#   - research-agent.ts 是 self-contained TypeScript, 直接用 fetch
-#     呼叫 LLM API + Hindsight API, 不需要 Docker container。
-#     (先前的 hermes-call.sh 用 docker run 跑 Hermes 容器, 但有
-#     UID mismatch + Hindsight "Server disconnected" 問題; v3 直接
-#     在 host 上跑, 省掉所有容器層。)
+# VM 上的 runtime topology (compose 模式):
+#   - dagu 跑在 docker container `alpha-lab-dagu` (image
+#     alpha-lab-dagu:local, 自建 Dockerfile.dagu = 官方
+#     dagu:2.10.7 + git/node22/bun/ssh/rsync)。PUID/PGID
+#     降權到 999:982 (host alpha-lab-dagu user)。
+#   - dags-sync sidecar container `alpha-lab-dags-sync`
+#     每 5 分鐘從 main 拉 automation/dags/ 同步到 dags_dir。
+#   - Hindsight 跑在 docker container `hindsight-hindsight-1`,
+#     容器內走 `http://hindsight-hindsight-1:8888` (compose
+#     environment 覆蓋 dagu.env 的 host-loopback URL)。
+#   - research-agent.ts 是 self-contained TypeScript, 在 dagu
+#     container 內直接用 fetch 呼叫 LLM API + Hindsight API,
+#     不需要額外的 Docker 容器。
 #
-# 環境變數:LLM_* 從 /etc/alpha-lab/dagu.env source 進來, 也透過
-# env: section 從 process env 傳入。HINDSIGHT_* 同理。
+# 環境變數:LLM_* + HINDSIGHT_* 從 /etc/alpha-lab/dagu.env
+# (compose env_file) 注入 process env,dagu 透過頂層 env:
+# block 用 ${NAME} import 到 dagu env scope,step 內用
+# ${env.NAME} 讀取。
 
 artifacts:
   enabled: true

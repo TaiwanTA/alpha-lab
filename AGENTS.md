@@ -8,10 +8,7 @@
 - 反思產出、校準判斷、模擬下注(Phase 4)
 
 ## 兩個環境
-- **local workspace** — commit 跟 dev 用,看 `research/AGENTS.md` 跟 `blog/AGENTS.md`
-  - `research/` — v2 pipeline 程式碼 (workflow server + raw
-    + tests);已被 v3 取代但 v2 部署仍在 VM 上跑,程式碼
-    暫不刪
+- **local workspace** — commit 跟 dev 用,看 `blog/AGENTS.md`
   - `automation/` — v3 dagu runtime (DAGs + 部署腳本
     + research-agent.ts + dags-sync sidecar + setup-vm.sh
     + docker-compose.yml + Dockerfile.dagu + Dockerfile.dags-sync
@@ -42,19 +39,13 @@
     repo 程式碼暫保留(等 user 確認後清掉)。
 
 ## 路徑規則
-- 部署流程(兩個 codebase 各自):
-  - **v2 research**:`commit 到 main → 推 GitHub → 在 local 跑
-    `cd research && ./scripts/deploy-vm.sh``(script 自動 tar
-    + scp + 解開 + 復原 .env + bun install + migrate +
-    workflow:setup + workflow:build + patch systemd unit +
-    restart server + verify /health)
-  - **v3 automation**:`commit 到 main → 推 GitHub → 在 local
-    跑 `cd automation && bash ops/deploy-dagu.sh``(script
-    自動 tar + scp + 解開 /opt/alpha-lab/automation + 部署
-    admin.yaml 到 /var/lib/alpha-lab/dagu/admin.yaml +
-    `systemctl reload alpha-lab-dagu.service` (ExecReload =
-    `docker compose ... up -d --force-recreate`)+ verify
-    systemd active / 兩個 container running / dagu http 200)
+- 部署流程(v3 automation):commit 到 main → 推 GitHub → 在 local
+  跑 `cd automation && bash ops/deploy-dagu.sh`(script 自動 tar
+  + scp + 解開 /opt/alpha-lab/automation + 部署 admin.yaml 到
+  /var/lib/alpha-lab/dagu/admin.yaml + systemctl reload
+  alpha-lab-dagu.service (ExecReload = docker compose
+  up -d --force-recreate) + verify systemd active / 兩個
+  container running / dagu http 200)
 - 新 VM 設置:用一般 user (非 root) 跑 `cd
   /opt/alpha-lab/automation && bash scripts/setup-vm.sh`
   (互動讀 SSH deploy key 來源 / secrets 寫入
@@ -144,8 +135,11 @@
 - `fixture-research.yaml` / `blog-publish.yaml` 的 checkout step 修 env passthrough bug:dagu 2.10.7 step 子進程不會 inherit systemd `EnvironmentFile` 到 step subprocess,需要 `env: GIT_READ_TOKEN: ${env.GIT_READ_TOKEN}` block。
 - `blog-publish.yaml` diff gate 修正:`git add -- blog/src/content/blog` → `git add -- 'blog/src/content/blog/*.md'`,避免 build artifact (`package-lock.json`、`.astro/`、`dist/`) 被偷偷 stage 進來。
 - `deploy-dagu.sh` chmod 用 nullglob guard,`scripts/*.sh` 或 `ops/*.sh` 空目錄不會 abort deploy。
-- `docker-compose.yml`:加 `security_opt: [no-new-privileges:true]` + `read_only: true` + 必要 tmpfs;docker.sock mount 帶來的 host-root 等價風險是 structural limit(為了 `docker exec hermes-hermes-1 ...` 不能拿掉),只能用 best-effort mitigation。**注意**:`/opt/alpha-lab/automation` host bind mount 是 `:ro`,加上 `read_only: true` 之後 `mkdir ./workspace` 仍會 fail;切到 docker-compose 部署前需要把 workspace 移到 bind mount 上(例如 `/var/lib/alpha-lab/dagu/workspace`)。
+- `docker-compose.yml`:PR #19 加了 `security_opt: [no-new-privileges:true]` + `read_only: true` + 必要 tmpfs,但 PR #25 compose 切換時未採用(npm/bun/git 需要寫 cache 到 $HOME,`read_only` 會 fail)。dagu state(data/logs/workspaces/dag-runs)全在 bind mount `/var/lib/alpha-lab/dagu/` 上;將來重新 enable hardening 需要把 $HOME/cache 也指向 bind mount。docker.sock mount 在 Hermes 移除後已拿掉。
 - `package.json` 移除 dead dep `zod`(沒有任何 import site),跟著 `bun.lock` 一起更新;`bun test automation/tests` 13/13 pass。
+
+### 2026-07-14 — Hermes 移除 + research-agent.ts (PR #20)
+
 VM e2e step 6-7 原先失敗(Hermes 容器 UID mismatch +
 Hindsight "Server disconnected")。Root cause:Hermes 容器內
 `write_file` 走 `/workspace/.hermes-tmp.X` 暫存,但 hermes
@@ -159,36 +153,45 @@ MiniMax-M3 模型,同一個 Hindsight endpoint,零容器層。把
 `hermes-call.sh` / `hindsight-retain.sh` / `hindsight-recall.sh`
 移到 `.delete/`;DAG 從 7 步(retain → recall → hermes)簡化
 為 6 步(一步 `research` 完成 retain + recall + LLM call +
-candidate 組裝)。
+candidate 組裝)。VM e2e 全綠。
 
-### 待辦(VM)
+### 2026-07-14 — push step 改用 SSH deploy key (PR #21)
 
-- **~~Hermes write guard / UID mismatch~~**:已解決 — Hermes
-  已移除,不再使用 Docker 容器。
-- **~~Hindsight recall 在容器內 "Server disconnected"~~**:已
-  解決 — research-agent.ts 直接在 host 上呼叫 Hindsight
-  (`127.0.0.1:8888`),不跨容器。
-- **`git_sync.enabled` enable**:見 admin.yaml migration
-  checklist(需要先確認 VM dags_dir 跟 main 一致,再
-  `enabled: true` + `auto_sync.enabled: true` + restart)。
-- **~~docker-compose 切到 active~~**:已解決 — PR #25 切換
-  完成。compose stack (dagu + dags-sync) 跑 production,
-  systemd unit 改為 compose wrapper。workspace 寫入
-  `/var/lib/alpha-lab/dagu/data/dag-runs/`(bind mount,
-  非 `:ro` 的 automation dir),`read_only` hardening 在
-  PR #19 提出但 compose 模式未採用(需要 npm/bun/git 寫
-  cache)。docker.sock mount 已移除(Hermes 移除後不需要)。
-- **~~v2 systemd units~~**:已除役 — 5 個 v2 unit
-  (`alpha-lab-workflow.service` + 4 個 timer)已
-  `disable --now`,全部 inactive + disabled。
-  `/opt/alpha-lab/research/` 跟 `research/` 程式碼暫保留。
-- **~~VM e2e~~**:已完成 —
-  native 模式:fixture-research DAG 全步驟全綠
-  (run `033pEGNOXMR7nuXYwROzwa`,1m32s;PR #21)。
-  compose 模式:fixture-research DAG 在 compose stack 上
-  端到端跑通(push blog post 到 main,commit `1918f48`)。
-  LLM env vars (`LLM_API_KEY` / `LLM_MODEL` /
-  `LLM_BASE_URL`)在 `/etc/alpha-lab/dagu.env`
-  (MiniMax native API, key from backup .env)。
-  GitHub ruleset:org-level (6159190) + repo-level
-  (18699827) 都已加 DeployKey bypass (always mode)。
+dagu `${env.X}` 截斷長 token + repo ruleset 擋 direct push。
+改用 SSH deploy key + repo-level ruleset (18699827) DeployKey
+bypass。fixture DAG 端到端全綠,自動 push blog post 到 main
+(commit `cc8c035`)。
+
+### 2026-07-15 — dagu runtime 切到 docker compose (PR #25)
+
+systemd unit 從 native binary 改為 compose wrapper
+(`alpha-lab-dagu.service`)。dagu + dags-sync 兩個 container 跑
+production。自建 `Dockerfile.dagu`(官方 dagu:2.10.7 +
+git/node22/bun/ssh/rsync)+ `Dockerfile.dags-sync`(alpine +
+git/openssh/rsync)。DAG YAML 加 `shell: ["bash", "-e"]` +
+頂層 `env:` block(`${NAME}` import host env vars 到 dagu env
+scope)。
+
+e2e 全綠:fixture-research DAG 在 compose stack 上端到端跑通,
+成功 push blog post 到 main(commit `1918f48`)。LLM env vars
+(`LLM_API_KEY` / `LLM_MODEL` / `LLM_BASE_URL`)在
+`/etc/alpha-lab/dagu.env`(MiniMax native API)。
+
+### 2026-07-15 — compose 切換收尾 + dags-sync fix + v2 除役 (PR #26)
+
+- **PR #26**:`dags-sync.sh` `git pull` → `git fetch --depth 1` +
+  `git reset --hard origin/<branch>`。shallow `--depth 1` clone
+  下 git pull 遇到 force-push 會因找不到共同祖先而 fail;
+  fetch + reset --hard 不需要 common ancestor,直接強制對齊
+  remote state。同 PR 更新 AGENTS.md(v3 切換完成 + v2 除役
+  標記)。v2 systemd units 除役:5 個 v2 unit 全部
+  `disable --now`,inactive + disabled。
+- **PR #27**:`deploy-dagu.sh` step 6 verify 的 `sed 's/^/      /'`
+  單引號被外層 `--command '...'` 吃掉 → 改用雙引號。
+- **GitHub ruleset**:org-level (6159190, TaiwanTA "default")
+  由 user 加 DeployKey bypass (always mode)。repo-level
+  (18699827) 既有 DeployKey bypass 仍有效。兩個 ruleset 都只
+  target `~DEFAULT_BRANCH` (main)。
+- `git_sync.enabled` 維持 false:dagu v2.10.7 git_sync
+  interval tick 不觸發(已驗證限制)。DAG 同步由外部
+  dags-sync sidecar 處理,跟 dagu 內部 git_sync 解耦。
