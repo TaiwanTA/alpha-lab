@@ -82,8 +82,7 @@ steps:
     working_dir: ./workspace/publish
     run: |
       set -euo pipefail
-      cd "${WORKDIR}/automation"
-      bun run scripts/materialize-research-candidate.ts \
+      bun /opt/alpha-lab/automation/scripts/materialize-research-candidate.ts \
         --research-run-id "${params.research_run_id}" \
         --owner "${params.claim_owner}" \
         --output "${WORKDIR}/candidate.md"
@@ -96,9 +95,7 @@ steps:
     working_dir: ./workspace/publish
     run: |
       set -euo pipefail
-      cd "${WORKDIR}/automation"
-      bun install --frozen-lockfile
-      bun run scripts/publish-draft.ts \
+      bun /opt/alpha-lab/automation/scripts/publish-draft.ts \
         --candidate "${WORKDIR}/candidate.md" \
         --blog-dir "${WORKDIR}/blog" \
         --runtime-sha "${params.runtime_sha:-$(git -C "${WORKDIR}" rev-parse HEAD)}"
@@ -153,12 +150,11 @@ steps:
     run: |
       set -euo pipefail
       export GIT_SSH_COMMAND="ssh -i /var/lib/alpha-lab/dagu/.ssh/id_ed25519 -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new"
-      cd "${WORKDIR}/automation"
       # Persist pushed before touching the remote. If this fails, the remote
       # is unchanged and the failure handler safely releases claimed.
-      bun run scripts/publish-next-research.ts --mark-pushed "${params.research_run_id}" --owner "${params.claim_owner}"
+      bun /opt/alpha-lab/automation/scripts/publish-next-research.ts --mark-pushed "${params.research_run_id}" --owner "${params.claim_owner}"
       if ! git -C "${WORKDIR}" push "git@github.com:TaiwanTA/alpha-lab.git" HEAD:main; then
-        bun run scripts/publish-next-research.ts --revert-pushed "${params.research_run_id}" --owner "${params.claim_owner}"
+        bun /opt/alpha-lab/automation/scripts/publish-next-research.ts --revert-pushed "${params.research_run_id}" --owner "${params.claim_owner}"
         exit 128
       fi
       echo pushed
