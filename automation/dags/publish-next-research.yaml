@@ -61,8 +61,10 @@ steps:
         exit 0
       fi
       if [ "$PUBLICATION_STATUS" != "pushed" ] && [ "$PUBLICATION_STATUS" != "published" ]; then
-        dagu start /var/lib/alpha-lab/dagu/dags/blog-publish.yaml \
-          --params "research_run_id=$RESEARCH_RUN_ID,claim_owner=$CLAIM_OWNER,runtime_sha="
+        dagu start /var/lib/alpha-lab/dagu/dags/blog-publish.yaml -- \
+          "research_run_id=$RESEARCH_RUN_ID" \
+          "claim_owner=$CLAIM_OWNER" \
+          "runtime_sha="
       fi
       bun run /opt/alpha-lab/automation/scripts/publish-next-research.ts --mark-published "$RESEARCH_RUN_ID" --owner "$CLAIM_OWNER"
     env:
