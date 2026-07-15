@@ -61,8 +61,13 @@ sync_once() {
       return 1
     }
   else
-    git -C "${CLONE_DIR}" pull --depth 1 origin "${BRANCH}" || {
-      log "ERROR: git pull failed (will retry in ${INTERVAL}s)"
+    # --ff-only: 如果 shallow clone 跟 remote 有分歧 (例如
+    # remote 被 force-push),git pull 會報 "Need to specify
+    # how to reconcile divergent branches" 並卡住。--ff-only
+    # 讓它直接 fail,然後下面的 rm -rf 觸發 next sync 重新 clone。
+    git -C "${CLONE_DIR}" pull --ff-only --depth 1 origin "${BRANCH}" || {
+      log "ERROR: git pull failed, wiping clone for fresh retry"
+      rm -rf "${CLONE_DIR}"
       return 1
     }
   fi
