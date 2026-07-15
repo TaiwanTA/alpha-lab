@@ -7,7 +7,7 @@
 # 第一次啟動:`git clone --branch <branch> --filter=blob:none
 # --sparse <repo> /tmp/repo`,然後 `git sparse-checkout set
 # <path>`,最後把 `<path>` 內容 rsync 到 ${DAG_SYNC_TARGET}。
-# 之後每 ${DAG_SYNC_INTERVAL} 秒跑 `git pull && rsync`。
+# 之後每 ${DAG_SYNC_INTERVAL} 秒跑 `git fetch + reset --hard && rsync`。
 #
 # Auth:SSH deploy key (bind mount /home/alpha-lab-dagu/.ssh/
 # 進 container),GIT_SSH_COMMAND 已預先設 StrictHostKeyChecking
