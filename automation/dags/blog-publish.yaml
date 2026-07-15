@@ -95,10 +95,11 @@ steps:
     working_dir: ./workspace/publish
     run: |
       set -euo pipefail
+      RUNTIME_SHA="$(git -C "${WORKDIR}" rev-parse HEAD)"
       bun /opt/alpha-lab/automation/scripts/publish-draft.ts \
         --candidate "${WORKDIR}/candidate.md" \
         --blog-dir "${WORKDIR}/blog" \
-        --runtime-sha "${params.runtime_sha:-$(git -C "${WORKDIR}" rev-parse HEAD)}"
+        --runtime-sha "$RUNTIME_SHA"
     env:
 
   - id: site_lint_build
