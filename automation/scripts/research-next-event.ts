@@ -200,11 +200,14 @@ function buildPrompt(event: SignalEventRow): string {
     "5. Call record_research exactly once with the final thesis, ticker,",
     "   direction (long/short), confidence in [0,1], rationale,",
     "   sourceCitations (every URL you cite), and candidateMarkdown.",
+    "   candidateMarkdown MUST be a complete publishable blog post, not a",
+    "   bare analysis. It MUST start with YAML frontmatter delimited by ---",
+    "   lines containing non-empty title, date (YYYY-MM-DD), summary,",
+    "   status: draft, tags, investors, tickers, and investmentClaim.",
+    "   After the closing --- provide the article body in Markdown.",
     "   The CLI forwards your arguments verbatim — thesis, ticker,",
     "   direction, confidence, rationale, and sourceCitations must be",
     "   the values you intend, not reconstructed later.",
-    "",
-    "Do not call any other tool. Do not call record_research twice.",
   ].join("\n");
 }
 
