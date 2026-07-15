@@ -279,10 +279,16 @@ export const EventRecord = {
    *  can pick the same row (their FOR UPDATE SKIP LOCKED + status
    *  filter will skip it).
    *
-   *  The CTE also excludes events that already have an accepted
-   *  `research_runs` row, so a worker can never re-claim an event
-   *  whose research is already persisted (defence in depth alongside
-   *  the `research_runs_event_accepted_unique` partial index). */
+   *  The CTE also excludes events that already have an active
+   *  `research_runs` row (status IN ('accepted', 'processing')),
+   *  so a worker can never re-claim an event whose research is
+   *  already persisted OR in flight — defence in depth alongside
+   *  the `research_runs_event_active_unique` partial index. The
+   *  accepted-derived `processing` state is the transient claim
+   *  state owned by the next-stage worker (claimNextPending →
+   *  releaseToAccepted / final settlement); excluding it here
+   *  prevents a second `claimNextActive` from reactivating an
+   *  event that already has an in-flight research run. */
   async claimNextActive(): Promise<SignalEventRow | null> {
     const rows = await db`
       WITH next_active AS (
@@ -293,7 +299,7 @@ export const EventRecord = {
             SELECT 1
             FROM research_runs rr
             WHERE rr.event_id = signal_events.id
-              AND rr.status = 'accepted'
+              AND rr.status IN ('accepted', 'processing')
           )
         ORDER BY captured_at ASC
         FOR UPDATE SKIP LOCKED
@@ -332,15 +338,24 @@ export const ResearchRun = {
     return id;
   },
 
-  /** Returns true when an event already has an `accepted` research
-   *  run. Used by the research CLI to decide whether the claim should
-   *  be released back to `active` (rare — the partial unique index
-   *  also enforces this at the DB level) or marked `superseded`. */
-  async hasAcceptedRunForEvent(eventId: string): Promise<boolean> {
+  /** Returns true when an event already has an active research
+   *  run (status IN ('accepted', 'processing')). Used by the
+   *  research CLI's claim release path to decide whether the
+   *  event should be released back to `active` (rare — the
+   *  partial unique index also enforces this at the DB level)
+   *  or left alone for an operator / Task 4 sweeper. The
+   *  `processing` predicate is critical: a worker that called
+   *  `claimNextPending` to start paper-bet opening owns the
+   *  run; a second `claimNextActive` race must NOT release the
+   *  event back to `active` while that run is still in flight,
+   *  otherwise the partial index would see a transient gap and
+   *  a parallel retry could insert a second accepted run. */
+  async hasActiveRunForEvent(eventId: string): Promise<boolean> {
     const rows = await db`
       SELECT 1
       FROM research_runs
-      WHERE event_id = ${eventId} AND status = 'accepted'
+      WHERE event_id = ${eventId}
+        AND status IN ('accepted', 'processing')
       LIMIT 1
     `;
     return rows.length > 0;

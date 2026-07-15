@@ -92,15 +92,24 @@ CREATE INDEX IF NOT EXISTS signal_events_research_queue
   ON signal_events (captured_at)
   WHERE status = 'active';
 
--- Prevent duplicate accepted research_runs for the same event. The
--- research CLI claims an event atomically and persists exactly one
--- research_runs row; if a worker error releases the claim back to
--- 'active' and a retry re-claims the same event, this partial index
--- makes the second insert fail (rather than silently produce two
--- accepted research_runs rows).
-CREATE UNIQUE INDEX IF NOT EXISTS research_runs_event_accepted_unique
+-- Prevent a second active research_run row for the same event. "Active"
+-- means status IN ('accepted', 'processing') — the accepted-derived
+-- processing state is the transient claim state owned by one worker
+-- between `claimNextPending` and final settlement. The earlier
+-- `research_runs_event_accepted_unique` partial index only fired for
+-- status = 'accepted', so a worker that transitioned a row to
+-- `processing` left a window where a duplicate accepted insert could
+-- slip past the DB-level guard. This index covers both statuses so
+-- the constraint holds for the entire lifecycle of the run, and the
+-- `claim_next_active` CTE / `has_active_run_for_event` guard can
+-- safely use the same predicate for defence in depth.
+--
+-- Idempotency: the migration drops the earlier accepted-only name
+-- first (no-op on fresh DBs) and creates the new combined index.
+DROP INDEX IF EXISTS research_runs_event_accepted_unique;
+CREATE UNIQUE INDEX IF NOT EXISTS research_runs_event_active_unique
   ON research_runs (event_id)
-  WHERE status = 'accepted';
+  WHERE status IN ('accepted', 'processing');
 
 CREATE INDEX IF NOT EXISTS paper_bets_open
   ON paper_bets (entry_session_date)

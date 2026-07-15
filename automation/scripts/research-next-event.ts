@@ -108,22 +108,28 @@ interface ClaimedEvent {
 }
 
 async function claimOneEvent(): Promise<ClaimedEvent | null> {
-  // Defence in depth: skip events that already have an accepted
-  // research_runs row even if their signal_events.status somehow
-  // reverted to active.
+  // Defence in depth: skip events that already have an active
+  // research_runs row (status IN ('accepted', 'processing')) even
+  // if their signal_events.status somehow reverted to active. The
+  // accepted-derived `processing` state is owned by a worker that
+  // has called `claimNextPending`; reactivating the event while
+  // that run is in flight would re-open a race window where a
+  // parallel retry could insert a second accepted research_runs
+  // row before the partial index re-engages.
   const event = await LedgerDb.EventRecord.claimNextActive();
   if (!event) return null;
   return {
     event,
     release: async () => {
-      // Only release if no accepted run landed in the meantime. If
-      // the unique partial index caught a duplicate race, leave the
-      // row in `processing` — the next claim cycle will skip it via
+      // Only release if no active run landed in the meantime
+      // (status IN ('accepted', 'processing')). If the unique
+      // partial index caught a duplicate race, leave the row in
+      // `processing` — the next claim cycle will skip it via
       // the NOT EXISTS CTE and an operator can clean it up.
-      const hasAccepted = await LedgerDb.ResearchRun.hasAcceptedRunForEvent(
+      const hasActive = await LedgerDb.ResearchRun.hasActiveRunForEvent(
         event.id,
       );
-      if (hasAccepted) return;
+      if (hasActive) return;
       try {
         await LedgerDb.EventRecord.releaseToActive(event.id);
       } catch {

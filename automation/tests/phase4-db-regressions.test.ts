@@ -95,6 +95,18 @@ describe("atomic claim SQL", () => {
     );
   });
 
+  test("EventRecord.claimNextActive excludes events with an active (accepted or processing) research_runs row", () => {
+    // The CTE must filter out events that already have a research_runs
+    // row in `accepted` OR `processing` — accepting only `accepted`
+    // would let a worker re-claim an event whose research is in flight
+    // (accepted-derived `processing` state owned by the next-stage
+    // claimNextPending worker). The regex anchors on the NOT EXISTS
+    // subquery and the IN-list covering both statuses.
+    expect(source).toMatch(
+      /NOT\s+EXISTS\s*\(\s*SELECT\s+1\s*FROM\s+research_runs\s+rr[\s\S]*?rr\.event_id\s*=\s*signal_events\.id[\s\S]*?rr\.status\s+IN\s*\(\s*'accepted',\s*'processing'\s*\)/,
+    );
+  });
+
   test("ResearchRun.claimNextPending uses UPDATE ... RETURNING with CTE + SKIP LOCKED", () => {
     expect(source).toMatch(
       /async\s+claimNextPending\s*\(\s*\)\s*:\s*Promise<ResearchRunRow\s*\|\s*null>\s*\{[\s\S]*?FOR\s+UPDATE\s+SKIP\s+LOCKED[\s\S]*?UPDATE\s+research_runs\s+SET\s+status\s*=\s*'processing'[\s\S]*?RETURNING/,
@@ -270,6 +282,70 @@ describe("listMarketSessions includes the entry session", () => {
 // ---------------------------------------------------------------------------
 // Fix #5 — no process.exit() before closeDb()
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// Fix #6 — research_runs accepted-derived processing cannot reactivate
+// the event or allow a second run (P1 race from Task 3 re-review).
+//
+// The original Task 3 fix added a partial unique index `WHERE status =
+// 'accepted'` and an `hasAcceptedRunForEvent` guard. That left a
+// window: a worker that called `claimNextPending` transitions the
+// run from `accepted` to `processing`, and during that window the
+// partial index does NOT cover the row, so a second `accepted`
+// insert (or a release-then-reclaim race) can slip past the DB
+// guard. The fix extends the partial index to cover both
+// `accepted` and `processing` and broadens the application-level
+// guards to the same predicate, so the invariant holds for the
+// entire lifecycle of the run.
+// ---------------------------------------------------------------------------
+
+describe("research_runs accepted-derived processing blocks reactivation", () => {
+  const source = readFileSync(DB_SOURCE, "utf8");
+  const migration = readFileSync(MIGRATION_SQL, "utf8");
+
+  test("migration drops the old accepted-only index and creates the broadened index", () => {
+    // The old partial index is removed (idempotent: no-op on fresh
+    // DBs) and replaced by an index whose predicate covers both
+    // `accepted` and the accepted-derived `processing` state.
+    expect(migration).toMatch(
+      /DROP\s+INDEX\s+IF\s+EXISTS\s+research_runs_event_accepted_unique/,
+    );
+    expect(migration).toMatch(
+      /CREATE\s+UNIQUE\s+INDEX\s+IF\s+NOT\s+EXISTS\s+research_runs_event_active_unique[\s\S]*?ON\s+research_runs\s*\(\s*event_id\s*\)[\s\S]*?WHERE\s+status\s+IN\s*\(\s*'accepted',\s*'processing'\s*\)/,
+    );
+  });
+
+  test("ResearchRun.hasActiveRunForEvent predicate covers both accepted and processing", () => {
+    // Renamed from `hasAcceptedRunForEvent`; the SQL must filter on
+    // `status IN ('accepted', 'processing')` so a processing run
+    // counts as an active run during the claim/release guard.
+    expect(source).toMatch(
+      /async\s+hasActiveRunForEvent\s*\(\s*eventId:\s*string\s*\)\s*:\s*Promise<boolean>\s*\{[\s\S]*?WHERE\s+event_id\s*=\s*\$\{eventId\}[\s\S]*?status\s+IN\s*\(\s*'accepted',\s*'processing'\s*\)/,
+    );
+    // The old accepted-only name is gone — no alias left behind.
+    expect(source).not.toMatch(/hasAcceptedRunForEvent/);
+  });
+
+  test("research-next-event calls hasActiveRunForEvent (not the old name)", () => {
+    // The CLI's release path is the only call site; this confirms
+    // it tracks the rename and the broadened predicate.
+    const cliSource = readFileSync(
+      join(HERE, "..", "scripts", "research-next-event.ts"),
+      "utf8",
+    );
+    expect(cliSource).toMatch(/hasActiveRunForEvent/);
+    expect(cliSource).not.toMatch(/hasAcceptedRunForEvent/);
+  });
+
+  test("claimNextActive CTE NOT EXISTS covers both accepted and processing", () => {
+    // Defence in depth: the CTE must skip events whose run is
+    // already accepted OR in the accepted-derived processing
+    // state, so a parallel claimNextActive cannot reactivate an
+    // event whose research is in flight.
+    expect(source).toMatch(
+      /NOT\s+EXISTS\s*\(\s*SELECT\s+1\s*FROM\s+research_runs\s+rr[\s\S]*?rr\.status\s+IN\s*\(\s*'accepted',\s*'processing'\s*\)/,
+    );
+  });
+});
 
 describe("migrate-phase4 never calls process.exit before closeDb", () => {
   const source = readFileSync(MIGRATE_SOURCE, "utf8");
