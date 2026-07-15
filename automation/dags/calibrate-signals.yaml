@@ -1,0 +1,21 @@
+# Runs after the weekday settlement DAG completes its normal window.
+schedule: "0 22 * * 1-5"
+timeout_sec: 300
+type: graph
+artifacts:
+  enabled: true
+shell: ["bash", "-e"]
+env:
+  - DATABASE_URL=${DATABASE_URL}
+
+steps:
+  - id: calibrate
+    working_dir: /opt/alpha-lab/automation
+    run: |
+      set -euo pipefail
+      export PATH="$HOME/.bun/bin:$PATH"
+      bun run scripts/calibrate-signals.ts
+    env:
+      - DATABASE_URL=${env.DATABASE_URL}
+    stdout:
+      artifact: calibration.json

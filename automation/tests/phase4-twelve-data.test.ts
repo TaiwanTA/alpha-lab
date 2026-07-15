@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 
 import {
   createTwelveDataClient,
+  fetchAdjustedCloseSessions,
   loadTwelveDataConfig,
   type TwelveDataConfig,
 } from "../scripts/phase4/twelve-data.ts";
@@ -184,6 +185,61 @@ describe("twelve-data fetchAdjustedClose — at-or-before semantics", () => {
     ).rejects.toThrow(/YYYY-MM-DD/);
   });
 
+
+  test("returns only actual finite positive sessions in ascending order", async () => {
+    const { captured, restore } = stubFetchJson(() => ({
+      meta: { symbol: "AAPL", interval: "1day" },
+      values: [
+        { datetime: "2026-07-17", close: "197.00" },
+        { datetime: "2026-07-15", close: "195.00" },
+        { datetime: "2026-07-16", close: "0" },
+      ],
+      status: "ok",
+    }));
+    try {
+      const result = await fetchAdjustedCloseSessions(BASE_CONFIG, "AAPL", "2026-07-15");
+      expect(result).toEqual([
+        { date: "2026-07-15", adjustedClose: 195 },
+        { date: "2026-07-17", adjustedClose: 197 },
+      ]);
+      const url = new URL(captured[0]?.url ?? "");
+      expect(url.searchParams.get("start_date")).toBe("2026-07-15");
+      expect(url.searchParams.get("order")).toBe("ASC");
+      expect(url.searchParams.get("adjust")).toBe("all");
+    } finally {
+      restore();
+    }
+  });
+
+  test("classifies a permanent symbol error as terminal unavailable price", async () => {
+    const { restore } = stubFetchJson(() => ({
+      status: "error",
+      code: 400,
+      message: "symbol not found or delisted",
+    }));
+    try {
+      await expect(
+        fetchAdjustedCloseSessions(BASE_CONFIG, "DELISTED", "2026-07-15"),
+      ).rejects.toThrow(/^terminal unavailable price:/);
+    } finally {
+      restore();
+    }
+  });
+
+  test("does not classify date-range no-data as terminal", async () => {
+    const { restore } = stubFetchJson(() => ({
+      status: "error",
+      code: 400,
+      message: "no data for the requested date range",
+    }));
+    try {
+      await expect(
+        fetchAdjustedCloseSessions(BASE_CONFIG, "AAPL", "2026-07-15"),
+      ).rejects.toThrow(/^twelve-data provider error:/);
+    } finally {
+      restore();
+    }
+  });
   test("loadTwelveDataConfig throws when TWELVE_DATA_API_KEY is missing", () => {
     expect(() => loadTwelveDataConfig({})).toThrow(/TWELVE_DATA_API_KEY/);
   });

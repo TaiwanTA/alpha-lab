@@ -1,0 +1,27 @@
+# 21:30 UTC is after 16:00 New York in both standard and daylight time.
+schedule: "30 21 * * 1-5"
+timeout_sec: 900
+type: graph
+artifacts:
+  enabled: true
+shell: ["bash", "-e"]
+env:
+  - DATABASE_URL=${DATABASE_URL}
+  - TWELVE_DATA_API_KEY=${TWELVE_DATA_API_KEY}
+
+steps:
+  - id: settle_all
+    working_dir: /opt/alpha-lab/automation
+    run: |
+      set -euo pipefail
+      export PATH="$HOME/.bun/bin:$PATH"
+      bun run scripts/settle-paper-bets.ts
+    env:
+      - DATABASE_URL=${env.DATABASE_URL}
+      - TWELVE_DATA_API_KEY=${env.TWELVE_DATA_API_KEY}
+    stdout:
+      artifact: settlement.json
+    retry_policy:
+      limit: 2
+      interval_sec: 120
+      exit_code: [1]

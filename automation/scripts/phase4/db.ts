@@ -389,6 +389,152 @@ export const ResearchRun = {
       WHERE id = ${id} AND status = 'processing'
     `;
   },
+
+  async findAcceptedById(id: string): Promise<ResearchRunRow | null> {
+    const rows = await db`
+      SELECT id, event_id, model, prompt_version, thesis, ticker,
+             direction, confidence, rationale, source_citations,
+             candidate_markdown, created_at, status
+      FROM research_runs
+      WHERE id = ${id} AND status = 'accepted'
+      LIMIT 1
+    `;
+    const first = rows[0];
+    return first ? mapResearchRunRow(first as Record<string, unknown>) : null;
+  },
+
+  async claimNextUnpublished(owner: string): Promise<ResearchRunRow | null> {
+    const rows = await db`
+      WITH recoverable AS (
+        UPDATE research_publications rp
+        SET claim_owner = ${owner}, claimed_at = now()
+        WHERE rp.research_run_id = (
+          SELECT candidate.research_run_id
+          FROM research_publications candidate
+          WHERE candidate.status = 'claimed'
+            AND candidate.claimed_at < now() - interval '30 minutes'
+          ORDER BY candidate.claimed_at ASC
+          FOR UPDATE SKIP LOCKED
+          LIMIT 1
+        )
+        RETURNING rp.research_run_id
+      ), next_accepted AS (
+        SELECT rr.id
+        FROM research_runs rr
+        WHERE rr.status = 'accepted'
+          AND NOT EXISTS (
+            SELECT 1 FROM research_publications rp
+            WHERE rp.research_run_id = rr.id
+          )
+          AND NOT EXISTS (SELECT 1 FROM recoverable)
+        ORDER BY rr.created_at ASC
+        FOR UPDATE OF rr SKIP LOCKED
+        LIMIT 1
+      ), inserted_claim AS (
+        INSERT INTO research_publications (research_run_id, status, claim_owner)
+        SELECT id, 'claimed', ${owner} FROM next_accepted
+        ON CONFLICT (research_run_id) DO NOTHING
+        RETURNING research_run_id
+      ), claimed AS (
+        SELECT research_run_id FROM recoverable
+        UNION ALL
+        SELECT research_run_id FROM inserted_claim
+      )
+      SELECT rr.id, rr.event_id, rr.model, rr.prompt_version, rr.thesis,
+             rr.ticker, rr.direction, rr.confidence, rr.rationale,
+             rr.source_citations, rr.candidate_markdown, rr.created_at,
+             rr.status
+      FROM research_runs rr
+      JOIN claimed claim ON claim.research_run_id = rr.id
+      LIMIT 1
+    `;
+    const first = rows[0];
+    return first ? mapResearchRunRow(first as Record<string, unknown>) : null;
+  },
+
+  async claimNextPushed(owner: string): Promise<ResearchRunRow | null> {
+    const rows = await db`
+      WITH claimed AS (
+        UPDATE research_publications rp
+        SET claim_owner = ${owner}, claimed_at = now()
+        WHERE rp.research_run_id = (
+          SELECT candidate.research_run_id
+          FROM research_publications candidate
+          WHERE candidate.status = 'pushed'
+            AND (candidate.claim_owner IS NULL OR candidate.claimed_at < now() - interval '30 minutes')
+          ORDER BY candidate.claimed_at ASC
+          FOR UPDATE SKIP LOCKED
+          LIMIT 1
+        )
+        RETURNING rp.research_run_id
+      )
+      SELECT rr.id, rr.event_id, rr.model, rr.prompt_version, rr.thesis,
+             rr.ticker, rr.direction, rr.confidence, rr.rationale,
+             rr.source_citations, rr.candidate_markdown, rr.created_at,
+             rr.status
+      FROM research_runs rr
+      JOIN claimed ON claimed.research_run_id = rr.id
+    `;
+    const first = rows[0];
+    return first ? mapResearchRunRow(first as Record<string, unknown>) : null;
+  },
+
+  async markPushed(id: string, owner: string): Promise<void> {
+    await db`
+      UPDATE research_publications
+      SET status = 'pushed', claimed_at = now()
+      WHERE research_run_id = ${id}
+        AND status = 'claimed'
+        AND claim_owner = ${owner}
+    `;
+  },
+
+  async revertPushed(id: string, owner: string): Promise<void> {
+    await db`
+      UPDATE research_publications
+      SET status = 'claimed'
+      WHERE research_run_id = ${id}
+        AND status = 'pushed'
+        AND claim_owner = ${owner}
+    `;
+  },
+
+  async findPublishableById(id: string, owner: string): Promise<ResearchRunRow | null> {
+    const rows = await db`
+      SELECT rr.id, rr.event_id, rr.model, rr.prompt_version, rr.thesis,
+             rr.ticker, rr.direction, rr.confidence, rr.rationale,
+             rr.source_citations, rr.candidate_markdown, rr.created_at,
+             rr.status
+      FROM research_runs rr
+      JOIN research_publications rp ON rp.research_run_id = rr.id
+      WHERE rr.id = ${id}
+        AND rr.status IN ('accepted','processing')
+        AND rp.status = 'claimed'
+        AND rp.claim_owner = ${owner}
+      LIMIT 1
+    `;
+    const first = rows[0];
+    return first ? mapResearchRunRow(first as Record<string, unknown>) : null;
+  },
+
+  async releasePublicationClaim(id: string, owner: string): Promise<void> {
+    await db`
+      DELETE FROM research_publications
+      WHERE research_run_id = ${id}
+        AND status = 'claimed'
+        AND claim_owner = ${owner}
+    `;
+  },
+
+  async markPublished(id: string, owner: string): Promise<void> {
+    await db`
+      UPDATE research_publications
+      SET status = 'published', published_at = now(), claim_owner = NULL
+      WHERE research_run_id = ${id}
+        AND status = 'pushed'
+        AND claim_owner = ${owner}
+    `;
+  },
 };
 
 // ---------------------------------------------------------------------------
@@ -407,6 +553,57 @@ export const PaperBet = {
         ...input,
       })}
     `;
+    return id;
+  },
+
+  async insertAndAcceptRun(
+    input: Omit<PaperBetRow, "id" | "opened_at" | "status">,
+    owner: string,
+  ): Promise<string> {
+    const id = crypto.randomUUID();
+    await db.begin(async (transaction) => {
+      const claims = await transaction`
+        SELECT 1 FROM paper_bet_opening_claims
+        WHERE research_run_id = ${input.research_run_id}
+          AND claim_owner = ${owner}
+        FOR UPDATE
+      `;
+      if (claims.length !== 1) throw new Error("paper-bet opening claim is not owned");
+      await transaction`
+        INSERT INTO paper_bets ${transaction({
+          id,
+          status: "open" as const,
+          ...input,
+        })}
+      `;
+      await transaction`
+        DELETE FROM paper_bet_opening_claims
+        WHERE research_run_id = ${input.research_run_id}
+          AND claim_owner = ${owner}
+      `;
+    });
+    return id;
+  },
+
+  async settle(
+    paperBetId: string,
+    input: Omit<BetOutcomeRow, "id" | "paper_bet_id" | "settled_at">,
+  ): Promise<string> {
+    const id = crypto.randomUUID();
+    await db.begin(async (transaction) => {
+      await transaction`
+        INSERT INTO bet_outcomes ${transaction({
+          id,
+          paper_bet_id: paperBetId,
+          ...input,
+        })}
+      `;
+      await transaction`
+        UPDATE paper_bets
+        SET status = ${input.outcome === "unresolved" ? "unresolved" : "settled"}
+        WHERE id = ${paperBetId} AND status = 'open'
+      `;
+    });
     return id;
   },
 

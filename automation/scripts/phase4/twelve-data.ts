@@ -28,11 +28,20 @@ export interface AdjustedCloseQuote {
   requestedAdjust: "all";
 }
 
+export interface AdjustedCloseSession {
+  date: string;
+  adjustedClose: number;
+}
+
 export interface TwelveDataClient {
   fetchAdjustedClose(
     ticker: string,
     date: string, // YYYY-MM-DD
   ): Promise<AdjustedCloseQuote>;
+  fetchAdjustedCloseSessions?(
+    ticker: string,
+    startDate: string,
+  ): Promise<AdjustedCloseSession[]>;
 }
 
 // ---------------------------------------------------------------------------
@@ -145,6 +154,10 @@ async function twelveDataRequest(
   if (raw.status === "error") {
     const message =
       typeof raw.message === "string" ? raw.message : "unknown provider error";
+    const code = typeof raw.code === "number" ? raw.code : null;
+    if (code === 400 && /invalid symbol|symbol (?:not found|has been delisted)|delisted symbol/i.test(message)) {
+      throw new Error(`terminal unavailable price: ${message}`);
+    }
     throw new Error(`twelve-data provider error: ${message}`);
   }
   return raw;
@@ -225,5 +238,41 @@ export function createTwelveDataClient(
         requestedAdjust: REQUESTED_ADJUST,
       };
     },
+    fetchAdjustedCloseSessions(ticker, startDate) {
+      return fetchAdjustedCloseSessions(config, ticker, startDate);
+    },
   };
+}
+
+export async function fetchAdjustedCloseSessions(
+  config: TwelveDataConfig,
+  ticker: string,
+  startDate: string,
+): Promise<AdjustedCloseSession[]> {
+  const normalizedTicker = ticker.trim().toUpperCase();
+  if (normalizedTicker.length === 0) {
+    throw new Error("twelve-data: ticker must be a non-empty string");
+  }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate)) {
+    throw new Error("twelve-data: start date must be in YYYY-MM-DD format");
+  }
+
+  const raw = await twelveDataRequest(config, {
+    symbol: normalizedTicker,
+    start_date: startDate,
+    outputsize: "5000",
+    order: "ASC",
+  });
+  const values = parseTimeSeriesValues(raw);
+  const byDate = new Map<string, number>();
+  for (const row of values) {
+    if (row.datetime < startDate) continue;
+    const adjustedClose = Number(row.close);
+    if (!Number.isFinite(adjustedClose) || adjustedClose <= 0) continue;
+    byDate.set(row.datetime, adjustedClose);
+  }
+
+  return [...byDate.entries()]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([date, adjustedClose]) => ({ date, adjustedClose }));
 }

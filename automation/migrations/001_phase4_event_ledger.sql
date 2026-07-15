@@ -88,6 +88,19 @@ CREATE TABLE IF NOT EXISTS bet_outcomes (
   reason text
 );
 
+CREATE TABLE IF NOT EXISTS research_publications (
+  research_run_id uuid PRIMARY KEY REFERENCES research_runs(id),
+  status text NOT NULL CHECK (status IN ('claimed','pushed','published')),
+  claim_owner text,
+  claimed_at timestamptz NOT NULL DEFAULT now(),
+  published_at timestamptz
+);
+CREATE TABLE IF NOT EXISTS paper_bet_opening_claims (
+  research_run_id uuid PRIMARY KEY REFERENCES research_runs(id),
+  claim_owner text NOT NULL,
+  claimed_at timestamptz NOT NULL DEFAULT now()
+);
+
 CREATE INDEX IF NOT EXISTS signal_events_research_queue
   ON signal_events (captured_at)
   WHERE status = 'active';
