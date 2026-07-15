@@ -44,8 +44,18 @@ jobs:
 
       - name: Validate Dagu definitions
         run: |
-          dagu validate automation/dags/fixture-research.yaml
-          dagu validate automation/dags/blog-publish.yaml
+          set -euo pipefail
+          shopt -s nullglob
+          dags=(automation/dags/*.yaml)
+          if [ ${#dags[@]} -eq 0 ]; then
+            echo "No DAG files found under automation/dags/" >&2
+            exit 1
+          fi
+          echo "Validating ${#dags[@]} DAG(s):"
+          printf '  - %s\n' "${dags[@]}"
+          for f in "${dags[@]}"; do
+            dagu validate "$f"
+          done
 
   deploy:
     name: Build and deploy
