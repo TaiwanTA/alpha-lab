@@ -14,7 +14,9 @@
 -- Status / direction / outcome values are enforced by CHECK constraints
 -- rather than enums so the application can add new values without an
 -- ALTER TYPE migration. Downstream code MUST keep its TypeScript unions
--- in sync with these CHECK clauses.
+-- in sync with these CHECK clauses. 'processing' is a transient state
+-- owned by a single worker during claim; releaseToActive() restores
+-- 'active' if the worker crashes before terminal settlement.
 
 CREATE TABLE IF NOT EXISTS schema_migrations (
   version text PRIMARY KEY,
@@ -39,7 +41,7 @@ CREATE TABLE IF NOT EXISTS signal_events (
   content_hash text NOT NULL,
   raw_content text NOT NULL,
   payload jsonb NOT NULL DEFAULT '{}'::jsonb,
-  status text NOT NULL CHECK (status IN ('active','superseded','rejected')) DEFAULT 'active',
+  status text NOT NULL CHECK (status IN ('active','processing','superseded','rejected')) DEFAULT 'active',
   supersedes_event_id uuid REFERENCES signal_events(id),
   UNIQUE (investor, source_url, published_at, content_hash)
 );
@@ -57,7 +59,7 @@ CREATE TABLE IF NOT EXISTS research_runs (
   source_citations jsonb NOT NULL,
   candidate_markdown text NOT NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
-  status text NOT NULL CHECK (status IN ('accepted','rejected','needs_review'))
+  status text NOT NULL CHECK (status IN ('accepted','processing','rejected','needs_review'))
 );
 
 CREATE TABLE IF NOT EXISTS paper_bets (
