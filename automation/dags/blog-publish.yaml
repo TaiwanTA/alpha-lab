@@ -54,14 +54,13 @@ env:
   - GIT_READ_TOKEN=${GIT_READ_TOKEN}
 handler_on:
   failure:
-    working_dir: /opt/alpha-lab/automation
     run: |
       if [ -n "${params.research_run_id}" ]; then
         export PATH="$HOME/.bun/bin:$PATH"
         # mark_pushed writes this DB-backed state after a successful push.
         # releasePublicationClaim only deletes status='claimed', so a pushed
         # row survives handler execution and is finalized by the next parent run.
-        bun run scripts/publish-next-research.ts --release-claim "${params.research_run_id}" --owner "${params.claim_owner}"
+        bun run /opt/alpha-lab/automation/scripts/publish-next-research.ts --release-claim "${params.research_run_id}" --owner "${params.claim_owner}"
       fi
     env:
       - DATABASE_URL=${env.DATABASE_URL}
