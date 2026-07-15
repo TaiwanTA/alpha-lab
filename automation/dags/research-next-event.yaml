@@ -1,0 +1,64 @@
+# Dagu DAG that drives Phase 4 Task 3's research CLI.
+#
+# 已驗證 Dagu v2.10.7 語法:
+#   - `${env.NAME}` 是唯一能解析 process env 變數的 namespace。
+#   - `shell: ["bash", "-e"]` 是容器模式必須的設定,/bin/sh 是
+#     dash,不支援 pipefail。
+#   - `env:` block 把 process env 用 ${NAME} 拉進 dagu scope。
+#   - `retry_policy: { exit_code: [...] }` 只在特定 exit code 才
+#     retry,不會把使用者程式設計錯誤也一併重試。
+#   - `preconditions: [...]` 用 shell condition gate step。
+#
+# 設計重點:
+#   - 單一 step 直接呼叫 research-next-event.ts;CLI 自己負責
+#     claim/release、agent prompt、research_runs 寫入,沒有
+#     DAG-level 的遷移 / 啟動 / 收尾 step(遷移由 Task 1 的
+#     migrate-phase4.ts 獨立跑)。
+#   - `working_dir: /opt/alpha-lab/automation` 直接走 production
+#     checkout 的 automation/,research-next-event 是 append-only,
+#     不會改任何 tracked source。
+#   - DATABASE_URL / MINIMAX_API_KEY / HINDSIGHT_* / TWELVE_DATA_API_KEY
+#     都從 dagu process env 注入;dagu.env.template 的對應行由
+#     deploy/dagu/dagu.env 提供。Brief 明確禁止 LLM_* / 自訂
+#     OpenAI-compatible provider,所以這裡只 import 新的密鑰。
+#   - `retry_policy: limit: 2` 配 `interval_sec: 120`:Hindsight 5xx /
+#     MiniMax 暫時性錯誤各重試一次 + 一次最終重試;再多就會撞到
+#     rate limit。重試只在 exit code 1 (CLI catch) 時觸發,不重試
+#     程式崩潰 / config 錯誤。
+#   - 沒有 schedule;這個 DAG 由 orchestrator 在 ingestion DAG
+#     完成後或被 settlement DAG 觸發,避免與 ingest-events.yaml
+#     (每 6 小時) 排程重疊。
+
+timeout_sec: 900
+type: graph
+
+# 容器模式下 /bin/sh → dash,不支援 pipefail。用 bash 執行
+# 所有 step commands,跟 native 模式 (Fedora /bin/sh → bash)
+# 行為一致。
+shell: ["bash", "-e"]
+env:
+  - DATABASE_URL=${DATABASE_URL}
+  - MINIMAX_API_KEY=${MINIMAX_API_KEY}
+  - HINDSIGHT_BASE_URL=${HINDSIGHT_BASE_URL}
+  - HINDSIGHT_API_KEY=${HINDSIGHT_API_KEY}
+  - HINDSIGHT_BANK_ID=${HINDSIGHT_BANK_ID}
+  - TWELVE_DATA_API_KEY=${TWELVE_DATA_API_KEY}
+
+steps:
+  - id: research
+    working_dir: /opt/alpha-lab/automation
+    run: |
+      set -euo pipefail
+      export PATH="$HOME/.bun/bin:$PATH"
+      bun run scripts/research-next-event.ts
+    env:
+      - DATABASE_URL=${env.DATABASE_URL}
+      - MINIMAX_API_KEY=${env.MINIMAX_API_KEY}
+      - HINDSIGHT_BASE_URL=${env.HINDSIGHT_BASE_URL}
+      - HINDSIGHT_API_KEY=${env.HINDSIGHT_API_KEY}
+      - HINDSIGHT_BANK_ID=${env.HINDSIGHT_BANK_ID}
+      - TWELVE_DATA_API_KEY=${env.TWELVE_DATA_API_KEY}
+    retry_policy:
+      limit: 2
+      interval_sec: 120
+      exit_code: [1]
