@@ -14,22 +14,28 @@ steps:
       set -euo pipefail
       export PATH="$HOME/.bun/bin:$PATH"
       CLAIM_OWNER="${DAG_RUN_ID}"
-      bun run scripts/publish-next-research.ts --owner "$CLAIM_OWNER"
+      CLAIM_JSON="$(bun run scripts/publish-next-research.ts --owner "$CLAIM_OWNER")"
+      printf '%s\n' "$CLAIM_JSON"
+      printf 'CLAIM_JSON=%s\n' "$CLAIM_JSON" >> "$DAGU_OUTPUT_FILE"
     env:
       - DATABASE_URL=${env.DATABASE_URL}
-    output: CLAIM_JSON
+    outputs:
+      - name: CLAIM_JSON
     stdout:
       artifact: publication-claim.json
 
   - id: execute_claim
     depends: [claim]
     working_dir: /opt/alpha-lab/automation
-    preconditions:
-      - condition: "[ -n '${CLAIM_JSON}' ]"
     run: |
       set -euo pipefail
       export PATH="$HOME/.bun/bin:$PATH"
       CLAIM_OWNER="${DAG_RUN_ID}"
+      CLAIM_JSON="${CLAIM_JSON:-}"
+      if [ -z "$CLAIM_JSON" ]; then
+        echo "no publication claim"
+        exit 0
+      fi
       ACTION="$(bun -e 'const value=JSON.parse(process.env.CLAIM_JSON); process.stdout.write(value.action)')"
       RESEARCH_RUN_ID="$(bun -e 'const value=JSON.parse(process.env.CLAIM_JSON); process.stdout.write(value.researchRunId)')"
       # Idempotency guard against retry: if execute_claim already drove
@@ -63,4 +69,4 @@ steps:
       bun run scripts/publish-next-research.ts --mark-published "$RESEARCH_RUN_ID" --owner "$CLAIM_OWNER"
     env:
       - DATABASE_URL=${env.DATABASE_URL}
-      - CLAIM_JSON=${CLAIM_JSON}
+      - CLAIM_JSON=${steps.claim.outputs.CLAIM_JSON}
