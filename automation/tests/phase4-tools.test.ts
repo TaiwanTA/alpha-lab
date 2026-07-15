@@ -239,10 +239,11 @@ describe("record_research gate", () => {
       confidence: 0.7,
       rationale: "strong iPhone cycle",
       sourceCitations: ["https://x.com/a/status/1"],
-      candidateMarkdown: "---\ntitle: x\n---\nbody",
+      candidateMarkdown: "---\ntitle: x\ninvestmentClaim: \"true\"\n---\nbody",
     });
     expect(recordResearchCalls).toHaveLength(1);
     expect(recordResearchCalls[0]?.eventId).toBe("evt-1");
+    expect(recordResearchCalls[0]?.candidateMarkdown).toContain("investmentClaim: true");
     expect(result.details).toEqual({ id: "run-1" });
   });
 

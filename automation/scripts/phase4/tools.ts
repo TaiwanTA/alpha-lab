@@ -25,6 +25,21 @@ import type {
 } from "@earendil-works/pi-agent-core";
 
 import type { HindsightClient } from "./hindsight.ts";
+
+function normalizeInvestmentClaim(markdown: string): string {
+  const opening = markdown.match(/^---\r?\n/);
+  if (!opening) return markdown;
+  const closingOffset = markdown.indexOf("\n---", opening[0].length);
+  if (closingOffset < 0) return markdown;
+  const frontmatter = markdown.slice(0, closingOffset);
+  const normalized = frontmatter.replace(
+    /^investmentClaim:\s*(['"])(true|false)\1\s*$/m,
+    "investmentClaim: $2",
+  );
+  return normalized === frontmatter
+    ? markdown
+    : `${normalized}${markdown.slice(closingOffset)}`;
+}
 import type { TwelveDataClient } from "./twelve-data.ts";
 
 // ---------------------------------------------------------------------------
@@ -354,10 +369,8 @@ export function createResearchToolkit(ctx: ResearchToolContext): ResearchToolkit
             );
           }
         }
-        const candidateMarkdown = requireString(
-          obj,
-          "candidateMarkdown",
-          "record_research",
+        const candidateMarkdown = normalizeInvestmentClaim(
+          requireString(obj, "candidateMarkdown", "record_research"),
         );
         const input: RecordResearchInput = {
           eventId: ctx.eventId,
