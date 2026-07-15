@@ -41,3 +41,4 @@ automation/.run-logs/
 automation/outbox/
 automation/candidates/
 .delete/
+.worktrees/
