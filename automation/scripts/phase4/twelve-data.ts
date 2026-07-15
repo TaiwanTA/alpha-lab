@@ -189,9 +189,15 @@ export function createTwelveDataClient(
           "twelve-data: date must be in YYYY-MM-DD format",
         );
       }
+      // Use end_date (not start_date) so the returned series is the
+      // most recent N rows ending on or before the requested date.
+      // start_date would return only rows on or after the requested
+      // date, so a weekend or holiday lookup against `date` would
+      // produce no usable quote — `pickAdjustedClose` walks the
+      // series newest-first and would then throw with no fallback.
       const raw = await twelveDataRequest(config, {
         symbol: normalizedTicker,
-        start_date: date,
+        end_date: date,
         outputsize: "5000",
       });
       const values = parseTimeSeriesValues(raw);

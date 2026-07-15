@@ -9,24 +9,28 @@
 // agent with the allowlisted toolkit, and persists exactly one
 // `research_runs` row.
 //
+// The CLI does NOT re-derive the persisted row's thesis / ticker /
+// direction / confidence / citations from the candidate frontmatter.
+// It forwards the structured `record_research` arguments straight to
+// the DB sink — the agent is the source of truth for those values.
+//
 // On failure the claim is always released back to `active` so the
-// next DAG run (or the next retry) can pick it up. The script
-// writes its own `research_runs.id` to stdout for downstream
-// observability; failures exit non-zero with no stdout payload so
-// Dagu's retry policy kicks in.
+// next DAG run (or the next retry) can pick it up. The script writes
+// its own `research_runs.id` to stdout and ALL OTHER OUTPUT to
+// stderr, so Dagu's stdout-only run-id consumer never sees log
+// noise interleaved with the id.
 //
 // Exit discipline mirrors `migrate-phase4.ts` and `ingest-events.ts`:
 // throw on missing env / config, set `process.exitCode = 1` in
 // catch, and `await closeDb()` in `finally` so the connection pool
 // is always flushed before the process dies.
 
-import matter from "gray-matter";
-
 import {
   buildPiResearchRuntime,
   assertRunPersisted,
   subscribeToolEvents,
   type PiResearchRunResult,
+  type ResearchEventPayload,
 } from "./phase4/pi-research.ts";
 import {
   type HindsightClient,
@@ -57,9 +61,19 @@ function requireEnv(name: string): string {
   return v;
 }
 
-/** Render the agent's final tool transcript as plain lines. Used for
- *  Dagu's per-run log; the script's stdout is reserved for the run
- *  ID. */
+function signalEventToPayload(event: SignalEventRow): ResearchEventPayload {
+  return {
+    id: event.id,
+    investor: event.investor,
+    sourceUrl: event.source_url,
+    rawContent: event.raw_content,
+    publishedAt: event.published_at,
+    capturedAt: event.captured_at,
+  };
+}
+
+/** Render the agent's final tool transcript as plain lines. Sent to
+ *  STDERR — stdout is reserved for the run ID. */
 function renderLogLines(
   event: SignalEventRow,
   result: PiResearchRunResult,
@@ -84,50 +98,6 @@ function renderLogLines(
   return out;
 }
 
-/** Pull the citation list from the trailing `## 來源` section if
- *  present; otherwise synthesize a single-element list from the
- *  event's source URL so the candidate never lands with zero
- *  citations. */
-function deriveCitations(
-  event: SignalEventRow,
-  candidateMarkdown: string,
-): string[] {
-  const match = candidateMarkdown.match(
-    /##\s*來源\s*\n([\s\S]*?)(?:\n##\s|$)/,
-  );
-  const fromSources = match
-    ? Array.from(match[1].matchAll(/https?:\/\/\S+/g)).map((m) => m[0])
-    : [];
-  const filtered = fromSources.filter((u) => u.length > 0);
-  if (filtered.length > 0) return filtered;
-  return [event.source_url];
-}
-
-function directionFromFrontmatter(value: unknown): "long" | "short" | null {
-  if (value === "long" || value === "short") return value;
-  return null;
-}
-
-function tickerFromFrontmatter(value: unknown): string | null {
-  if (typeof value !== "string") return null;
-  const trimmed = value.trim().toUpperCase();
-  if (trimmed.length === 0) return null;
-  // Accept comma-separated tickers by taking the first.
-  return trimmed.split(/[,\s]+/)[0] ?? null;
-}
-
-function confidenceFromFrontmatter(value: unknown): number | null {
-  if (typeof value === "number" && Number.isFinite(value)) {
-    if (value < 0 || value > 1) return null;
-    return value;
-  }
-  if (typeof value === "string") {
-    const n = Number(value);
-    if (Number.isFinite(n) && n >= 0 && n <= 1) return n;
-  }
-  return null;
-}
-
 // ---------------------------------------------------------------------------
 // Claim + release
 // ---------------------------------------------------------------------------
@@ -138,11 +108,22 @@ interface ClaimedEvent {
 }
 
 async function claimOneEvent(): Promise<ClaimedEvent | null> {
+  // Defence in depth: skip events that already have an accepted
+  // research_runs row even if their signal_events.status somehow
+  // reverted to active.
   const event = await LedgerDb.EventRecord.claimNextActive();
   if (!event) return null;
   return {
     event,
     release: async () => {
+      // Only release if no accepted run landed in the meantime. If
+      // the unique partial index caught a duplicate race, leave the
+      // row in `processing` — the next claim cycle will skip it via
+      // the NOT EXISTS CTE and an operator can clean it up.
+      const hasAccepted = await LedgerDb.ResearchRun.hasAcceptedRunForEvent(
+        event.id,
+      );
+      if (hasAccepted) return;
       try {
         await LedgerDb.EventRecord.releaseToActive(event.id);
       } catch {
@@ -156,42 +137,17 @@ async function claimOneEvent(): Promise<ClaimedEvent | null> {
 }
 
 // ---------------------------------------------------------------------------
-// Persist a `research_runs` row from the agent's final candidate.
+// Persist a `research_runs` row from the agent's structured
+// `record_research` arguments. The CLI does NOT re-parse the
+// candidate markdown frontmatter; the agent's typed arguments are
+// the source of truth.
 // ---------------------------------------------------------------------------
 
 async function persistResearchRun(
   event: SignalEventRow,
-  parsed: matter.GrayMatterFile<string>,
+  input: RecordResearchInput,
 ): Promise<string> {
-  const fm = parsed.data as Record<string, unknown>;
-  const bodyText = parsed.content.trim();
-  const firstLine = bodyText.split("\n")[0] ?? "";
-  const summaryText = typeof fm.summary === "string" ? fm.summary : "";
-  const thesis = summaryText.length > 0 ? summaryText : firstLine.slice(0, 280);
-  const ticker = tickerFromFrontmatter(fm.tickers);
-  const direction =
-    directionFromFrontmatter(fm.direction) ?? "long";
-  const confidence =
-    confidenceFromFrontmatter(fm.confidence) ??
-    (typeof fm.investmentClaim === "boolean"
-      ? fm.investmentClaim
-        ? 0.6
-        : 0.2
-      : 0.5);
-  const citations = deriveCitations(event, parsed.content);
-  const candidateMarkdown = matter.stringify(parsed.content, fm);
-  const rationale = summaryText.length > 0 ? summaryText : "see candidate body";
-  const input: RecordResearchInput = {
-    eventId: event.id,
-    thesis,
-    ticker: ticker ?? "UNKNOWN",
-    direction,
-    confidence,
-    rationale,
-    sourceCitations: citations,
-    candidateMarkdown,
-  };
-  const runId = await LedgerDb.ResearchRun.insert({
+  return LedgerDb.ResearchRun.insert({
     event_id: event.id,
     model: "minimax/MiniMax-M3",
     prompt_version: "phase4-task3-v1",
@@ -204,7 +160,6 @@ async function persistResearchRun(
     candidate_markdown: input.candidateMarkdown,
     status: "accepted",
   });
-  return runId;
 }
 
 // ---------------------------------------------------------------------------
@@ -226,10 +181,11 @@ function buildPrompt(event: SignalEventRow): string {
     "3. Call retain_event_memory with your distilled observation (content + context).",
     "4. Call lookup_adjusted_close for any ticker you intend to cite.",
     "5. Call record_research exactly once with the final thesis, ticker,",
-    "   direction (long/short), confidence in [0,1], rationale, sourceCitations,",
-    "   and candidateMarkdown. The candidateMarkdown MUST start with YAML",
-    "   frontmatter (`---` ... `---`) and end with a `## 來源` section that",
-    "   lists every URL you cite.",
+    "   direction (long/short), confidence in [0,1], rationale,",
+    "   sourceCitations (every URL you cite), and candidateMarkdown.",
+    "   The CLI forwards your arguments verbatim — thesis, ticker,",
+    "   direction, confidence, rationale, and sourceCitations must be",
+    "   the values you intend, not reconstructed later.",
     "",
     "Do not call any other tool. Do not call record_research twice.",
   ].join("\n");
@@ -257,16 +213,19 @@ async function main(): Promise<void> {
   let persistedRunId: string | null = null;
   try {
     // Sink that persists the run AND captures the returned id so we
-    // can echo it to stdout.
-    const sink = async (input: RecordResearchInput): Promise<{ id: string }> => {
-      const parsed = matter(input.candidateMarkdown);
-      const runId = await persistResearchRun(claimed.event, parsed);
+    // can echo it to stdout. The agent's structured arguments are
+    // forwarded verbatim — no markdown reparse.
+    const sink = async (
+      input: RecordResearchInput,
+    ): Promise<{ id: string }> => {
+      const runId = await persistResearchRun(claimed.event, input);
       persistedRunId = runId;
       return { id: runId };
     };
 
     const runtime = buildPiResearchRuntime({
       eventId: claimed.event.id,
+      event: signalEventToPayload(claimed.event),
       hindsight,
       twelveData,
       recordResearch: sink,
@@ -286,12 +245,14 @@ async function main(): Promise<void> {
       finalResult.toolEvents,
       finalResult.persistedRun,
     );
+    // ALL non-run-id output goes to stderr so stdout is reserved for
+    // the run id (or the no-claim sentinel).
     for (const line of renderLogLines(
       claimed.event,
       finalResult,
       persistedRunId,
     )) {
-      console.log(line);
+      console.error(line);
     }
     process.stdout.write(`${persistedRunId}\n`);
   } catch (err) {

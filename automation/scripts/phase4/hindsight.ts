@@ -6,6 +6,21 @@
 //   POST /v1/default/banks/alpha-lab/memories           (retain)
 //   POST /v1/default/banks/alpha-lab/memories/recall    (recall)
 //
+// v0.8.4 wire protocol (per https://hindsight.vectorize.io/developer/api/retain
+// and https://hindsight.vectorize.io/developer/api/recall):
+//
+//   retain  request body  : { items: [{ content, context?, ... }] }
+//   retain  response shape: { success: boolean, bank_id: string,
+//                             items_count: number, async?: boolean,
+//                             usage?: { input_tokens, output_tokens, total_tokens } }
+//
+//   recall  request body  : { query: string, ... }
+//   recall  response shape: { results: RecallResult[] }
+//   RecallResult fields   : { id, text, type?, context?, metadata?,
+//                             tags?, entities?, occurred_start?,
+//                             occurred_end?, mentioned_at?,
+//                             document_id?, chunk_id? }
+//
 // The brief requires:
 //   - reject malformed responses rather than silently producing an
 //     empty memory list
@@ -21,18 +36,36 @@ export interface HindsightConfig {
   bankId: string;
 }
 
-export interface HindsightMemoryItem {
+/** A single memory returned by Hindsight recall. The full v0.8.4
+ *  RecallResult carries many more fields (type, context, metadata,
+ *  tags, entities, occurred_start / occurred_end, mentioned_at,
+ *  document_id, chunk_id); the research pipeline consumes only
+ *  `id` + `text` and keeps the raw record under `raw` so downstream
+ *  code can introspect the rest without a separate type. */
+export interface HindsightRecallResult {
   id: string;
-  content: string;
-  context: string;
+  text: string;
+  raw: Record<string, unknown>;
 }
 
+/** Synchronous retain response per v0.8.4 docs. `usage` is present
+ *  for synchronous operations only and may be absent for async
+ *  ingestion; the client treats both shapes as valid. */
 export interface HindsightRetainResponse {
-  id: string;
+  success: boolean;
+  bankId: string;
+  itemsCount: number;
+  async: boolean;
+  usage?: {
+    inputTokens: number;
+    outputTokens: number;
+    totalTokens: number;
+  };
 }
 
+/** Recall response — top-level `results` array per v0.8.4 docs. */
 export interface HindsightRecallResponse {
-  items: HindsightMemoryItem[];
+  results: HindsightRecallResult[];
 }
 
 export interface HindsightClient {
@@ -75,53 +108,97 @@ function parseRetainResponse(raw: unknown): HindsightRetainResponse {
   if (!isRecord(raw)) {
     throw new Error("hindsight retain: response is not a JSON object");
   }
-  const id = raw.id;
-  if (typeof id !== "string" || id.length === 0) {
-    throw new Error("hindsight retain: response is missing string 'id'");
+  const success = raw.success;
+  if (typeof success !== "boolean") {
+    throw new Error(
+      "hindsight retain: response is missing boolean 'success'",
+    );
   }
-  return { id };
+  if (success === false) {
+    throw new Error(
+      "hindsight retain: response reports success=false; refusing to treat as accepted",
+    );
+  }
+  const bankId = raw.bank_id;
+  if (typeof bankId !== "string" || bankId.length === 0) {
+    throw new Error(
+      "hindsight retain: response is missing string 'bank_id'",
+    );
+  }
+  const itemsCount = raw.items_count;
+  if (typeof itemsCount !== "number" || !Number.isFinite(itemsCount)) {
+    throw new Error(
+      "hindsight retain: response is missing finite number 'items_count'",
+    );
+  }
+  const asyncFlag = raw.async;
+  if (typeof asyncFlag !== "boolean") {
+    throw new Error(
+      "hindsight retain: response is missing boolean 'async'",
+    );
+  }
+  let usage: HindsightRetainResponse["usage"];
+  if (raw.usage !== undefined) {
+    if (!isRecord(raw.usage)) {
+      throw new Error("hindsight retain: response 'usage' is not an object");
+    }
+    const inputTokens = raw.usage.input_tokens;
+    const outputTokens = raw.usage.output_tokens;
+    const totalTokens = raw.usage.total_tokens;
+    if (
+      typeof inputTokens !== "number" ||
+      typeof outputTokens !== "number" ||
+      typeof totalTokens !== "number" ||
+      !Number.isFinite(inputTokens) ||
+      !Number.isFinite(outputTokens) ||
+      !Number.isFinite(totalTokens)
+    ) {
+      throw new Error(
+        "hindsight retain: response 'usage' is missing finite input_tokens / output_tokens / total_tokens",
+      );
+    }
+    usage = { inputTokens, outputTokens, totalTokens };
+  }
+  return { success, bankId, itemsCount, async: asyncFlag, usage };
 }
 
-function parseMemoryItem(value: unknown, idx: number): HindsightMemoryItem {
+function parseRecallResult(
+  value: unknown,
+  idx: number,
+): HindsightRecallResult {
   if (!isRecord(value)) {
     throw new Error(
-      `hindsight recall: items[${idx}] is not a JSON object`,
+      `hindsight recall: results[${idx}] is not a JSON object`,
     );
   }
   const id = value.id;
-  const content = value.content;
-  const context = value.context;
+  const text = value.text;
   if (typeof id !== "string" || id.length === 0) {
     throw new Error(
-      `hindsight recall: items[${idx}] is missing string 'id'`,
+      `hindsight recall: results[${idx}] is missing string 'id'`,
     );
   }
-  if (typeof content !== "string") {
+  if (typeof text !== "string") {
     throw new Error(
-      `hindsight recall: items[${idx}].content must be a string`,
+      `hindsight recall: results[${idx}].text must be a string`,
     );
   }
-  if (typeof context !== "string") {
-    throw new Error(
-      `hindsight recall: items[${idx}].context must be a string`,
-    );
-  }
-  return { id, content, context };
+  return { id, text, raw: value };
 }
 
 function parseRecallResponse(raw: unknown): HindsightRecallResponse {
   if (!isRecord(raw)) {
     throw new Error("hindsight recall: response is not a JSON object");
   }
-  if (!Array.isArray(raw.items)) {
+  if (!Array.isArray(raw.results)) {
     throw new Error(
-      "hindsight recall: response is missing string[] 'items'",
+      "hindsight recall: response is missing array 'results'",
     );
   }
-  const items = raw.items.map((value: unknown, idx: number) =>
-    parseMemoryItem(value, idx),
+  const results = raw.results.map((value: unknown, idx: number) =>
+    parseRecallResult(value, idx),
   );
-  return { items };
+  return { results };
 }
 
 // ---------------------------------------------------------------------------
@@ -175,13 +252,14 @@ export function createHindsightClient(
 ): HindsightClient {
   return {
     async retain(content, context) {
+      // v0.8.4 retain body: { items: [{ content, context, ... }] }
       const raw = await hindsightRequest(config, "memories", {
-        content,
-        context,
+        items: [{ content, context }],
       });
       return parseRetainResponse(raw);
     },
     async recall(query) {
+      // v0.8.4 recall body: { query }
       const raw = await hindsightRequest(config, "memories/recall", {
         query,
       });

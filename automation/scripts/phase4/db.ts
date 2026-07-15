@@ -277,13 +277,24 @@ export const EventRecord = {
    *  transitions status → 'processing' in the same statement that
    *  returns the row, so once the statement commits no other worker
    *  can pick the same row (their FOR UPDATE SKIP LOCKED + status
-   *  filter will skip it). */
+   *  filter will skip it).
+   *
+   *  The CTE also excludes events that already have an accepted
+   *  `research_runs` row, so a worker can never re-claim an event
+   *  whose research is already persisted (defence in depth alongside
+   *  the `research_runs_event_accepted_unique` partial index). */
   async claimNextActive(): Promise<SignalEventRow | null> {
     const rows = await db`
       WITH next_active AS (
         SELECT id
         FROM signal_events
         WHERE status = 'active'
+          AND NOT EXISTS (
+            SELECT 1
+            FROM research_runs rr
+            WHERE rr.event_id = signal_events.id
+              AND rr.status = 'accepted'
+          )
         ORDER BY captured_at ASC
         FOR UPDATE SKIP LOCKED
         LIMIT 1
@@ -308,20 +319,7 @@ export const EventRecord = {
       WHERE id = ${id} AND status = 'processing'
     `;
   },
-
-  /** Mark a claimed event as settled (final terminal state). */
-  async markSettled(id: string, terminal: "superseded" | "rejected"): Promise<void> {
-    await db`
-      UPDATE signal_events
-      SET status = ${terminal}
-      WHERE id = ${id}
-    `;
-  },
 };
-
-// ---------------------------------------------------------------------------
-// ResearchRun repository
-// ---------------------------------------------------------------------------
 
 export const ResearchRun = {
   async insert(
@@ -332,6 +330,20 @@ export const ResearchRun = {
       INSERT INTO research_runs ${db({ id, ...input })}
     `;
     return id;
+  },
+
+  /** Returns true when an event already has an `accepted` research
+   *  run. Used by the research CLI to decide whether the claim should
+   *  be released back to `active` (rare — the partial unique index
+   *  also enforces this at the DB level) or marked `superseded`. */
+  async hasAcceptedRunForEvent(eventId: string): Promise<boolean> {
+    const rows = await db`
+      SELECT 1
+      FROM research_runs
+      WHERE event_id = ${eventId} AND status = 'accepted'
+      LIMIT 1
+    `;
+    return rows.length > 0;
   },
 
   async claimNextPending(): Promise<ResearchRunRow | null> {

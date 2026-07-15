@@ -92,6 +92,16 @@ CREATE INDEX IF NOT EXISTS signal_events_research_queue
   ON signal_events (captured_at)
   WHERE status = 'active';
 
+-- Prevent duplicate accepted research_runs for the same event. The
+-- research CLI claims an event atomically and persists exactly one
+-- research_runs row; if a worker error releases the claim back to
+-- 'active' and a retry re-claims the same event, this partial index
+-- makes the second insert fail (rather than silently produce two
+-- accepted research_runs rows).
+CREATE UNIQUE INDEX IF NOT EXISTS research_runs_event_accepted_unique
+  ON research_runs (event_id)
+  WHERE status = 'accepted';
+
 CREATE INDEX IF NOT EXISTS paper_bets_open
   ON paper_bets (entry_session_date)
   WHERE status = 'open';

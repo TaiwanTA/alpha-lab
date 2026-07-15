@@ -79,7 +79,9 @@ export interface ReadEventDetails {
 
 export interface ResearchToolContext {
   eventId: string;
-  event?: ResearchEventPayload;
+  /** The full event payload. Required by `read_event`; the runtime
+   *  always attaches it before the toolkit is constructed. */
+  event: ResearchEventPayload;
   hindsight: HindsightClient;
   twelveData: TwelveDataClient;
   recordResearch: (input: RecordResearchInput) => Promise<{ id: string }>;
@@ -215,16 +217,12 @@ export function createResearchToolkit(ctx: ResearchToolContext): ResearchToolkit
         params: unknown,
       ): Promise<AgentToolResult<ReadEventDetails>> {
         requireObject(params, "read_event");
-        if (!ctx.event) {
-          throw new Error(
-            `read_event: no event payload attached to research context for ${ctx.eventId}`,
-          );
-        }
+        const event = ctx.event;
         const details: ReadEventDetails = {
-          id: ctx.event.id,
-          investor: ctx.event.investor,
-          sourceUrl: ctx.event.sourceUrl,
-          rawContent: ctx.event.rawContent,
+          id: event.id,
+          investor: event.investor,
+          sourceUrl: event.sourceUrl,
+          rawContent: event.rawContent,
         };
         return {
           content: [{ type: "text", text: JSON.stringify(details) }],

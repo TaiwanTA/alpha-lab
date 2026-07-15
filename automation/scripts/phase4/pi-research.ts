@@ -33,6 +33,7 @@ import type { TwelveDataClient } from "./twelve-data.ts";
 import {
   createResearchToolkit,
   type RecordResearchInput,
+  type ResearchEventPayload,
   type ResearchToolContext,
 } from "./tools.ts";
 
@@ -41,7 +42,7 @@ import {
 // `hindsight.ts` / `twelve-data.ts` directly.
 export type { HindsightClient } from "./hindsight.ts";
 export type { TwelveDataClient } from "./twelve-data.ts";
-
+export type { ResearchEventPayload, ResearchToolContext } from "./tools.ts";
 // ---------------------------------------------------------------------------
 // Model + provider selection
 // ---------------------------------------------------------------------------
@@ -93,12 +94,14 @@ export interface PiResearchRuntime {
  *  `runtime.buildAgent()`. */
 export interface PiResearchRuntimeOptions {
   eventId: string;
+  /** The full event payload. Required so the toolkit's `read_event`
+   *  tool can return the claim's data instead of throwing. */
+  event: ResearchEventPayload;
   hindsight: HindsightClient;
   twelveData: TwelveDataClient;
   recordResearch: (input: RecordResearchInput) => Promise<{ id: string }>;
   runAgent?: () => Promise<PiResearchRunResult>;
 }
-
 // ---------------------------------------------------------------------------
 // Runtime builder
 // ---------------------------------------------------------------------------
@@ -114,6 +117,7 @@ export function buildPiResearchRuntime(
   const model = getMinimaxModel();
   const researchCtx: ResearchToolContext = {
     eventId: options.eventId,
+    event: options.event,
     hindsight: options.hindsight,
     twelveData: options.twelveData,
     recordResearch: options.recordResearch,

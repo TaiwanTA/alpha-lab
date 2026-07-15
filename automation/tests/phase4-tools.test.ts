@@ -2,12 +2,12 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 
 import {
   createResearchToolkit,
+  type ResearchEventPayload,
   type ResearchToolContext,
   type HindsightClient,
   type TwelveDataClient,
   type RecordResearchInput,
 } from "../scripts/phase4/tools.ts";
-
 // ---------------------------------------------------------------------------
 // These tests prove the constraint contract:
 //   - Exactly five tools are exposed to the agent
@@ -26,15 +26,22 @@ function makeHindsightStub(
   }> = {},
 ): HindsightClient {
   return {
-    retain: overrides.retain ?? (async () => ({ id: "mem-1" })),
+    retain:
+      overrides.retain ??
+      (async () => ({
+        success: true,
+        bankId: "alpha-lab",
+        itemsCount: 1,
+        async: false,
+      })),
     recall:
       overrides.recall ??
       (async () => ({
-        items: [
+        results: [
           {
             id: "obs-1",
-            content: "prior observation",
-            context: "alpha-lab",
+            text: "prior observation",
+            raw: { context: "alpha-lab" },
           },
         ],
       })),
@@ -68,6 +75,7 @@ function makeContext(
       input: RecordResearchInput,
     ) => Promise<{ id: string }>;
     eventId: string;
+    event: ResearchEventPayload;
   }> = {},
 ): {
   ctx: ResearchToolContext;
@@ -82,6 +90,14 @@ function makeContext(
     });
   const ctx: ResearchToolContext = {
     eventId: overrides.eventId ?? "evt-1",
+    event: overrides.event ?? {
+      id: overrides.eventId ?? "evt-1",
+      investor: "Stub Investor",
+      sourceUrl: "https://example.com/stub",
+      rawContent: "stub raw content",
+      publishedAt: new Date("2026-07-15T00:00:00Z"),
+      capturedAt: new Date("2026-07-15T00:00:01Z"),
+    },
     hindsight: overrides.hindsight ?? makeHindsightStub(),
     twelveData: overrides.twelveData ?? makeTwelveDataStub(),
     recordResearch,
