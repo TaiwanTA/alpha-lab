@@ -72,14 +72,18 @@ tar --exclude='.env' \
 echo "    $(du -h "${TAR_FILE}" | cut -f1) packaged"
 
 echo "[2/6] scp tar to VM + extract"
-# 把 timestamp 收進變數 TS,讓 rm 跟 mv 用同一個值,避免跨秒
-# 時兩個 timestamp 不同的競態。第一次部署時 /opt/alpha-lab
-# /automation 還不存在,mv 會 "No such file or directory" 失敗
-# — 這是合法的 first-deploy 路徑,不是 deploy 錯。first-deploy
-# 之後任何 mv 失敗 (磁碟滿、SELinux、container 還在用舊工作樹)
-# 都是真的 deploy 錯,必須在 extract 之前 abort,否則 tar 解到
-# 還沒搬走的舊 tree 上面會新舊混雜。
-"${SSH_CMD[@]}" --command "TS=\$(date +%s); sudo rm -rf /opt/alpha-lab/automation.bak.\$TS 2>/dev/null; if [ -d /opt/alpha-lab/automation ]; then sudo mv /opt/alpha-lab/automation /opt/alpha-lab/automation.bak.\$TS; fi; sudo mkdir -p /opt/alpha-lab/automation && sudo chown \$(whoami):\$(id -gn) /opt/alpha-lab/automation"
+# 1. 清理舊 backup,只保留最近 1 個 automation.bak.* — 避免
+#    每次 deploy 留一個舊 snapshot 在 /opt/alpha-lab/ 累積垃圾。
+#    Sort by name(就是 timestamp)確保 stable order;head -n -1
+#    留最新 1 個,把其餘砍掉。-print0/-0 處理任何奇怪檔名。
+# 2. 把 timestamp 收進變數 TS,讓 rm 跟 mv 用同一個值,避免跨秒
+#    時兩個 timestamp 不同的競態。第一次部署時 /opt/alpha-lab
+#    /automation 還不存在,mv 會 "No such file or directory" 失敗
+#    — 這是合法的 first-deploy 路徑,不是 deploy 錯。first-deploy
+#    之後任何 mv 失敗 (磁碟滿、SELinux、container 還在用舊工作樹)
+#    都是真的 deploy 錯,必須在 extract 之前 abort,否則 tar 解到
+#    還沒搬走的舊 tree 上面會新舊混雜。
+"${SSH_CMD[@]}" --command 'set -e; python3 -c "import subprocess; baks=sorted(__import__(\"glob\").glob(\"/opt/alpha-lab/automation.bak.*\")); baks=[p for p in baks if __import__(\"os\").path.isdir(p)]; [subprocess.check_call([\"/usr/bin/sudo\",\"rm\",\"-rf\",p]) for p in baks[:-1]]" || true; TS=$(date +%s); sudo rm -rf "/opt/alpha-lab/automation.bak.${TS}" 2>/dev/null; if [ -d /opt/alpha-lab/automation ]; then sudo mv /opt/alpha-lab/automation "/opt/alpha-lab/automation.bak.${TS}"; fi; sudo mkdir -p /opt/alpha-lab/automation && sudo chown $(whoami):$(id -gn) /opt/alpha-lab/automation; echo "    pruned old backups, kept latest, mv ok"'
 gcloud compute scp --zone "${ZONE}" "${TAR_FILE}" "${INSTANCE}:/tmp/dagu-deploy.tar.gz" --project "${PROJECT}"
 rm -f "${TAR_FILE}"
 "${SSH_CMD[@]}" --command "cd /opt/alpha-lab/automation && sudo tar -xzf /tmp/dagu-deploy.tar.gz --strip-components=1 --no-same-owner && sudo chown -R \$(whoami):\$(id -gn) . && (shopt -s nullglob; for f in scripts/*.sh deploy/dagu/*.sh ops/*.sh; do [ -e \"\$f\" ] && sudo chmod +x \"\$f\" || true; done) && rm -f /tmp/dagu-deploy.tar.gz && echo '    extracted'"
