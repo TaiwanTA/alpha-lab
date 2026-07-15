@@ -11,6 +11,7 @@ import {
   type XApiClient,
   type XTweet,
 } from "../scripts/phase4/x-client.ts";
+import { commitSourceBatch } from "../scripts/ingest-events.ts";
 
 // ---------------------------------------------------------------------------
 // parseInvestorSources — strict X-only YAML registry parser.
@@ -119,6 +120,36 @@ sources:
     expect(() => parseInvestorSources(numericHandle)).toThrow(/handle/i);
   });
 
+  test("enforces X username grammar", () => {
+    const valid = parseInvestorSources(`version: 1
+sources:
+  - key: valid
+    investor: Valid
+    type: x
+    handle: A_b123456789012
+    enabled: true
+`);
+    expect(valid.sources[0]?.handle).toBe("A_b123456789012");
+
+    for (const handle of [
+      "@BillAckman",
+      "bill-ackman",
+      "has space",
+      "投資人",
+      "abcdefghijklmnop",
+    ]) {
+      const yaml = `version: 1
+sources:
+  - key: invalid
+    investor: Invalid
+    type: x
+    handle: ${JSON.stringify(handle)}
+    enabled: true
+`;
+      expect(() => parseInvestorSources(yaml)).toThrow(/handle/i);
+    }
+  });
+
   test("rejects malformed YAML", () => {
     expect(() => parseInvestorSources(":\n  : -")).toThrow();
   });
@@ -200,7 +231,7 @@ describe("URL builders", () => {
   test("buildTimelineUrl adds exclude and tweet.fields", () => {
     const url = buildTimelineUrl("42", undefined);
     expect(url).toContain("users/42/tweets");
-    expect(url).toContain("exclude=replies%2cretweets");
+    expect(url).toContain("exclude=replies%2Cretweets");
     expect(url).toContain("tweet.fields=created_at");
     expect(url).not.toContain("since_id");
   });
@@ -216,6 +247,11 @@ describe("URL builders", () => {
     expect(url).toContain("since_id=100");
   });
 });
+
+  test("buildTimelineUrl preserves an opaque mixed-case pagination token", () => {
+    const url = new URL(buildTimelineUrl("42", "100", "AbC-DeF_123"));
+    expect(url.searchParams.get("pagination_token")).toBe("AbC-DeF_123");
+  });
 
 // ---------------------------------------------------------------------------
 // normalizeTweets — turn the X v2 timeline payload into the canonical
@@ -256,17 +292,22 @@ describe("normalizeTweets", () => {
     expect(rows[0]?.contentHash).toMatch(/^[a-f0-9]{64}$/);
   });
 
-  test("drops tweets missing id or created_at", () => {
-    const payload = {
-      data: [
-        { id: "100", text: "ok", created_at: "2026-07-01T12:00:00.000Z" },
-        { id: "101", text: "missing date" },
-        { text: "missing id", created_at: "2026-07-01T13:00:00.000Z" },
-      ],
-    };
-    const rows = normalizeTweets(payload, source);
-    expect(rows).toHaveLength(1);
-    expect(rows[0]?.sourceUrl).toBe("https://x.com/BillAckman/status/100");
+  test("throws when any returned tweet is malformed", () => {
+    const malformedTweets: unknown[] = [
+      null,
+      { id: "", text: "empty id", created_at: "2026-07-01T12:00:00.000Z" },
+      { id: 100, text: "numeric id", created_at: "2026-07-01T12:00:00.000Z" },
+      { id: "100", created_at: "2026-07-01T12:00:00.000Z" },
+      { id: "100", text: 123, created_at: "2026-07-01T12:00:00.000Z" },
+      { id: "100", text: "missing date" },
+      { id: "100", text: "bad date", created_at: "not-a-date" },
+    ];
+
+    for (const tweet of malformedTweets) {
+      expect(() =>
+        normalizeTweets({ data: [tweet] } as never, source),
+      ).toThrow(/malformed tweet/i);
+    }
   });
 
   test("produces a deterministic content_hash for identical inputs", () => {
@@ -398,6 +439,28 @@ describe("IngestXClient", () => {
     expect(tweets).toHaveLength(1);
   });
 
+  test("fetchTimeline throws when next_token is present but invalid", async () => {
+    const api = fakeClient(async () =>
+      new Response(
+        JSON.stringify({
+          data: [
+            { id: "1", text: "valid", created_at: "2026-07-01T12:00:00.000Z" },
+          ],
+          meta: { next_token: null },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      ),
+    );
+    const client = new IngestXClient(api);
+
+    const collect = async (): Promise<void> => {
+      for await (const _tweet of client.fetchTimeline("42")) {
+        // Exhaust the generator so page validation runs.
+      }
+    };
+    expect(collect()).rejects.toThrow(/next_token/i);
+  });
+
   test("429 propagates as a thrown error so Dagu can retry", async () => {
     const api = fakeClient(async () =>
       new Response("rate limited", { status: 429 }),
@@ -412,5 +475,42 @@ describe("IngestXClient", () => {
     );
     const client = new IngestXClient(api);
     expect(client.lookupUserId("BillAckman")).rejects.toThrow(/503/);
+  });
+});
+
+describe("commitSourceBatch", () => {
+  test("counts only rows returned by INSERT ON CONFLICT DO NOTHING", async () => {
+    const source: InvestorSource = {
+      key: "bill-ackman-x",
+      investor: "Bill Ackman",
+      type: "x",
+      handle: "BillAckman",
+      enabled: true,
+    };
+    const events = [
+      { id: "2", text: "new", createdAt: new Date("2026-07-02T00:00:00.000Z") },
+      { id: "1", text: "duplicate", createdAt: new Date("2026-07-01T00:00:00.000Z") },
+    ];
+    let signalInsert = 0;
+    const tx = async (
+      stringsOrValues: TemplateStringsArray | Record<string, unknown>,
+    ) => {
+      if (!Array.isArray(stringsOrValues)) return "values";
+      if (stringsOrValues.join("").includes("INSERT INTO signal_events")) {
+        signalInsert += 1;
+        return signalInsert === 1 ? [{ id: "inserted" }] : [];
+      }
+      return [];
+    };
+
+    const result = await commitSourceBatch(
+      tx as never,
+      source,
+      "42",
+      null,
+      events,
+    );
+
+    expect(result).toEqual({ inserted: 1, cursor: "2" });
   });
 });

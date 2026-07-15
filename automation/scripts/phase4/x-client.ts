@@ -99,7 +99,7 @@ export function parseInvestorSources(text: string): InvestorSourceRegistry {
       );
     }
     const handle = src.handle;
-    if (typeof handle !== "string" || handle.trim().length === 0) {
+    if (typeof handle !== "string" || !/^[A-Za-z0-9_]{1,15}$/.test(handle)) {
       throw new Error(
         `investor sources: ${label} '${key}' has a malformed handle`,
       );
@@ -147,7 +147,7 @@ export function buildTimelineUrl(
   if (paginationToken !== undefined && paginationToken.length > 0) {
     params.set("pagination_token", paginationToken);
   }
-  return `https://api.x.com/2/users/${encodeURIComponent(userId)}/tweets?${params.toString().toLowerCase()}`;
+  return `https://api.x.com/2/users/${encodeURIComponent(userId)}/tweets?${params.toString()}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -181,22 +181,30 @@ export type XTimelinePayload = {
 };
 
 export function extractTweets(payload: XTimelinePayload): XTweet[] {
-  if (!Array.isArray(payload.data)) return [];
-  const out: XTweet[] = [];
-  for (const raw of payload.data) {
-    if (raw === null || typeof raw !== "object") continue;
-    const tweet = raw as { id?: unknown; text?: unknown; created_at?: unknown };
-    if (typeof tweet.id !== "string" || tweet.id.length === 0) continue;
-    if (typeof tweet.created_at !== "string") continue;
-    const createdAt = new Date(tweet.created_at);
-    if (Number.isNaN(createdAt.getTime())) continue;
-    out.push({
-      id: tweet.id,
-      text: typeof tweet.text === "string" ? tweet.text : "",
-      createdAt,
-    });
+  if (payload.data === undefined) return [];
+  if (!Array.isArray(payload.data)) {
+    throw new Error("x client: timeline returned malformed tweet data");
   }
-  return out;
+
+  return payload.data.map((raw, index) => {
+    if (raw === null || typeof raw !== "object") {
+      throw new Error(`x client: timeline returned malformed tweet #${index + 1}`);
+    }
+    const tweet = raw as { id?: unknown; text?: unknown; created_at?: unknown };
+    if (
+      typeof tweet.id !== "string" ||
+      tweet.id.length === 0 ||
+      typeof tweet.text !== "string" ||
+      typeof tweet.created_at !== "string"
+    ) {
+      throw new Error(`x client: timeline returned malformed tweet #${index + 1}`);
+    }
+    const createdAt = new Date(tweet.created_at);
+    if (Number.isNaN(createdAt.getTime())) {
+      throw new Error(`x client: timeline returned malformed tweet #${index + 1}`);
+    }
+    return { id: tweet.id, text: tweet.text, createdAt };
+  });
 }
 export function normalizeTweets(
   payload: XTimelinePayload,
@@ -273,8 +281,12 @@ export class IngestXClient {
       }
       const payload = (await response.json()) as XTimelinePayload;
       yield* extractTweets(payload);
-      const next = payload.meta?.next_token;
-      if (typeof next !== "string" || next.length === 0) break;
+      const meta = payload.meta;
+      if (meta === undefined || !("next_token" in meta)) break;
+      const next = meta.next_token;
+      if (typeof next !== "string" || next.length === 0) {
+        throw new Error("x client: timeline returned invalid next_token");
+      }
       paginationToken = next;
     }
   }

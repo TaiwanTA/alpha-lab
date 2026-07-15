@@ -89,7 +89,7 @@ type SourceCheckpointRow = {
  *  `tx` is the Bun SQL transaction handle yielded by `db.begin(...)`.
  *  We accept the `SQL` instance from the caller so a future Task
  *  can substitute a test-time `SQL` (e.g. via `LedgerDb.db`). */
-async function commitSourceBatch(
+export async function commitSourceBatch(
   tx: SQL,
   source: InvestorSource,
   xUserId: string,
@@ -123,10 +123,11 @@ async function commitSourceBatch(
   // ledger, so the UNIQUE constraint will silently absorb any
   // duplicates the upstream API returns.
   const newestId = events[0]?.id ?? null;
+  let inserted = 0;
 
   for (const tweet of events) {
     const contentHash = await sha256Utf8(tweet.text);
-    await tx`
+    const rows = await tx<{ id: string }[]>`
       INSERT INTO signal_events ${tx({
         id: crypto.randomUUID(),
         source_key: source.key,
@@ -139,7 +140,9 @@ async function commitSourceBatch(
         payload: { tweet_id: tweet.id, x_user_id: xUserId },
       })}
       ON CONFLICT (investor, source_url, published_at, content_hash) DO NOTHING
+      RETURNING id
     `;
+    inserted += rows.length;
   }
 
   await tx`
@@ -154,7 +157,7 @@ async function commitSourceBatch(
           updated_at = now()
   `;
 
-  return { inserted: events.length, cursor: newestId };
+  return { inserted, cursor: newestId };
 }
 
 /** SHA-256 over the UTF-8 bytes of `text`, returned as lowercase
