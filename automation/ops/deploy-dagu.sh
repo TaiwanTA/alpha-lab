@@ -18,7 +18,9 @@
 #      dags-sync 第一次跑會 git clone 進 dags 子目錄,5-30s
 #      內 dags 出現)
 #   5. 等兩個 container 都 running (最多 30s)
-#   6. verify:systemd active + dagu http 200 + dags-sync log
+#   6. verify:systemd active + 7 Phase 4 DAG YAML 在
+#      /var/lib/alpha-lab/dagu/dags 都存在 + dagu http 200 +
+#      dags-sync log
 #
 # 不做的事:
 #   - 不會把 git branch 推到 origin (那個 user 自己做)
@@ -39,7 +41,15 @@
 #
 # 用法:
 #   ./ops/deploy-dagu.sh
-
+#
+# Phase 4 update (Task 5 brief Step 2):step 6 verifier 從原本
+# 「systemd active + dagu http 200 + dags-sync log」擴充為也
+# 檢查 7 個 Phase 4 DAG YAML (`blog-publish`, `calibrate-signals`,
+# `ingest-events`, `open-next-paper-bet`, `publish-next-research`,
+# `research-next-event`, `settle-paper-bets`) 都已由 dags-sync
+# 從 main 拉到 `/var/lib/alpha-lab/dagu/dags`。舊的 `fixture-research`
+# DAG 在 Phase 4 cutover 時已移除 — verifier 不列它,也不觸發任何
+# live X / LLM / blog-publish code path。
 set -euo pipefail
 
 ZONE="asia-east1-b"
@@ -112,24 +122,57 @@ done
 sudo /usr/bin/docker compose ps'
 
 echo "[6/6] verify"
-"${SSH_CMD[@]}" --command 'set -e
-# systemd active
-if ! sudo systemctl is-active --quiet alpha-lab-dagu.service; then
-  echo "    ERROR: alpha-lab-dagu.service not active"
-  sudo systemctl status alpha-lab-dagu.service --no-pager
-  exit 1
-fi
-echo "    systemd: active"
-# dagu http
-code=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8080/)
-if [ "${code}" != "200" ]; then
-  echo "    ERROR: dagu http ${code}"
-  echo "    dagu container tail (debug):"
-  sudo docker logs --tail 30 alpha-lab-dagu 2>&1 | sed "s/^/      /"
-  exit 1
-fi
-echo "    dagu http: 200"
-# dags-sync container log 最後幾行 (git clone / pull 結果)
-echo "    dags-sync tail:"
-sudo docker logs --tail 5 alpha-lab-dags-sync 2>&1 | sed "s/^/      /"
-'
+# Phase 4 DAG 清單 — brief Step 2 要求 deploy verifier 證明這 7 個
+# YAML 都已透過 dags-sync 從 main 拉到 /var/lib/alpha-lab/dagu/dags。
+# `fixture-research.yaml` 在 Phase 4 cutover 時已移除(brief 計劃
+# review checklist 第 3 條:舊 fixture DAG 跟 direct-fetch agent 同
+# 一個 task 移除,沒有 compatibility path 留下)。Verifier 不列
+# fixture-research,也不觸發任何 live X / LLM / blog-publish 的
+# code path。
+PHASE4_DAGS="blog-publish calibrate-signals ingest-events open-next-paper-bet publish-next-research research-next-event settle-paper-bets"
+# 用 printf 把要送給 VM 的 shell command 組出來。PHASE4_DAGS
+# (local variable) 在 printf argument list 展開成 DAG 清單字串;
+# 其它每一行 VM-side 變數(${d}/${missing}/${running}/${code})都用
+# 單引號包住,在 local shell 不展開,VM 上才展開。printf 也避免內
+# 層 \\$var / \"\$var\" 容易踩到的引號配錯。
+VERIFY_CMD=$(printf '%s\n' \
+  'set -e' \
+  'if ! sudo systemctl is-active --quiet alpha-lab-dagu.service; then' \
+  '  echo "    ERROR: alpha-lab-dagu.service not active"' \
+  '  sudo systemctl status alpha-lab-dagu.service --no-pager' \
+  '  exit 1' \
+  'fi' \
+  'echo "    systemd: active"' \
+  'missing=0' \
+  "for d in ${PHASE4_DAGS}; do" \
+  '  if sudo test -f "/var/lib/alpha-lab/dagu/dags/${d}.yaml"; then' \
+  '    echo "    dag: ${d}.yaml present"' \
+  '  else' \
+  '    echo "    ERROR: dag ${d}.yaml missing in /var/lib/alpha-lab/dagu/dags"' \
+  '    missing=1' \
+  '  fi' \
+  'done' \
+  'if [ "${missing}" -ne 0 ]; then' \
+  '  echo "    dags-sync tail (debug):"' \
+  '  sudo docker logs --tail 20 alpha-lab-dags-sync 2>&1 | sed "s/^/      /"' \
+  '  exit 1' \
+  'fi' \
+  '# 兩個 Compose container 都 running — closure check(避免 step 5 等完到這裡又被任何 concurrent restart 弄掉)' \
+  "running=\$(sudo /usr/bin/docker compose ps --status running 2>/dev/null | grep -cE 'alpha-lab-dagu|alpha-lab-dags-sync')" \
+  'if [ "${running}" -lt 2 ]; then' \
+  '  echo "    ERROR: expected 2 compose containers running, got ${running}"' \
+  '  sudo /usr/bin/docker compose ps' \
+  '  exit 1' \
+  'fi' \
+  'echo "    compose containers: ${running}/2 running"' \
+  "code=\$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8080/)" \
+  'if [ "${code}" != "200" ]; then' \
+  '  echo "    ERROR: dagu http ${code}"' \
+  '  echo "    dagu container tail (debug):"' \
+  '  sudo docker logs --tail 30 alpha-lab-dagu 2>&1 | sed "s/^/      /"' \
+  '  exit 1' \
+  'fi' \
+  'echo "    dagu http: 200"' \
+  'echo "    dags-sync tail:"' \
+  'sudo docker logs --tail 5 alpha-lab-dags-sync 2>&1 | sed "s/^/      /"')
+"${SSH_CMD[@]}" --command "${VERIFY_CMD}"
