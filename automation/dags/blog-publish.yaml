@@ -102,7 +102,7 @@ steps:
       bun run scripts/publish-draft.ts \
         --candidate "${WORKDIR}/candidate.md" \
         --blog-dir "${WORKDIR}/blog" \
-        --runtime-sha "${params.runtime_sha}"
+        --runtime-sha "${params.runtime_sha:-$(git -C "${WORKDIR}" rev-parse HEAD)}"
     env:
 
   - id: site_lint_build

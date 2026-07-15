@@ -9,7 +9,6 @@ env:
 
 steps:
   - id: claim
-    working_dir: /opt/alpha-lab/automation
     run: |
       set -euo pipefail
       export PATH="$HOME/.bun/bin:$PATH"
@@ -26,7 +25,6 @@ steps:
 
   - id: execute_claim
     depends: [claim]
-    working_dir: /opt/alpha-lab/automation
     run: |
       set -euo pipefail
       export PATH="$HOME/.bun/bin:$PATH"
@@ -64,7 +62,7 @@ steps:
       fi
       if [ "$PUBLICATION_STATUS" != "pushed" ] && [ "$PUBLICATION_STATUS" != "published" ]; then
         dagu start /var/lib/alpha-lab/dagu/dags/blog-publish.yaml \
-          --params "research_run_id=$RESEARCH_RUN_ID,claim_owner=$CLAIM_OWNER,runtime_sha=$(git rev-parse HEAD)"
+          --params "research_run_id=$RESEARCH_RUN_ID,claim_owner=$CLAIM_OWNER,runtime_sha="
       fi
       bun run scripts/publish-next-research.ts --mark-published "$RESEARCH_RUN_ID" --owner "$CLAIM_OWNER"
     env:
