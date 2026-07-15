@@ -153,6 +153,13 @@ else
           # PUBLISH_TOKEN 暫停用,跳過
           continue
         fi
+        # Phase 4 event-ledger runtime contract — Phase 4
+        # workers (capture / research / settlement) read these.
+        # DATABASE_URL 必須用 host.docker.internal,不能是
+        # 127.0.0.1 — 容器內 127.0.0.1 是 container 自己的
+        # loopback,連不到 host PostgreSQL。docker-compose
+        # 的 dagu service 已加 extra_hosts 把 host.docker.internal
+        # 指向 host-gateway。
         # 一般 secret
         # < /dev/tty:while 迴圈 stdin 被 template file 佔用,
         # read 需要從 terminal 讀使用者輸入

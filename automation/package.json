@@ -8,7 +8,10 @@
     "publish-draft": "bun run scripts/publish-draft.ts"
   },
   "dependencies": {
-    "gray-matter": "^4.0.3"
+    "@earendil-works/pi-agent-core": "0.80.7",
+    "@earendil-works/pi-ai": "0.80.7",
+    "gray-matter": "^4.0.3",
+    "yaml": "2.8.1"
   },
   "devDependencies": {
     "@types/bun": "latest",
