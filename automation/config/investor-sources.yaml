@@ -1,0 +1,7 @@
+version: 1
+sources:
+  - key: bill-ackman-x
+    investor: Bill Ackman
+    type: x
+    handle: BillAckman
+    enabled: true
