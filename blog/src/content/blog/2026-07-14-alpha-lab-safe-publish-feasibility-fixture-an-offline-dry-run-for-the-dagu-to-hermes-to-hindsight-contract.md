@@ -7,7 +7,7 @@ summary: >-
   A synthetic, non-investment integration fixture used by the Dagu
   feasibility-check DAG to verify the Dagu–Hermes–Hindsight contract before any
   real research workflow is built.
-status: draft
+status: unverified
 tags:
   - 系統驗證
 investors: []

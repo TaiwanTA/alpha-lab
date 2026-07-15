@@ -4,7 +4,7 @@ date: '2026-07-14'
 summary: >-
   A note on the offline, non-financial fixture that validates the
   Dagu-to-Hermes-to-Hindsight contract.
-status: draft
+status: unverified
 tags:
   - 系統驗證
 investors: []

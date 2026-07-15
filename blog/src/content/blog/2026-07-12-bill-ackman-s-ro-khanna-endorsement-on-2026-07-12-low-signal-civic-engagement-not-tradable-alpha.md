@@ -11,7 +11,7 @@ summary: >-
   content with one-word or short political reactions, this post is assessed as
   low-signal political/civic commentary and is not a tradable alpha event on its
   own.
-status: draft
+status: unverified
 tags:
   - bill-ackman
   - pershing-square

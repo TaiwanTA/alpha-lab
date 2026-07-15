@@ -5,7 +5,7 @@ summary: >-
   A non-investment, offline fixture used by the Dagu feasibility-check DAG to
   verify the Dagu-to-Hermes-to-Hindsight contract before any real research or
   publication workflow is built on top of it.
-status: draft
+status: unverified
 tags:
   - 系統驗證
 investors: []

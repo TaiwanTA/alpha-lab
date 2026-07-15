@@ -72,7 +72,9 @@ function validateFrontmatter(data: Record<string, unknown>): void {
     throw new PublishError("frontmatter.summary must be a non-empty string ≤ 500 chars");
   }
 
-  // 輸入的 status 欄位刻意忽略:publisher 一律強制寫成 "draft"。
+  // 輸入的 status 欄位刻意忽略:publisher 一律強制寫成 "unverified"。
+  // archive / 文章列表的 getPublishedPosts() 只收 status != 'draft',
+  // 若發布時留 draft,新文永遠不會在 archive 出現。
 
   for (const name of ["tags", "investors", "tickers"] as const) {
     const v = data[name];
@@ -184,7 +186,7 @@ export async function publishDraft(input: PublishDraftInput): Promise<PublishDra
   const title = parsed.data.title as string;
   const targetPath = deriveTargetPath(blogDir, date, title);
 
-  const forced = { ...parsed.data, status: "draft" as const };
+  const forced = { ...parsed.data, status: "unverified" as const };
   const bodyWithSha = appendRuntimeSha(parsed.content, runtimeSha);
   const content = matter.stringify(bodyWithSha, forced as never);
 

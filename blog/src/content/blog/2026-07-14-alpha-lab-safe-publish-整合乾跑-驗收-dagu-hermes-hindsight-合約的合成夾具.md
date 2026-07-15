@@ -4,7 +4,7 @@ date: '2026-07-14'
 summary: >-
   本次發佈為一支合成的離線整合測試夾具，旨在驗證 Dagu feasibility-check DAG、Hermes 寫作層與 Hindsight
   記憶層之間的端對端合約，並非真實研究產出。
-status: draft
+status: unverified
 tags:
   - 系統驗證
 investors: []

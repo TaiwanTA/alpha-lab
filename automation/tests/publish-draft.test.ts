@@ -40,9 +40,9 @@ function baseFrontmatter(overrides: Record<string, unknown> = {}): string {
 
 
 describe("publishDraft", () => {
-  test("valid candidate writes the deterministic target with forced draft status", async () => {
+  test("valid candidate writes the deterministic target with forced unverified status", async () => {
     const { root, candidatePath, blogDir } = makeScratch("valid");
-    const candidate = baseFrontmatter({ status: "unverified" }) +
+    const candidate = baseFrontmatter({ status: "draft" }) +
       "## 來源\n\n- https://example.com/article\n";
     writeFileSync(candidatePath, candidate);
 
@@ -53,8 +53,8 @@ describe("publishDraft", () => {
     expect(result.targetPath).toBe(targetPath);
     expect(existsSync(targetPath)).toBe(true);
     const written = readFileSync(targetPath, "utf8");
-    expect(written).toContain("status: draft");
-    expect(written).not.toContain("status: unverified");
+    expect(written).toContain("status: unverified");
+    expect(written).not.toContain("status: draft");
 
     rmSync(root, { recursive: true, force: true });
   });

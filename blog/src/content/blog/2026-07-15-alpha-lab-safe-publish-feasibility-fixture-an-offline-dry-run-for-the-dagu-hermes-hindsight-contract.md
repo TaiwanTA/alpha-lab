@@ -7,7 +7,7 @@ summary: >-
   A synthetic, offline, non-investment dry-run fixture used solely to verify the
   Dagu-to-Hermes-to-Hindsight integration contract before any real research
   workflow is built on top of it.
-status: draft
+status: unverified
 tags:
   - 系統驗證
 investors: []
