@@ -63,8 +63,7 @@ cd "${LOCAL_ROOT}"
 echo "[1/6] packaging automation/ to /tmp/dagu-deploy.tar.gz"
 TAR_FILE=$(mktemp /tmp/dagu-deploy-XXXXXX.tar.gz)
 trap 'rm -f "${TAR_FILE}"' EXIT
-tar --exclude='node_modules' \
-    --exclude='.env' \
+tar --exclude='.env' \
     --exclude='.env.local' \
     --exclude='*.log' \
     --exclude='tests/.tmp' \

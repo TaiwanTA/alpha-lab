@@ -30,8 +30,8 @@ steps:
       set -euo pipefail
       export PATH="$HOME/.bun/bin:$PATH"
       CLAIM_OWNER="${DAG_RUN_ID}"
-      ACTION="$(bun -e 'const value=JSON.parse(process.argv[1]); process.stdout.write(value.action)' "$CLAIM_JSON")"
-      RESEARCH_RUN_ID="$(bun -e 'const value=JSON.parse(process.argv[1]); process.stdout.write(value.researchRunId)' "$CLAIM_JSON")"
+      ACTION="$(printf '%s' '${CLAIM_JSON}' | bun -e 'const value=JSON.parse(await Bun.stdin.text()); process.stdout.write(value.action)')"
+      RESEARCH_RUN_ID="$(printf '%s' '${CLAIM_JSON}' | bun -e 'const value=JSON.parse(await Bun.stdin.text()); process.stdout.write(value.researchRunId)')"
       # Idempotency guard against retry: if execute_claim already drove
       # this research_run_id past 'claimed' on a prior attempt, skip the
       # destructive child DAG invocation. Without this gate, a retry
