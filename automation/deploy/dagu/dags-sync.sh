@@ -61,12 +61,19 @@ sync_once() {
       return 1
     }
   else
-    # --ff-only: 如果 shallow clone 跟 remote 有分歧 (例如
-    # remote 被 force-push),git pull 會報 "Need to specify
-    # how to reconcile divergent branches" 並卡住。--ff-only
-    # 讓它直接 fail,然後下面的 rm -rf 觸發 next sync 重新 clone。
-    git -C "${CLONE_DIR}" pull --ff-only --depth 1 origin "${BRANCH}" || {
-      log "ERROR: git pull failed, wiping clone for fresh retry"
+    # git fetch + git reset --hard:比 git pull 更適合
+    # shallow clone 同步腳本。git pull (即使 --ff-only) 在
+    # shallow --depth 1 clone 下,如果 remote 被 force-push
+    # 或歷史不連續,會因找不到共同祖先而 fail。fetch + reset
+    # --hard 直接把 local state 強制對齊 remote,不嘗試
+    # merge,不需要共同祖先。適合唯讀同步(sidecar 只讀
+    # remote,不會本地 commit)。
+    git -C "${CLONE_DIR}" fetch --depth 1 origin "${BRANCH}" || {
+      log "ERROR: git fetch failed (will retry in ${INTERVAL}s)"
+      return 1
+    }
+    git -C "${CLONE_DIR}" reset --hard "origin/${BRANCH}" || {
+      log "ERROR: git reset failed, wiping clone for fresh retry"
       rm -rf "${CLONE_DIR}"
       return 1
     }
