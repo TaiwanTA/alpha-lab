@@ -142,6 +142,7 @@ VERIFY_CMD=$(printf '%s\n' \
   '  exit 1' \
   'fi' \
   'echo "    systemd: active"' \
+  'cd /opt/alpha-lab/automation/deploy/dagu' \
   'missing=0' \
   "for d in ${PHASE4_DAGS}; do" \
   '  if sudo test -f "/var/lib/alpha-lab/dagu/dags/${d}.yaml"; then' \
