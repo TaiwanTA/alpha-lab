@@ -1,5 +1,6 @@
 #!/usr/bin/env bun
 
+import { SQL } from "bun";
 import { LedgerDb, type PaperBetRow, type ResearchRunRow } from "./phase4/db.ts";
 import { qualifiesForBet, type MarketSession, type ResearchDirection } from "./phase4/contracts.ts";
 import {
@@ -135,11 +136,13 @@ export function isTerminalUnavailablePrice(error: unknown): boolean {
 export async function settleOpenBets(deps: SettlementDependencies): Promise<{
   examined: number;
   settled: number;
+  alreadySettled: number;
   unresolved: number;
   pending: number;
 }> {
   const bets = await deps.listOpen();
   let settled = 0;
+  let alreadySettled = 0;
   let unresolved = 0;
   let pending = 0;
   for (const bet of bets) {
@@ -160,31 +163,47 @@ export async function settleOpenBets(deps: SettlementDependencies): Promise<{
       continue;
     }
     const returnPct = calculateReturn(bet.direction, bet.entry_price, exit.adjustedClose);
-    await deps.settle({
-      paperBetId: bet.id,
-      exitPrice: exit.adjustedClose,
-      exitPriceSource: PRICE_SOURCE,
-      returnPct,
-      outcome: returnPct > 0 ? "win" : "loss",
-    });
-    settled += 1;
+    try {
+      await deps.settle({
+        paperBetId: bet.id,
+        exitPrice: exit.adjustedClose,
+        exitPriceSource: PRICE_SOURCE,
+        returnPct,
+        outcome: returnPct > 0 ? "win" : "loss",
+      });
+      settled += 1;
+    } catch (error) {
+      // 23505 (unique_violation) on bet_outcomes.paper_bet_id means a
+      // sibling worker raced this loop and persisted an outcome first.
+      // listOpen() returns status='open' rows; a concurrent settler can
+      // flip that to 'settled' between read and write. Treat the duplicate
+      // outcome as "already settled" and continue — counting it would
+      // mask the race, throwing would abort the whole batch and strand
+      // every later bet in 'open'.
+      if (error instanceof SQL.PostgresError && error.code === "23505") {
+        alreadySettled += 1;
+        continue;
+      }
+      throw error;
+    }
   }
-  return { examined: bets.length, settled, unresolved, pending };
+  return { examined: bets.length, settled, alreadySettled, unresolved, pending };
 }
 
 async function claimNextQualifying(owner: string): Promise<ClaimedQualifyingRun | null> {
   const rows = await LedgerDb.db`
-    WITH recoverable AS (
+    WITH recoverable_target AS (
+      SELECT candidate.research_run_id
+      FROM paper_bet_opening_claims candidate
+      WHERE candidate.claimed_at < now() - interval '30 minutes'
+      ORDER BY candidate.claimed_at ASC
+      FOR UPDATE SKIP LOCKED
+      LIMIT 1
+    ), recoverable AS (
       UPDATE paper_bet_opening_claims claim
       SET claim_owner = ${owner}, claimed_at = now()
-      WHERE claim.research_run_id = (
-        SELECT candidate.research_run_id
-        FROM paper_bet_opening_claims candidate
-        WHERE candidate.claimed_at < now() - interval '30 minutes'
-        ORDER BY candidate.claimed_at ASC
-        FOR UPDATE SKIP LOCKED
-        LIMIT 1
-      )
+      FROM recoverable_target
+      WHERE claim.research_run_id = recoverable_target.research_run_id
       RETURNING claim.research_run_id
     ), next_run AS (
       SELECT rr.id

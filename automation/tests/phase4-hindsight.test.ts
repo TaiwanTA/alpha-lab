@@ -271,3 +271,46 @@ describe("hindsight recall — v0.8.4 wire protocol", () => {
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// AbortSignal — every fetch must carry a finite-timeout signal so a
+// hung provider cannot strand a research run. The production code
+// uses AbortSignal.timeout(120_000) on the fetch init. The existing
+// stubFetch helper does not surface the signal, so this test installs
+// its own minimal stub to observe init.signal directly.
+// ---------------------------------------------------------------------------
+
+describe("hindsight fetch — abort signal", () => {
+  test("retain fetch carries an AbortSignal with a finite timeout", async () => {
+    const originalFetch = globalThis.fetch;
+    let capturedSignal: AbortSignal | null = null;
+    globalThis.fetch = (async (
+      _input: RequestInfo | URL,
+      init?: RequestInit,
+    ) => {
+      const signal: AbortSignal | null = (init?.signal ?? null) as AbortSignal | null;
+      capturedSignal = signal;
+      return new Response(JSON.stringify({
+        success: true,
+        bank_id: "alpha-lab",
+        items_count: 0,
+        async: false,
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    }) as typeof fetch;
+    try {
+      const client = createHindsightClient(BASE_CONFIG);
+      await client.retain("x", "alpha-lab");
+      // capturedSignal is mutated inside the stub; re-bind to a
+      // local to avoid TS's control-flow analysis collapsing the
+      // null check to `never` after `expect().toBeInstanceOf`.
+      const captured = capturedSignal as AbortSignal | null;
+      expect(captured).toBeInstanceOf(AbortSignal);
+      // AbortSignal.timeout sets a deadline; reading aborted before
+      // that deadline must be false. We don't sleep — we just check
+      // the immediate-not-aborted invariant.
+      expect((captured as AbortSignal | undefined)?.aborted ?? null).toBe(false);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+});

@@ -269,6 +269,91 @@ describe("record_research gate", () => {
       }),
     ).rejects.toThrow(/confidence/);
   });
+
+  test("rejects a record_research call with a malformed ticker", async () => {
+    const { ctx } = makeContext();
+    const toolkit = createResearchToolkit(ctx);
+    const recall = toolkit.tools.find((t) => t.name === "recall_memory");
+    const retain = toolkit.tools.find(
+      (t) => t.name === "retain_event_memory",
+    );
+    const record = toolkit.tools.find((t) => t.name === "record_research");
+    if (!recall || !retain || !record) throw new Error("tool missing");
+    await recall.execute("c1", { query: "what prior?" });
+    await retain.execute("c2", { content: "x", context: "alpha-lab" });
+    const malformedTickers = ["aapl", "1234-5678-9012-3456", "AAPL!", "$AAPL", "A APL"];
+    for (const ticker of malformedTickers) {
+      await expect(
+        record.execute("c3", {
+          thesis: "t",
+          ticker,
+          direction: "long",
+          confidence: 0.5,
+          rationale: "r",
+          sourceCitations: ["https://x.com/a/status/1"],
+          candidateMarkdown: "---\ntitle: x\n---\nbody",
+        }),
+      ).rejects.toThrow(/ticker must match/);
+    }
+  });
+
+  test("accepts tickers with dot and dash (BRK.B, RDS-A)", async () => {
+    const { ctx, recordResearchCalls } = makeContext();
+    const toolkit = createResearchToolkit(ctx);
+    const recall = toolkit.tools.find((t) => t.name === "recall_memory");
+    const retain = toolkit.tools.find(
+      (t) => t.name === "retain_event_memory",
+    );
+    const record = toolkit.tools.find((t) => t.name === "record_research");
+    if (!recall || !retain || !record) throw new Error("tool missing");
+    // BRK.B (Berkshire class B — class share with dot)
+    await recall.execute("c1", { query: "what prior?" });
+    await retain.execute("c2", { content: "x", context: "alpha-lab" });
+    const result = await record.execute("c3", {
+      thesis: "t",
+      ticker: "BRK.B",
+      direction: "long",
+      confidence: 0.5,
+      rationale: "r",
+      sourceCitations: ["https://x.com/a/status/1"],
+      candidateMarkdown: "---\ntitle: x\n---\nbody",
+    });
+    expect(result.details).toEqual({ id: "run-1" });
+    expect(recordResearchCalls[0]?.ticker).toBe("BRK.B");
+  });
+
+  test("rejects a record_research call whose citations are not http(s) URLs", async () => {
+    const { ctx } = makeContext();
+    const toolkit = createResearchToolkit(ctx);
+    const recall = toolkit.tools.find((t) => t.name === "recall_memory");
+    const retain = toolkit.tools.find(
+      (t) => t.name === "retain_event_memory",
+    );
+    const record = toolkit.tools.find((t) => t.name === "record_research");
+    if (!recall || !retain || !record) throw new Error("tool missing");
+    await recall.execute("c1", { query: "what prior?" });
+    await retain.execute("c2", { content: "x", context: "alpha-lab" });
+    const badCitations = [
+      ["javascript:alert(1)"],
+      ["ftp://example.com/source"],
+      ["data:text/plain,hello"],
+      ["//example.com/no-scheme"],
+      ["x.com/a/status/1"], // bare host without scheme
+    ];
+    for (const sourceCitations of badCitations) {
+      await expect(
+        record.execute("c3", {
+          thesis: "t",
+          ticker: "AAPL",
+          direction: "long",
+          confidence: 0.5,
+          rationale: "r",
+          sourceCitations,
+          candidateMarkdown: "---\ntitle: x\n---\nbody",
+        }),
+      ).rejects.toThrow(/sourceCitations must use http/);
+    }
+  });
 });
 
 // ---------------------------------------------------------------------------

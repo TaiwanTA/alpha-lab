@@ -283,6 +283,11 @@ export function createResearchToolkit(ctx: ResearchToolContext): ResearchToolkit
       ): Promise<AgentToolResult<unknown>> {
         const obj = requireObject(params, "lookup_adjusted_close");
         const ticker = requireString(obj, "ticker", "lookup_adjusted_close");
+        if (!/^[A-Z0-9.\-]{1,16}$/.test(ticker)) {
+          throw new Error(
+            `lookup_adjusted_close: ticker must match /^[A-Z0-9.\\-]{1,16}$/ (uppercase letters, digits, dot, dash)`,
+          );
+        }
         const date = requireString(obj, "date", "lookup_adjusted_close");
         if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
           throw new Error(
@@ -314,6 +319,11 @@ export function createResearchToolkit(ctx: ResearchToolContext): ResearchToolkit
         const obj = requireObject(params, "record_research");
         const thesis = requireString(obj, "thesis", "record_research");
         const ticker = requireString(obj, "ticker", "record_research");
+        if (!/^[A-Z0-9.\-]{1,16}$/.test(ticker)) {
+          throw new Error(
+            `record_research: ticker must match /^[A-Z0-9.\\-]{1,16}$/ (uppercase letters, digits, dot, dash)`,
+          );
+        }
         const direction = requireDirection(obj, "direction", "record_research");
         const confidence = requireNumber(obj, "confidence", "record_research");
         if (!Number.isFinite(confidence)) {
@@ -336,6 +346,13 @@ export function createResearchToolkit(ctx: ResearchToolContext): ResearchToolkit
           throw new Error(
             "record_research: sourceCitations must contain at least one URL",
           );
+        }
+        for (const citation of sourceCitations) {
+          if (!/^https?:\/\//.test(citation)) {
+            throw new Error(
+              `record_research: sourceCitations must use http:// or https:// scheme, got ${citation}`,
+            );
+          }
         }
         const candidateMarkdown = requireString(
           obj,

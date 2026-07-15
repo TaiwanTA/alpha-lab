@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { SQL } from "bun";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
@@ -10,6 +11,7 @@ import {
   type OpeningDependencies,
   type SettlementDependencies,
 } from "../scripts/open-next-paper-bet.ts";
+import type { PaperBetRow } from "../scripts/phase4/db.ts";
 
 const HERE = dirname(new URL(import.meta.url).pathname);
 const MIGRATION = readFileSync(
@@ -149,7 +151,7 @@ describe("paper-bet settlement", () => {
     };
 
     const result = await settleOpenBets(deps);
-    expect(result).toEqual({ examined: 1, settled: 0, unresolved: 0, pending: 1 });
+    expect(result).toEqual({ examined: 1, settled: 0, alreadySettled: 0, unresolved: 0, pending: 1 });
     expect(writes).toEqual([]);
   });
 
@@ -232,5 +234,98 @@ describe("paper-bet settlement", () => {
 
     await expect(settleOpenBets(deps)).rejects.toThrow(/503/);
     expect(writes).toEqual([]);
+  });
+
+  test("treats a Postgres unique_violation as alreadySettled and continues the batch", async () => {
+    // Race: listOpen returns N 'open' rows; a sibling worker lands first
+    // on one of them. The losing settle call hits 23505 on
+    // bet_outcomes.paper_bet_id UNIQUE. The loop must count it as
+    // alreadySettled and keep going — throwing would strand every
+    // later bet in 'open' for the next settlement run.
+    const bets = [
+      {
+        id: "bet-1",
+        research_run_id: "run-1",
+        event_id: "event-1",
+        ticker: "ABC",
+        direction: "long",
+        confidence: 0.8,
+        opened_at: new Date(),
+        entry_session_date: "2026-01-02",
+        entry_price: 100,
+        entry_price_source: "twelve-data:1day:adjust=all",
+        status: "open",
+      },
+      {
+        id: "bet-2",
+        research_run_id: "run-2",
+        event_id: "event-2",
+        ticker: "XYZ",
+        entry_session_date: "2026-01-02",
+        confidence: 0.7,
+        opened_at: new Date(),
+        entry_price: 50,
+        entry_price_source: "twelve-data:1day:adjust=all",
+        status: "open",
+      },
+    ];
+    const writes: unknown[] = [];
+    const race = new SQL.PostgresError("duplicate key value violates unique constraint", {
+      code: "23505",
+      constraint: "bet_outcomes_paper_bet_id_key",
+    });
+    let settleCalls = 0;
+    const deps: SettlementDependencies = {
+      listOpen: async () => bets as PaperBetRow[],
+      fetchSessions: async () => sessions(30),
+      settle: async (input) => {
+        settleCalls += 1;
+        if (settleCalls === 1) throw race;
+        writes.push(input);
+      },
+      markUnresolved: async (input) => writes.push(input),
+    };
+
+    const result = await settleOpenBets(deps);
+    expect(result).toEqual({
+      examined: 2,
+      settled: 1,
+      alreadySettled: 1,
+      unresolved: 0,
+      pending: 0,
+    });
+    // The second bet was attempted after the race was swallowed — it
+    // must have reached settle. If the loop had aborted on the
+    // unique_violation, writes would be empty.
+    expect(writes).toHaveLength(1);
+  });
+
+  test("propagates non-23505 settle errors without counting them", async () => {
+    // Any DB error that is NOT the unique_violation must still throw,
+    // otherwise a real failure (FK violation, NOT NULL, network drop)
+    // would be silently swallowed and the bet would stay 'open'.
+    const other = new SQL.PostgresError("foreign key violation", {
+      code: "23503",
+      constraint: "bet_outcomes_paper_bet_id_fkey",
+    });
+    const deps: SettlementDependencies = {
+      listOpen: async () => [{
+        id: "bet-1",
+        research_run_id: "run-1",
+        event_id: "event-1",
+        ticker: "ABC",
+        direction: "long",
+        confidence: 0.8,
+        opened_at: new Date(),
+        entry_session_date: "2026-01-02",
+        entry_price: 100,
+        entry_price_source: "twelve-data:1day:adjust=all",
+        status: "open",
+      }],
+      fetchSessions: async () => sessions(30),
+      settle: async () => { throw other; },
+      markUnresolved: async () => {},
+    };
+    await expect(settleOpenBets(deps)).rejects.toBe(other);
   });
 });

@@ -405,18 +405,19 @@ export const ResearchRun = {
 
   async claimNextUnpublished(owner: string): Promise<ResearchRunRow | null> {
     const rows = await db`
-      WITH recoverable AS (
+      WITH recoverable_target AS (
+        SELECT candidate.research_run_id
+        FROM research_publications candidate
+        WHERE candidate.status = 'claimed'
+          AND candidate.claimed_at < now() - interval '30 minutes'
+        ORDER BY candidate.claimed_at ASC
+        FOR UPDATE SKIP LOCKED
+        LIMIT 1
+      ), recoverable AS (
         UPDATE research_publications rp
         SET claim_owner = ${owner}, claimed_at = now()
-        WHERE rp.research_run_id = (
-          SELECT candidate.research_run_id
-          FROM research_publications candidate
-          WHERE candidate.status = 'claimed'
-            AND candidate.claimed_at < now() - interval '30 minutes'
-          ORDER BY candidate.claimed_at ASC
-          FOR UPDATE SKIP LOCKED
-          LIMIT 1
-        )
+        FROM recoverable_target
+        WHERE rp.research_run_id = recoverable_target.research_run_id
         RETURNING rp.research_run_id
       ), next_accepted AS (
         SELECT rr.id
@@ -454,18 +455,19 @@ export const ResearchRun = {
 
   async claimNextPushed(owner: string): Promise<ResearchRunRow | null> {
     const rows = await db`
-      WITH claimed AS (
+      WITH pushed_target AS (
+        SELECT candidate.research_run_id
+        FROM research_publications candidate
+        WHERE candidate.status = 'pushed'
+          AND (candidate.claim_owner IS NULL OR candidate.claimed_at < now() - interval '30 minutes')
+        ORDER BY candidate.claimed_at ASC
+        FOR UPDATE SKIP LOCKED
+        LIMIT 1
+      ), claimed AS (
         UPDATE research_publications rp
         SET claim_owner = ${owner}, claimed_at = now()
-        WHERE rp.research_run_id = (
-          SELECT candidate.research_run_id
-          FROM research_publications candidate
-          WHERE candidate.status = 'pushed'
-            AND (candidate.claim_owner IS NULL OR candidate.claimed_at < now() - interval '30 minutes')
-          ORDER BY candidate.claimed_at ASC
-          FOR UPDATE SKIP LOCKED
-          LIMIT 1
-        )
+        FROM pushed_target
+        WHERE rp.research_run_id = pushed_target.research_run_id
         RETURNING rp.research_run_id
       )
       SELECT rr.id, rr.event_id, rr.model, rr.prompt_version, rr.thesis,

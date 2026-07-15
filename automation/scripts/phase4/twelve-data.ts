@@ -131,6 +131,7 @@ async function twelveDataRequest(
   const response = await fetch(url, {
     method: "GET",
     headers: { accept: "application/json" },
+    signal: AbortSignal.timeout(120_000),
   });
   if (!response.ok) {
     const text = await response.text();

@@ -223,6 +223,7 @@ async function hindsightRequest(
     method: "POST",
     headers,
     body: JSON.stringify(body),
+    signal: AbortSignal.timeout(120_000),
   });
   if (!response.ok) {
     const text = await response.text();

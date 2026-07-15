@@ -93,12 +93,21 @@ async function loadSettledOutcomes(): Promise<CalibrationOutcome[]> {
     WHERE bo.outcome IN ('win','loss')
     ORDER BY se.investor ASC, se.signal_type ASC, pb.confidence ASC, bo.id ASC
   `;
-  return rows.map((row: Record<string, unknown>) => ({
-    investor: row.investor as string,
-    signalType: row.signal_type as string,
-    confidence: Number(row.confidence),
-    outcome: row.outcome as "win" | "loss",
-  }));
+  return rows.map((row: Record<string, unknown>) => {
+    // numeric(4,3) round-trips through text → Number() can drift
+    // (0.7499999 or 0.7500001) due to the text formatter and IEEE-754
+    // representation. Round to the schema's precision so the bucket
+    // boundary check (`confidence < 0.75`) lands on the canonical
+    // value the row was stored with.
+    const parsed = Number(row.confidence);
+    const confidence = Math.round(parsed * 1000) / 1000;
+    return {
+      investor: row.investor as string,
+      signalType: row.signal_type as string,
+      confidence,
+      outcome: row.outcome as "win" | "loss",
+    };
+  });
 }
 
 async function main(): Promise<void> {

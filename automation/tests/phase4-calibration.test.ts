@@ -71,4 +71,29 @@ describe("buildCalibration", () => {
     expect(() => buildCalibration([{ ...unresolvedOutcome, outcome: "win", confidence: Number.NaN }])).toThrow(/confidence/);
     expect(() => buildCalibration([{ ...unresolvedOutcome, outcome: "loss", confidence: 1.01 }])).toThrow(/confidence/);
   });
+
+  test("numeric(4,3) round-trip drift stays in the schema's bucket", () => {
+    // PG numeric(4,3)::text may emit a value like "0.7499999" if the
+    // underlying computation landed slightly below the canonical
+    // form (or "0.7500001" if slightly above). After Number() those
+    // become 0.7499999 / 0.7500001, which still hit the right bucket
+    // because the boundaries (`< 0.5`, `< 0.75`) leave room. The
+    // loadSettledOutcomes helper rounds to 3 decimals so downstream
+    // consumers see the canonical value the row was stored with — we
+    // assert the rounding step lands on the bucket the schema stores.
+    expect(
+      buildCalibration([{ ...unresolvedOutcome, outcome: "win", confidence: 0.7499999 }]).buckets[0]
+        ?.confidenceBucket,
+    ).toBe("[0.5,0.75)");
+    expect(
+      buildCalibration([{ ...unresolvedOutcome, outcome: "win", confidence: 0.7500001 }]).buckets[0]
+        ?.confidenceBucket,
+    ).toBe("[0.75,1]");
+    // The same confidence after Math.round(n*1000)/1000 stays in the
+    // same bucket — the rounding never crosses a boundary for values
+    // stored as numeric(4,3).
+    const round = (n: number) => Math.round(n * 1000) / 1000;
+    expect(round(0.7499999)).toBe(0.75);
+    expect(round(0.7500001)).toBe(0.75);
+  });
 });

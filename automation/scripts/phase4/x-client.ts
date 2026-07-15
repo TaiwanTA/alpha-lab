@@ -193,8 +193,9 @@ export function extractTweets(payload: XTimelinePayload): XTweet[] {
     const tweet = raw as { id?: unknown; text?: unknown; created_at?: unknown };
     if (
       typeof tweet.id !== "string" ||
-      tweet.id.length === 0 ||
+      !/^[0-9]+$/.test(tweet.id) ||
       typeof tweet.text !== "string" ||
+      tweet.text.length === 0 ||
       typeof tweet.created_at !== "string"
     ) {
       throw new Error(`x client: timeline returned malformed tweet #${index + 1}`);

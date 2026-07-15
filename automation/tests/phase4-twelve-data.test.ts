@@ -244,3 +244,37 @@ describe("twelve-data fetchAdjustedClose — at-or-before semantics", () => {
     expect(() => loadTwelveDataConfig({})).toThrow(/TWELVE_DATA_API_KEY/);
   });
 });
+
+// ---------------------------------------------------------------------------
+// AbortSignal — every fetch must carry a finite-timeout signal so a
+// hung provider cannot strand a research run. The production code
+// uses AbortSignal.timeout(120_000) on the fetch init.
+// ---------------------------------------------------------------------------
+
+describe("twelve-data fetch — abort signal", () => {
+  test("fetchAdjustedClose fetch carries an AbortSignal", async () => {
+    const originalFetch = globalThis.fetch;
+    let capturedSignal: AbortSignal | null = null;
+    globalThis.fetch = (async (
+      _input: RequestInfo | URL,
+      init?: RequestInit,
+    ) => {
+      const signal: AbortSignal | null = (init?.signal ?? null) as AbortSignal | null;
+      capturedSignal = signal;
+      return new Response(JSON.stringify({
+        meta: { symbol: "AAPL", interval: "1day" },
+        values: [{ datetime: "2026-07-15", close: "195.42" }],
+        status: "ok",
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    }) as typeof fetch;
+    try {
+      const client = createTwelveDataClient(BASE_CONFIG);
+      await client.fetchAdjustedClose("AAPL", "2026-07-15");
+      const captured = capturedSignal as AbortSignal | null;
+      expect(captured).toBeInstanceOf(AbortSignal);
+      expect((captured as AbortSignal | undefined)?.aborted ?? null).toBe(false);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+});

@@ -5,8 +5,10 @@ import { getBuiltinModel } from "@earendil-works/pi-ai/providers/all";
 import type { Agent, AgentEvent } from "@earendil-works/pi-agent-core";
 
 import {
+  DEFAULT_MAX_STEPS,
   buildPiResearchRuntime,
   assertRunPersisted,
+  subscribeMaxStepsGuard,
   subscribeToolEvents,
   type PiResearchRuntimeOptions,
   type HindsightClient,
@@ -163,6 +165,20 @@ describe("pi research runtime — tool surface", () => {
     const runtime = buildPiResearchRuntime(makeRuntimeOptions());
     expect(runtime.toolExecution).toBe("sequential");
   });
+
+  test("system prompt isolates <investor_content> as data, not instructions", () => {
+    // The agent's built system prompt must instruct the model to
+    // treat any text inside an <investor_content> block as raw DATA,
+    // never as instructions. Otherwise an attacker who controls an
+    // investor's post can inject tool calls / commands into the
+    // prompt. We assert the rule exists in the agent state because
+    // the rule is the only thing standing between us and a
+    // prompt-injection take-over.
+    const runtime = buildPiResearchRuntime(makeRuntimeOptions());
+    const agent = runtime.buildAgent();
+    expect(agent.state.systemPrompt).toMatch(/DATA \/ INSTRUCTION SEPARATION/);
+    expect(agent.state.systemPrompt).toMatch(/<investor_content>/);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -284,8 +300,32 @@ describe("pi research runtime — Hindsight failure surfacing", () => {
       recall: async () => ({ results: [] }),
     };
     const opts = makeRuntimeOptions({ hindsight });
-    await expect(
-      opts.hindsight.retain("x", "alpha-lab"),
-    ).rejects.toThrow(/503/);
+    await expect(opts.hindsight.retain("x", "alpha-lab")).rejects.toThrow(
+      /503/,
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Max-steps guard — cap the number of LLM turns the agent may consume
+// per claim so a misbehaving model cannot loop indefinitely. The Agent
+// class has no constructor option for this, so the guard is implemented
+// as a subscriber that aborts after `maxSteps` `turn_start` events.
+// ---------------------------------------------------------------------------
+
+describe("pi research runtime — max-steps guard", () => {
+  test("DEFAULT_MAX_STEPS is a finite positive integer", () => {
+    expect(typeof DEFAULT_MAX_STEPS).toBe("number");
+    expect(Number.isInteger(DEFAULT_MAX_STEPS)).toBe(true);
+    expect(DEFAULT_MAX_STEPS).toBeGreaterThan(0);
+  });
+
+  test("subscribeMaxStepsGuard exposes a turn counter that starts at zero", () => {
+    const runtime = buildPiResearchRuntime(makeRuntimeOptions());
+    const agent = runtime.buildAgent();
+    const guard = subscribeMaxStepsGuard(agent, 3);
+    expect(guard.turnCount()).toBe(0);
+    expect(typeof guard.unsubscribe).toBe("function");
+    guard.unsubscribe();
   });
 });
