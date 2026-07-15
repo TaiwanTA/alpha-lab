@@ -1,4 +1,4 @@
-# 子 DAG,由 `fixture-research` 在 candidate 產出後呼叫。
+# 子 DAG,由 `publish-next-research` 以 stored research run 呼叫。
 # push 目標是 `main`,用 SSH deploy key (GitHub ruleset
 # DeployKey bypass)。Prerequisites:ruleset 18699827
 # (repo-level) + 6159190 (org-level) 都已加 DeployKey
@@ -12,8 +12,8 @@
 #   - `working_dir:` (不是 `dir:`);`DAG_RUN_ID` (不是 `DAGU_RUN_ID`)。
 #
 # 子 DAG 接收兩個參數:
-#   - `candidate_path` (candidate Markdown 的絕對路徑)
-#   - `runtime_sha` (產生 candidate 的 commit SHA)
+#   - `research_run_id` (已接受且被 publication worker claim 的 UUID)
+#   - `runtime_sha` (發布 checkout 的 commit SHA)
 #
 # 流程:
 #   1. 重新 checkout `main` 到一個新的 worktree
@@ -35,7 +35,8 @@
 # (GIT_ASKPASS,不走 argv)。
 
 params:
-  candidate_path: ""
+  research_run_id: ""
+  claim_owner: ""
   runtime_sha: ""
 
 artifacts:
@@ -49,12 +50,22 @@ type: graph
 
 shell: ["bash", "-e"]
 env:
+  - DATABASE_URL=${DATABASE_URL}
   - GIT_READ_TOKEN=${GIT_READ_TOKEN}
-  - HINDSIGHT_API_KEY=${HINDSIGHT_API_KEY}
-  - HINDSIGHT_BASE_URL=${HINDSIGHT_BASE_URL}
-  - LLM_API_KEY=${LLM_API_KEY}
-  - LLM_MODEL=${LLM_MODEL}
-  - LLM_BASE_URL=${LLM_BASE_URL}
+handler_on:
+  failure:
+    working_dir: /opt/alpha-lab/automation
+    run: |
+      if [ -n "${params.research_run_id}" ]; then
+        export PATH="$HOME/.bun/bin:$PATH"
+        # mark_pushed writes this DB-backed state after a successful push.
+        # releasePublicationClaim only deletes status='claimed', so a pushed
+        # row survives handler execution and is finalized by the next parent run.
+        bun run scripts/publish-next-research.ts --release-claim "${params.research_run_id}" --owner "${params.claim_owner}"
+      fi
+    env:
+      - DATABASE_URL=${env.DATABASE_URL}
+
 steps:
   - id: checkout
     run: bash /opt/alpha-lab/automation/scripts/clone-publish.sh
@@ -72,10 +83,14 @@ steps:
     working_dir: ./workspace/publish
     run: |
       set -euo pipefail
-      cp "${params.candidate_path}" "${WORKDIR}/candidate.md"
+      cd "${WORKDIR}/automation"
+      bun run scripts/materialize-research-candidate.ts \
+        --research-run-id "${params.research_run_id}" \
+        --owner "${params.claim_owner}" \
+        --output "${WORKDIR}/candidate.md"
       test -s "${WORKDIR}/candidate.md"
-      echo "Materialized candidate from ${params.candidate_path}"
-      echo "Runtime SHA: ${params.runtime_sha}"
+    env:
+      - DATABASE_URL=${env.DATABASE_URL}
 
   - id: publish_draft
     depends: [materialize_candidate]
@@ -131,19 +146,28 @@ steps:
       set -euo pipefail
       git -C "${WORKDIR}" config user.email "alpha-lab-bot@users.noreply.github.com"
       git -C "${WORKDIR}" config user.name "alpha-lab-bot"
-      git -C "${WORKDIR}" commit -m "feat(blog): publish draft from fixture-research (${DAG_RUN_ID})"
+      git -C "${WORKDIR}" commit -m "feat(blog): publish stored research (${DAG_RUN_ID})"
 
-  - id: push
+  - id: push_and_mark
     depends: [commit]
     working_dir: ./workspace/publish
     run: |
       set -euo pipefail
-      # 用 SSH deploy key push,不走 HTTPS + askpass。
-      # deploy key 在 VM 上 alpha-lab-dagu 的 ~/.ssh/id_ed25519,
-      # GitHub repo settings 裡加了對應的 write deploy key。
       export GIT_SSH_COMMAND="ssh -i /var/lib/alpha-lab/dagu/.ssh/id_ed25519 -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new"
-      git -C "${WORKDIR}" push "git@github.com:TaiwanTA/alpha-lab.git" HEAD:main
+      cd "${WORKDIR}/automation"
+      # Persist pushed before touching the remote. If this fails, the remote
+      # is unchanged and the failure handler safely releases claimed.
+      bun run scripts/publish-next-research.ts --mark-pushed "${params.research_run_id}" --owner "${params.claim_owner}"
+      if ! git -C "${WORKDIR}" push "git@github.com:TaiwanTA/alpha-lab.git" HEAD:main; then
+        bun run scripts/publish-next-research.ts --revert-pushed "${params.research_run_id}" --owner "${params.claim_owner}"
+        exit 128
+      fi
+      echo pushed
+    env:
+      - DATABASE_URL=${env.DATABASE_URL}
     retry_policy:
       limit: 1
       interval_sec: 30
       exit_code: [128]
+    stdout:
+      outputs: PUSHED_STATE

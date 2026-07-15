@@ -1,0 +1,26 @@
+schedule: "*/30 * * * *"
+timeout_sec: 300
+type: graph
+artifacts:
+  enabled: true
+shell: ["bash", "-e"]
+env:
+  - DATABASE_URL=${DATABASE_URL}
+  - TWELVE_DATA_API_KEY=${TWELVE_DATA_API_KEY}
+
+steps:
+  - id: open_one
+    working_dir: /opt/alpha-lab/automation
+    run: |
+      set -euo pipefail
+      export PATH="$HOME/.bun/bin:$PATH"
+      bun run scripts/open-next-paper-bet.ts
+    env:
+      - DATABASE_URL=${env.DATABASE_URL}
+      - TWELVE_DATA_API_KEY=${env.TWELVE_DATA_API_KEY}
+    stdout:
+      artifact: open-next-paper-bet.json
+    retry_policy:
+      limit: 2
+      interval_sec: 120
+      exit_code: [1]

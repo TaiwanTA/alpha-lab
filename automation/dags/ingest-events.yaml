@@ -1,0 +1,52 @@
+# Dagu DAG that drives Phase 4 Task 2's X ingestion CLI.
+#
+# 已驗證 Dagu v2.10.7 語法:
+#   - `${env.NAME}` 是唯一能解析 process env 變數的 namespace。
+#   - `shell: ["bash", "-e"]` 是容器模式必須的設定,/bin/sh 是
+#     dash,不支援 pipefail。
+#   - `env:` block 把 process env 用 ${NAME} 拉進 dagu scope。
+#   - `retry_policy: { exit_code: [...] }` 只在特定 exit code 才
+#     retry,不會把使用者程式設計錯誤也一併重試。
+#   - `schedule:` cron expression 必須在 dagu server 的時區(預設 UTC)。
+#
+# 設計重點:
+#   - 單一 step 直接呼叫 ingest-events.ts;CLI 自己處理 checked-in
+#     YAML、逐 source 交易、source_checkpoints 推進。Dagu 只負責
+#     環境變數、重試、cron。
+#   - `working_dir: /opt/alpha-lab/automation` 直接走 production
+#     checkout 的 automation/,不靠 git worktree(ingest-events 是
+#     append-only,不會改任何 tracked source)。
+#   - DATABASE_URL / X_BEARER_TOKEN 都從 dagu process env 注入;
+#     dagu.env.template 的對應行由 deploy/dagu/dagu.env 提供。
+#   - `retry_policy: limit: 1` 配 `interval_sec: 60`:`IngestXClient`
+#     對 429/5xx 直接 throw,讓 Dagu 重試一次足以;再多就會撞到
+#     X 的 rate limit。重試只在 exit code 1 (CLI catch) 時觸發,
+#     不重試遷移 / 程式崩潰。
+#   - schedule 每 6 小時跑一次(00/06/12/18 UTC),與 brief 要求一致。
+
+schedule: "0 */6 * * *"
+timeout_sec: 900
+type: graph
+
+# 容器模式下 /bin/sh → dash,不支援 pipefail。用 bash 執行
+# 所有 step commands,跟 native 模式 (Fedora /bin/sh → bash)
+# 行為一致。
+shell: ["bash", "-e"]
+env:
+  - DATABASE_URL=${DATABASE_URL}
+  - X_BEARER_TOKEN=${X_BEARER_TOKEN}
+
+steps:
+  - id: ingest
+    working_dir: /opt/alpha-lab/automation
+    run: |
+      set -euo pipefail
+      export PATH="$HOME/.bun/bin:$PATH"
+      bun run scripts/ingest-events.ts
+    env:
+      - DATABASE_URL=${env.DATABASE_URL}
+      - X_BEARER_TOKEN=${env.X_BEARER_TOKEN}
+    retry_policy:
+      limit: 1
+      interval_sec: 60
+      exit_code: [1]
