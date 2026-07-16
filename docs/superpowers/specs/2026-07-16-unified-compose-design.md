@@ -19,7 +19,7 @@
    - mastra：直接採用現有 external volume `mastra-data`，避免不必要的資料複製。
 6. Hindsight 與 mastra 的服務定義由 canonical Compose 接管；現有 `/opt/hermes/.../docker-compose.yml` 僅作為遷移時的設定來源，不能在正式啟動時再以另一個 Compose project 運作。
 7. Secrets 留在 VM 的 root-owned 目錄並按服務分檔；Compose 啟動時另使用一份不入 repo 的 interpolation env。建置階段不得把 secrets 放入 image layer、`ARG` 或 source tree。
-8. GitHub Actions workflow `.github/workflows/build-images.yml` 在 push `main` 時以 repo root context 建置 Dagu image、以 `automation/deploy/dagu` context 建置 dags-sync image，分別推送 `ghcr.io/taiwanta/alpha-lab-dagu` 與 `ghcr.io/taiwanta/alpha-lab-dags-sync`，tag 同時包含完整 commit SHA 與 `latest`。目前 repo 可見性是 **private**，因此 VM pull 必須配置 `read:packages` credential；公開化不是本設計的前置條件。
+8. GitHub Actions workflow `.github/workflows/build-images.yml` 在 pull request（只建置、不推送）與 push `main`（建置並推送）時，以 repo root context 建置 Dagu image、以 `automation/deploy/dagu` context 建置 dags-sync image，分別推送 `ghcr.io/taiwanta/alpha-lab-dagu` 與 `ghcr.io/taiwanta/alpha-lab-dags-sync`，tag 同時包含完整 commit SHA 與 `latest`（只在 main push）。目前 repo 可見性是 **private**，因此 VM pull 必須配置 `read:packages` credential；公開化不是本設計的前置條件。
 
 ## 2. 目標架構
 
@@ -73,9 +73,9 @@ name: alpha-lab
 
 services:
   alpha-lab-dagu:
-    image: ghcr.io/taiwanta/alpha-lab-dagu:${ALPHA_LAB_IMAGE_TAG:-latest}
-    # production 由 GitHub Actions build + GHCR pull；不在 VM build。
-    # ALPHA_LAB_IMAGE_TAG 建議指定 workflow 產生的完整 commit SHA。
+    image: ghcr.io/taiwanta/alpha-lab-dagu:${ALPHA_LAB_IMAGE_TAG:?set immutable image tag}
+    # production 必須明確指定 workflow 產生的完整 commit SHA；
+    # 測試 latest 時也要顯式設定 ALPHA_LAB_IMAGE_TAG=latest。
     container_name: alpha-lab-dagu
     restart: unless-stopped
     command: ["dagu", "start-all"]
@@ -107,7 +107,7 @@ services:
     networks: [alpha_lab_net]
 
   alpha-lab-dags-sync:
-    image: ghcr.io/taiwanta/alpha-lab-dags-sync:${ALPHA_LAB_IMAGE_TAG:-latest}
+    image: ghcr.io/taiwanta/alpha-lab-dags-sync:${ALPHA_LAB_IMAGE_TAG:?set immutable image tag}
     # image 由同一個 GitHub Actions workflow 推送；只 bake sidecar
     # script/dependencies，DAG source 仍由 sidecar 從 GitHub 同步。
     container_name: alpha-lab-dags-sync
@@ -250,14 +250,15 @@ secrets:
 現行 `automation/deploy/dagu/Dockerfile.dagu` 改為以 repo root 作為 build context；`.github/workflows/build-images.yml` 以 `docker/build-push-action` 執行：
 
 ```dockerfile
-FROM ghcr.io/dagucloud/dagu:2.10.7
+FROM ghcr.io/dagucloud/dagu:2.10.7@sha256:5e715705e0c96e462417303f3e2fbbadc7f9cd15d153764c89fd1442e80a1d66
 
 # 安裝 git、openssh-client、rsync、Node.js 22 與 Bun。
 RUN <固定版本的 runtime 工具鏈安裝，沿用既有 Dockerfile>
 
 WORKDIR /opt/alpha-lab/automation
-# 先 COPY manifest，讓依賴層可由 Bun lockfile cache 重用。
-COPY automation/package.json automation/bun.lock automation/tsconfig.json ./
+# 先 COPY package manifest 與文字 lockfile，讓 tsconfig/source
+# 修改不會使 production dependency layer 失效。
+COPY automation/package.json automation/bun.lock ./
 RUN bun install --frozen-lockfile --production
 
 # `.dockerignore` 排除 tests、.env、node_modules、blog、research、
@@ -267,15 +268,21 @@ COPY automation/ ./
 ```
 
 這個 image 由 GitHub Actions 推送到 `ghcr.io/taiwanta/alpha-lab-dagu`，
-tag 同時產生完整 commit SHA 與 `latest`。VM 的 Compose 只使用
-`image:`，不含 `build:`；production 應以 `ALPHA_LAB_IMAGE_TAG=<SHA>`
-固定部署版本，`latest` 僅供手動更新或非 production 使用。
+tag 同時產生完整 commit SHA 與 `latest`（只在 main push）。VM 的
+Compose 只使用 `image:`，不含 `build:`；production 應以
+`ALPHA_LAB_IMAGE_TAG=<SHA>` 固定部署版本，測試 latest 時必須顯式指定。
 
 實際 Dockerfile 應注意：
 
 - `bun install --frozen-lockfile --production` 在 build time 生成 `/opt/alpha-lab/automation/node_modules`；runtime 不執行 install，不依賴 VM 的 node_modules。
 - `automation/scripts`、`automation/dags`、`automation/config`、`automation/migrations` 與 `package.json`/`bun.lock` 都在 image 內。Dagu YAML 中現有 `working_dir: /opt/alpha-lab/automation` 與 `bun run scripts/*.ts` 可維持。
 - tests、`.git`、logs、`.env*`、SSH key、任何未追蹤產物必須由 `.dockerignore` 排除；不要讓 secret 進 build context 或 layer。
+- base image 固定為目前驗證過的
+  `ghcr.io/dagucloud/dagu:2.10.7@sha256:5e715705e0c96e462417303f3e2fbbadc7f9cd15d153764c89fd1442e80a1d66`；
+  更新 Dagu base image 時必須另行更新 digest 並重新驗證。
+- Bun `bun-v1.3.14/bun-linux-x64.zip` 下載後以官方
+  `sha256=951ee2aee855f08595aeec6225226a298d3fea83a3dcd6465c09cbccdf7e848f`
+  驗證；更新 Bun 版本時必須同步更新 URL 與 checksum。
 - image metadata 以 commit SHA、lockfile hash、base image digest 標記；GitHub Actions
   以 `GITHUB_TOKEN` 登入 GHCR 並推送 `ghcr.io/taiwanta/alpha-lab-dagu`。
   workflow 的 package permission 必須是 `contents: read` + `packages: write`。
