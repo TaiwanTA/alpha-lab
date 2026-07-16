@@ -57,8 +57,6 @@ LOCAL_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "${LOCAL_ROOT}"
 
 COMPOSE_FILE="${LOCAL_ROOT}/automation/deploy/docker-compose.yml"
-REMOTE_COMPOSE="/opt/alpha-lab/automation/deploy/docker-compose.yml"
-REMOTE_STACK_ENV="/etc/alpha-lab/stack.env"
 
 echo "[1/5] 部署 canonical Compose 到 VM 正式路徑"
 gcloud compute scp --zone "${ZONE}" "${COMPOSE_FILE}" \
@@ -155,8 +153,17 @@ VERIFY_CMD=$(printf '%s\n' \
   '    exit 1' \
   '  fi' \
   '  echo "    dagu http: 200"' \
-  '  echo "    hindsight api: $(curl -sS -o /dev/null -w "%{http_code}" http://127.0.0.1:8888/health)"' \
-  '  echo "    mastra api: $(curl -sS -o /dev/null -w "%{http_code}" http://127.0.0.1:4111/health)"' \
+  '  hindsight_code=$(curl -sS -o /dev/null -w "%{http_code}" http://127.0.0.1:8888/health || true)' \
+  '  if [ "${hindsight_code}" != "200" ]; then' \
+  '    echo "    ERROR: hindsight api ${hindsight_code}"' \
+  '    exit 1' \
+  '  fi' \
+  '  echo "    hindsight api: 200"' \
+  '  mastra_code=$(curl -sS -o /dev/null -w "%{http_code}" http://127.0.0.1:4111/health || true)' \
+  '  if [ "${mastra_code}" != "200" ]; then' \
+  '    echo "    ERROR: mastra api ${mastra_code}"' \
+  '    exit 1' \
+  '  fi' \
+  '  echo "    mastra api: 200"' \
   '  echo "    dags-sync tail:"' \
   '  sudo docker logs --tail 5 alpha-lab-dags-sync 2>&1 | sed "s/^/      /"')
-"${SSH_CMD[@]}" --command "${VERIFY_CMD}"

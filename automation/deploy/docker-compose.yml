@@ -127,12 +127,12 @@ services:
 
   mastra-app:
     # 此 tag 是 VM 現有 local image；搬遷至其他 VM 前須先推送並 pin digest。
-    image: ${MASTRA_IMAGE:-mastra-selfhost:local}
+    image: ${MASTRA_IMAGE:?set immutable mastra image or existing VM tag}
     container_name: mastra-app
     user: "1001:1001"
     restart: unless-stopped
     ports:
-      - "4111:4111"
+      - "127.0.0.1:4111:4111"
     env_file:
       - /etc/alpha-lab/secrets/mastra.env
     environment:
