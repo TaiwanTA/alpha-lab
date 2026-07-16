@@ -1,34 +1,24 @@
-# 自建 dagu runtime image — 補齊 DAG step 需要的工具鏈。
+# 自建 Dagu runtime image：把 automation 原始碼與 production
+# dependencies bake 進 image，runtime 不需要 host source bind mount。
 #
-# 官方 image `ghcr.io/dagucloud/dagu:2.10.7` (Ubuntu 24.04)
-# 只含 dagu binary + tini + sudo + bash + jq。DAG step 需要
-# git / ssh / node >=22 / npm / bun,這裡一層裝進去。
+# GitHub Actions 的 build context 是 alpha-lab repo root (`.`)：
+#   docker build -f automation/deploy/dagu/Dockerfile.dagu .
 #
-# build context 是 `.` (跟 compose file 同層)。
-# build 完 image tag = `alpha-lab-dagu:local` (見
-# docker-compose.yml `build` block)。
+# 官方 image `ghcr.io/dagucloud/dagu:2.10.7`（Ubuntu 24.04）
+# 固定 digest，確保同一個 commit 重建時取得相同 base bytes。
+# 只含 dagu binary + tini + sudo + bash + jq；DAG step 需要
+# 另外安裝 git / ssh / node >=22 / npm / bun 等 DAG step 工具鏈。
 #
-# Entry point 不動:沿用官方 `/usr/local/bin/tini -g -- /entrypoint.sh`。
-# entrypoint.sh 以 root 跑 groupmod/usermod 把 dagu user
-# 改成 PUID/PGID,最後 `sudo -u #PUID` 降權執行 cmd。compose
-# 設 PUID=999 PGID=982 對齊 host alpha-lab-dagu user。
+# 官方 entrypoint 仍以 root 啟動，透過 PUID/PGID 降權到
+# 999:982；compose 以環境變數設定，故不在 Dockerfile 寫死
+# runtime user。
 #
-# dagu user 預設 HOME = /home/dagu (官方 image 已建)。但
-# compose bind mount 掛在 /var/lib/alpha-lab/dagu,所以
-# entrypoint.sh 的 `mkdir -p ${DAGU_HOME}` 跟 DAGU_HOME
-# env var 需要對齊這個路徑。entrypoint 會把 DAGU_HOME
-# export 出去,dagu binary 以 DAGU_HOME 為 state root。
-# 我們在 compose 設 DAGU_HOME=/var/lib/alpha-lab/dagu。
-#
-# npm/bun cache 寫 $HOME — entrypoint `sudo -H` 會把 HOME
-# 設成 dagu user 的 home dir (/home/dagu)。但 /home/dagu
-# 是容器層,不持久。解法:在 compose 設 HOME=/var/lib/alpha-lab/dagu
-# 覆蓋 entrypoint 的 sudo -H,讓 cache 寫進 bind mount。
+# `DAGU_HOME` 和 `HOME` 由 compose 指向 named/bind state mount
+# `/var/lib/alpha-lab/dagu`；node/bun cache 因此可跨 restart 保留。
 
-FROM ghcr.io/dagucloud/dagu:2.10.7
+FROM ghcr.io/dagucloud/dagu:2.10.7@sha256:5e715705e0c96e462417303f3e2fbbadc7f9cd15d153764c89fd1442e80a1d66
 
-# apt 裝 git + openssh-client + rsync + unzip。Node 22 LTS 走
-# NodeSource deb repo (Ubuntu 24.04 noble)。
+# 安裝 DAG step 需要的 git、SSH、rsync、unzip 與 Node.js 22。
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
       ca-certificates \
@@ -42,12 +32,23 @@ RUN apt-get update && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
-# bun 裝到 /usr/local/bin (全域),所有 user 可用。
-# 直接從 GitHub releases 下載 binary (不用 install script,
-# 因為 `bash -s "bun"` 會把 "bun" 當 version tag 導致 404)。
+# Bun 安裝到全域路徑，所有 runtime user 都可執行。
 RUN curl -fsSL -o /tmp/bun.zip \
       "https://github.com/oven-sh/bun/releases/download/bun-v1.3.14/bun-linux-x64.zip" && \
+    echo "951ee2aee855f08595aeec6225226a298d3fea83a3dcd6465c09cbccdf7e848f  /tmp/bun.zip" | \
+      sha256sum -c - && \
     unzip -o /tmp/bun.zip -d /tmp/bun && \
     mv /tmp/bun/bun-linux-x64/bun /usr/local/bin/bun && \
     chmod 0755 /usr/local/bin/bun && \
     rm -rf /tmp/bun /tmp/bun.zip
+
+# Build context 是 repo root；只先 COPY package manifest 與文字 lockfile，
+# 讓 tsconfig/source 修改不會使 production dependency layer 失效。
+WORKDIR /opt/alpha-lab/automation
+COPY automation/package.json automation/bun.lock ./
+RUN bun install --frozen-lockfile --production
+
+# .dockerignore 排除 tests、.env、node_modules 等非 runtime 內容。
+# 這裡會把 scripts、dags、config、migrations 與其餘 automation
+# runtime source bake 進 image，DAG 的 working_dir 不需改。
+COPY automation/ ./

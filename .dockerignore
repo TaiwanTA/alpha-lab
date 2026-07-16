@@ -1,0 +1,27 @@
+# 不把版本控制與本機機密送進 Docker build context
+.git
+.git/**
+**/.git
+**/.git/**
+.env*
+**/.env
+**/.env.*
+**/*.key
+**/*.pem
+
+# 依賴與本機產物：image 會在 Dockerfile 內重新安裝 production deps
+node_modules
+**/node_modules
+**/.bun
+**/.cache
+**/*.log
+
+# 非 Dagu runtime 的專案與文件
+blog/
+research/
+.delete/
+docs/
+
+# 自動化測試不需進 production image
+automation/tests/
+automation/**/tests/
