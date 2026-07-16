@@ -56,45 +56,46 @@ LOCAL_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 
 cd "${LOCAL_ROOT}"
 
-COMPOSE_FILE="${LOCAL_ROOT}/automation/deploy/dagu/docker-compose.yml"
+COMPOSE_FILE="${LOCAL_ROOT}/automation/deploy/docker-compose.yml"
+REMOTE_COMPOSE="/opt/alpha-lab/automation/deploy/docker-compose.yml"
+REMOTE_STACK_ENV="/etc/alpha-lab/stack.env"
 
-echo "[1/5] scp compose 檔到 VM"
+echo "[1/5] 部署 canonical Compose 到 VM 正式路徑"
 gcloud compute scp --zone "${ZONE}" "${COMPOSE_FILE}" \
   "${INSTANCE}:/tmp/alpha-lab-docker-compose.yml" --project "${PROJECT}"
 "${SSH_CMD[@]}" --command 'set -e
-sudo mkdir -p /etc/alpha-lab
-sudo install -m 0644 /tmp/alpha-lab-docker-compose.yml /etc/alpha-lab/docker-compose.yml
+sudo mkdir -p /opt/alpha-lab/automation/deploy
+sudo install -m 0644 /tmp/alpha-lab-docker-compose.yml /opt/alpha-lab/automation/deploy/docker-compose.yml
 rm -f /tmp/alpha-lab-docker-compose.yml
-echo "    /etc/alpha-lab/docker-compose.yml installed"'
+sudo test -f /etc/alpha-lab/stack.env
+echo "    /opt/alpha-lab/automation/deploy/docker-compose.yml installed"'
 
 echo "[2/5] docker compose pull"
 "${SSH_CMD[@]}" --command 'set -e
-cd /etc/alpha-lab
-sudo /usr/bin/docker compose pull
-echo "    images pulled from GHCR"'
+sudo /usr/bin/docker compose --env-file /etc/alpha-lab/stack.env \
+  -f /opt/alpha-lab/automation/deploy/docker-compose.yml pull
+echo "    images pulled"'
 
 echo "[3/5] systemctl reload alpha-lab-dagu.service"
-# ExecReload = `docker compose ... up -d --force-recreate`。
-# 兩個 container 都會重建;dags bind mount 內資料保留。
+# ExecReload 會以 canonical Compose 重建六個服務，且不刪除任何 volume。
 "${SSH_CMD[@]}" --command 'set -e
 sudo systemctl reload alpha-lab-dagu.service
 echo "    reload issued"'
 
-echo "[4/5] wait for containers"
-# reload 後 dagu 跟 dags-sync 都需要時間起來 (force-recreate)。
+echo "[4/5] wait for six services"
 "${SSH_CMD[@]}" --command 'set -e
-cd /etc/alpha-lab
-for i in $(seq 1 30); do
-  # 兩個 container 都 running 才繼續,不能只等其中一個。
-  running=$(sudo /usr/bin/docker compose ps --status running 2>/dev/null \
-    | grep -cE "alpha-lab-dagu|alpha-lab-dags-sync" || true)
-  if [ "${running}" -ge 2 ]; then
-    echo "    containers up after ${i}s"
+for i in $(seq 1 60); do
+  running=$(sudo docker ps --filter label=com.docker.compose.project=alpha-lab \
+    --format "{{.Names}}" | grep -cE "^(alpha-lab-dagu|alpha-lab-dags-sync|hindsight|hindsight-db|alpha-lab-postgres|mastra-app)$" || true)
+  if [ "${running}" -ge 6 ]; then
+    echo "    six services running after ${i}s"
     break
   fi
   sleep 1
 done
-sudo /usr/bin/docker compose ps'
+sudo /usr/bin/docker compose --env-file /etc/alpha-lab/stack.env \
+  -f /opt/alpha-lab/automation/deploy/docker-compose.yml ps'
+
 
 echo "[5/5] verify"
 # Phase 4 DAG 清單 — deploy verifier 證明這 7 個 YAML
@@ -111,7 +112,9 @@ VERIFY_CMD=$(printf '%s\n' \
   '  exit 1' \
   'fi' \
   'echo "    systemd: active"' \
-  'cd /etc/alpha-lab' \
+  '  cd /opt/alpha-lab' \
+  '  sudo test -f /etc/alpha-lab/stack.env' \
+  '  compose() { sudo /usr/bin/docker compose --env-file /etc/alpha-lab/stack.env -f /opt/alpha-lab/automation/deploy/docker-compose.yml "$@"; }' \
   'missing=0' \
   "for d in ${PHASE4_DAGS}; do" \
   '  if sudo test -f "/var/lib/alpha-lab/dagu/dags/${d}.yaml"; then' \
@@ -126,22 +129,34 @@ VERIFY_CMD=$(printf '%s\n' \
   '  sudo docker logs --tail 20 alpha-lab-dags-sync 2>&1 | sed "s/^/      /"' \
   '  exit 1' \
   'fi' \
-  '# 兩個 Compose container 都 running — closure check' \
-  "running=\$(sudo /usr/bin/docker compose ps --status running 2>/dev/null | grep -cE 'alpha-lab-dagu|alpha-lab-dags-sync' || true)" \
-  'if [ "${running}" -lt 2 ]; then' \
-  '  echo "    ERROR: expected 2 compose containers running, got ${running}"' \
-  '  sudo /usr/bin/docker compose ps' \
-  '  exit 1' \
-  'fi' \
-  'echo "    compose containers: ${running}/2 running"' \
-  "code=\$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8080/)" \
-  'if [ "${code}" != "200" ]; then' \
-  '  echo "    ERROR: dagu http ${code}"' \
-  '  echo "    dagu container tail (debug):"' \
-  '  sudo docker logs --tail 30 alpha-lab-dagu 2>&1 | sed "s/^/      /"' \
-  '  exit 1' \
-  'fi' \
-  'echo "    dagu http: 200"' \
-  'echo "    dags-sync tail:"' \
-  'sudo docker logs --tail 5 alpha-lab-dags-sync 2>&1 | sed "s/^/      /"')
+  '# 六個服務都必須 running；四個有 healthcheck 的服務都必須 healthy' \
+  '  expected="alpha-lab-dagu alpha-lab-dags-sync hindsight hindsight-db alpha-lab-postgres mastra-app"' \
+  '  for c in ${expected}; do' \
+  '    state=$(sudo docker inspect -f "{{.State.Status}}" "${c}" 2>/dev/null || true)' \
+  '    if [ "${state}" != "running" ]; then' \
+  '      echo "    ERROR: ${c} state=${state}"' \
+  '      compose ps' \
+  '      exit 1' \
+  '    fi' \
+  '  done' \
+  '  for c in hindsight hindsight-db alpha-lab-postgres mastra-app; do' \
+  '    health=$(sudo docker inspect -f "{{.State.Health.Status}}" "${c}" 2>/dev/null || true)' \
+  '    if [ "${health}" != "healthy" ]; then' \
+  '      echo "    ERROR: ${c} health=${health}"' \
+  '      sudo docker logs --tail 30 "${c}" 2>&1 | sed "s/^/      /"' \
+  '      exit 1' \
+  '    fi' \
+  '  done' \
+  '  echo "    compose services: 6/6 running; healthchecks passed"' \
+  "  code=\$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8080/)" \
+  '  if [ "${code}" != "200" ]; then' \
+  '    echo "    ERROR: dagu http ${code}"' \
+  '    sudo docker logs --tail 30 alpha-lab-dagu 2>&1 | sed "s/^/      /"' \
+  '    exit 1' \
+  '  fi' \
+  '  echo "    dagu http: 200"' \
+  '  echo "    hindsight api: $(curl -sS -o /dev/null -w "%{http_code}" http://127.0.0.1:8888/health)"' \
+  '  echo "    mastra api: $(curl -sS -o /dev/null -w "%{http_code}" http://127.0.0.1:4111/health)"' \
+  '  echo "    dags-sync tail:"' \
+  '  sudo docker logs --tail 5 alpha-lab-dags-sync 2>&1 | sed "s/^/      /"')
 "${SSH_CMD[@]}" --command "${VERIFY_CMD}"

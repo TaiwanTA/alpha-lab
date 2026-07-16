@@ -1,0 +1,174 @@
+# alpha-lab canonical Compose：將六個服務及其網路與持久化資料集中管理。
+#
+# 正式部署時由 VM-only 的 /etc/alpha-lab/stack.env 提供 image tag、
+# Hindsight 內部資料庫 URL 等 interpolation 變數；所有秘密值都留在
+# /etc/alpha-lab/secrets/ 下的 env 檔，不進入 repository。
+name: alpha-lab
+
+services:
+  alpha-lab-dagu:
+    image: ghcr.io/taiwanta/alpha-lab-dagu:${ALPHA_LAB_IMAGE_TAG:-latest}
+    container_name: alpha-lab-dagu
+    restart: unless-stopped
+    command: ["dagu", "start-all"]
+    ports:
+      - "127.0.0.1:8080:8080"
+    env_file:
+      - /etc/alpha-lab/secrets/dagu.env
+    environment:
+      PUID: "999"
+      PGID: "982"
+      HOME: /var/lib/alpha-lab/dagu
+      DAGU_HOME: /var/lib/alpha-lab/dagu
+      # 以 Compose DNS 連線，不能在 container 內使用 127.0.0.1。
+      HINDSIGHT_BASE_URL: http://hindsight:8888
+    volumes:
+      # 目前 systemd、Dagu 與 dags-sync 都依賴這個既有 state 路徑。
+      - /var/lib/alpha-lab/dagu:/var/lib/alpha-lab/dagu
+    secrets:
+      - source: dagu_env
+        target: /etc/alpha-lab/dagu.env
+    depends_on:
+      hindsight:
+        condition: service_healthy
+      alpha-lab-postgres:
+        condition: service_healthy
+    networks:
+      - alpha_lab_net
+
+  alpha-lab-dags-sync:
+    image: ghcr.io/taiwanta/alpha-lab-dags-sync:${ALPHA_LAB_IMAGE_TAG:-latest}
+    container_name: alpha-lab-dags-sync
+    restart: unless-stopped
+    entrypoint: ["/usr/local/bin/dags-sync.sh"]
+    environment:
+      DAG_SYNC_REPO: git@github.com:TaiwanTA/alpha-lab.git
+      DAG_SYNC_BRANCH: main
+      DAG_SYNC_PATH: automation/dags
+      DAG_SYNC_INTERVAL: "300"
+      DAG_SYNC_TARGET: /var/lib/alpha-lab/dagu/dags
+      HOME: /var/lib/alpha-lab/dagu
+      GIT_SSH_COMMAND: >-
+        ssh -i /var/lib/alpha-lab/dagu/.ssh/id_ed25519
+        -o IdentitiesOnly=yes
+        -o UserKnownHostsFile=/var/lib/alpha-lab/dagu/.ssh/known_hosts
+        -o StrictHostKeyChecking=yes
+    volumes:
+      # sidecar 與 Dagu 必須共享同一個 state 及 SSH deploy key。
+      - /var/lib/alpha-lab/dagu:/var/lib/alpha-lab/dagu
+    networks:
+      - alpha_lab_net
+
+  hindsight-db:
+    image: pgvector/pgvector:pg${HINDSIGHT_DB_VERSION:-18}
+    container_name: hindsight-db
+    restart: unless-stopped
+    env_file:
+      - /etc/alpha-lab/secrets/hindsight-db.env
+    volumes:
+      - hindsight_pgdata:/var/lib/postgresql/${HINDSIGHT_DB_VERSION:-18}/docker
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks:
+      - alpha_lab_net
+
+  hindsight:
+    image: ghcr.io/vectorize-io/hindsight:${HINDSIGHT_VERSION:-latest-slim}
+    container_name: hindsight
+    restart: unless-stopped
+    entrypoint:
+      - /bin/sh
+      - -c
+      - >-
+        uv pip install --python /app/api/.venv/bin/python --quiet
+        --link-mode=copy flashrank && exec /app/start-all.sh
+    env_file:
+      - /etc/alpha-lab/secrets/hindsight.env
+    environment:
+      # stack.env 中的 URL 由遷移腳本產生，host 必須是 hindsight-db。
+      HINDSIGHT_API_DATABASE_URL: ${HINDSIGHT_API_DATABASE_URL:?set URL with hindsight-db host}
+      HINDSIGHT_API_VECTOR_EXTENSION: pgvector
+    ports:
+      - "127.0.0.1:8888:8888"
+    depends_on:
+      hindsight-db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8888/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 180s
+    networks:
+      alpha_lab_net:
+        aliases:
+          # 切換期間保留舊 container DNS 名稱，完成驗證後可移除。
+          - hindsight-hindsight-1
+
+  alpha-lab-postgres:
+    image: postgres:16-alpine
+    container_name: alpha-lab-postgres
+    restart: unless-stopped
+    env_file:
+      - /etc/alpha-lab/secrets/research-postgres.env
+    volumes:
+      - research_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    networks:
+      - alpha_lab_net
+
+  mastra-app:
+    # 此 tag 是 VM 現有 local image；搬遷至其他 VM 前須先推送並 pin digest。
+    image: ${MASTRA_IMAGE:-mastra-selfhost:local}
+    container_name: mastra-app
+    user: "1001:1001"
+    restart: unless-stopped
+    ports:
+      - "4111:4111"
+    env_file:
+      - /etc/alpha-lab/secrets/mastra.env
+    environment:
+      PORT: "4111"
+      HOST: 0.0.0.0
+      LOG_LEVEL: info
+      DATABASE_URL: file:/data/mastra.db
+    volumes:
+      - mastra_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:4111/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - alpha_lab_net
+
+networks:
+  alpha_lab_net:
+    name: alpha-lab-net
+    driver: bridge
+    internal: false
+
+volumes:
+  hindsight_pgdata:
+    name: alpha_lab_hindsight_pgdata
+  research_pgdata:
+    external: true
+    name: research_pgdata
+  mastra_data:
+    external: true
+    name: mastra-data
+
+secrets:
+  dagu_env:
+    file: /etc/alpha-lab/secrets/dagu.env

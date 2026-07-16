@@ -1,8 +1,6 @@
 [Unit]
-Description=Alpha Lab Dagu runtime (compose wrapper)
-# 此 unit 取代 legacy `dagu start-all` systemd unit，
-# 驅動定義在 /etc/alpha-lab/docker-compose.yml 的
-# Docker Compose stack。
+Description=Alpha Lab unified Compose runtime
+# 由 repository 維護的 canonical Compose 管理六個服務。
 After=network-online.target docker.service
 Wants=network-online.target
 Requires=docker.service
@@ -10,10 +8,10 @@ Requires=docker.service
 [Service]
 Type=oneshot
 RemainAfterExit=true
-WorkingDirectory=/etc/alpha-lab
-ExecStart=/usr/bin/docker compose -f /etc/alpha-lab/docker-compose.yml up -d --remove-orphans
-ExecStop=/usr/bin/docker compose -f /etc/alpha-lab/docker-compose.yml down
-ExecReload=/usr/bin/docker compose -f /etc/alpha-lab/docker-compose.yml up -d --force-recreate
+WorkingDirectory=/opt/alpha-lab
+ExecStart=/usr/bin/docker compose --env-file /etc/alpha-lab/stack.env -f /opt/alpha-lab/automation/deploy/docker-compose.yml up -d --remove-orphans
+ExecStop=/usr/bin/docker compose --env-file /etc/alpha-lab/stack.env -f /opt/alpha-lab/automation/deploy/docker-compose.yml down
+ExecReload=/usr/bin/docker compose --env-file /etc/alpha-lab/stack.env -f /opt/alpha-lab/automation/deploy/docker-compose.yml up -d --force-recreate --remove-orphans
 Restart=on-failure
 RestartSec=5
 
