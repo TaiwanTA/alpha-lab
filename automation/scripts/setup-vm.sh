@@ -8,14 +8,15 @@
 # 等價的 dagu runtime。
 #
 # 已知先決條件 (在跑這支之前必須先完成):
-#   - GCP VM 已建好並用 `gcloud compute ssh` 可連
+#   - GCP VM 已建好並用 SSH 可連
 #   - docker 已裝 (docker version >= 20)
-#   - dagu image `ghcr.io/dagu-org/dagu:2.10.7` 可 pull
-#     (ghcr.io 需要 login 或 public access)
+#   - VM 可連線到 ghcr.io 與 GitHub
 #   - hindsight-net 外部 docker network 已建好
 #     (Hindsight container 跟 alpha-lab-dagu 共用)
-#   - /opt/alpha-lab/automation/ 已被 deploy-dagu.sh 部署進來
-#     (見 AGENTS.md「部署流程」)
+#   - 執行者可提供 GHCR PAT (read:packages scope)
+#
+# VM 不需要 alpha-lab source checkout；這支腳本只會把 compose
+# 檔安裝到 /etc/alpha-lab，runtime scripts 都在 GHCR image 內。
 #
 # 步驟:
 #   1. 建立 alpha-lab-dagu user (uid=999, gid=982)
@@ -24,15 +25,16 @@
 #      (備援用 — 互動讀 public key path,或用 backup)
 #   4. 從 dagu.env.template 生成 /etc/alpha-lab/dagu.env
 #      (互動讀 secret 值,不入 repo)
-#   5. cp systemd unit + systemctl daemon-reload + enable
+#   5. 安裝 compose 檔與 systemd unit
 #   6. 預先建 hindsight-net (如果還沒)
-#   7. docker compose pull
-#   8. docker compose up -d
-#   9. verify (curl dagu http base URL)
+#   7. 互動登入 GHCR (read:packages PAT)
+#   8. docker compose pull
+#   9. 透過 systemd 啟動服務 (ExecStart 執行 docker compose up -d)
+#  10. verify (curl dagu http base URL)
 #
 # Idempotent:重跑不會破壞既有狀態。`useradd` 重複跑會跳過,
-# `mkdir -p` 不會壞,systemd unit 永遠覆蓋,`docker compose
-# up -d` 沒變更就不做事。
+# `mkdir -p` 不會壞,systemd unit 永遠覆蓋,`systemctl start`
+# 會重用既有 compose containers。
 #
 # 互動模式:每個 secret 值用 read -s 隱藏輸入,非 secret 用
 # read。沒有 --batch / non-interactive mode — 這是故意,新 VM
@@ -55,7 +57,9 @@ if [ "${EUID:-$(id -u)}" -eq 0 ]; then
 fi
 
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
-DAGU_DEPLOY_DIR="${REPO_ROOT}/deploy/dagu"
+DAGU_DEPLOY_DIR="${REPO_ROOT}/automation/deploy/dagu"
+DAGU_COMPOSE_SRC="${DAGU_DEPLOY_DIR}/docker-compose.yml"
+DAGU_COMPOSE_TARGET="/etc/alpha-lab/docker-compose.yml"
 DAGU_ENV_TEMPLATE="${DAGU_DEPLOY_DIR}/dagu.env.template"
 DAGU_ENV_TARGET="/etc/alpha-lab/dagu.env"
 SYSTEMD_UNIT_SRC="${DAGU_DEPLOY_DIR}/alpha-lab-dagu.service"
@@ -65,21 +69,21 @@ SSH_KEY="${SSH_DIR}/id_ed25519"
 DAGU_HOME="/var/lib/alpha-lab/dagu"
 
 # === 步驟 1: user ===
-echo "[1/9] 建立 alpha-lab-dagu user (uid=999, gid=982)"
+echo "[1/10] 建立 alpha-lab-dagu user (uid=999, gid=982)"
 if ! id alpha-lab-dagu >/dev/null 2>&1; then
   sudo groupadd -g 982 alpha-lab-dagu
   sudo useradd -u 999 -g 982 -d "${DAGU_HOME}" -M -s /bin/bash alpha-lab-dagu
 fi
 
 # === 步驟 2: dirs ===
-echo "[2/9] 建立 dagu state 跟 dags dirs"
+echo "[2/10] 建立 dagu state 跟 dags dirs"
 sudo mkdir -p "${DAGU_HOME}/data" "${DAGU_HOME}/logs" "${DAGU_HOME}/dags"
 sudo chown -R alpha-lab-dagu:alpha-lab-dagu "${DAGU_HOME}"
 sudo chmod 0750 "${DAGU_HOME}"
 sudo chmod 0755 "${DAGU_HOME}/dags"
 
 # === 步驟 3: SSH deploy key ===
-echo "[3/9] SSH deploy key (git@github.com:TaiwanTA/alpha-lab)"
+echo "[3/10] SSH deploy key (git@github.com:TaiwanTA/alpha-lab)"
 sudo mkdir -p "${SSH_DIR}"
 sudo chmod 0700 "${SSH_DIR}"
 # chown 給 alpha-lab-dagu:sudo mkdir 預設是 root:root,後續
@@ -122,11 +126,11 @@ fi
 sudo chmod 0644 "${SSH_DIR}/known_hosts"
 
 # === 步驟 4: dagu.env ===
-echo "[4/9] /etc/alpha-lab/dagu.env (互動讀值)"
+echo "[4/10] /etc/alpha-lab/dagu.env (互動讀值)"
+sudo mkdir -p /etc/alpha-lab
 if [ -f "${DAGU_ENV_TARGET}" ]; then
   echo "    既有 ${DAGU_ENV_TARGET} 保留 (刪除檔案後重跑才會重新生成)"
 else
-  sudo mkdir -p /etc/alpha-lab
   # 用 temp file 收集 secret 再 install 到目標路徑:
   # 避免 `sudo tee -a` 把 secret value 放進 argv (會落到
   # /var/log/audit/audit.log 的 EXECVE 記錄)。secret 只走
@@ -177,29 +181,42 @@ else
   rm -f "${TMP_ENV}"
 fi
 
-# === 步驟 5: systemd unit ===
-echo "[5/9] systemd unit"
+# === 步驟 5: compose 檔與 systemd unit ===
+echo "[5/10] /etc/alpha-lab/docker-compose.yml 與 systemd unit"
+sudo install -m 0644 "${DAGU_COMPOSE_SRC}" "${DAGU_COMPOSE_TARGET}"
 sudo install -m 0644 "${SYSTEMD_UNIT_SRC}" "${SYSTEMD_UNIT_TARGET}"
 sudo systemctl daemon-reload
 sudo systemctl enable alpha-lab-dagu.service
 
 # === 步驟 6: hindsight-net ===
-echo "[6/9] docker network hindsight-net"
+echo "[6/10] docker network hindsight-net"
 if ! docker network ls --format '{{.Name}}' | grep -qx hindsight-net; then
   docker network create --driver bridge hindsight-net
 fi
 
-# === 步驟 7: docker compose pull ===
-echo "[7/9] docker compose pull"
-cd "${DAGU_DEPLOY_DIR}"
-docker compose pull
+# === 步驟 7: GHCR login ===
+echo "[7/10] GHCR login (需要 read:packages PAT)"
+read -r -s -p "    GHCR PAT (read:packages)= " GHCR_PAT < /dev/tty
+echo
+if [ -z "${GHCR_PAT}" ]; then
+  echo "ERROR: GHCR PAT 不可為空" >&2
+  exit 1
+fi
+printf '%s' "${GHCR_PAT}" | sudo docker login ghcr.io -u taiwanta --password-stdin
+unset GHCR_PAT
 
-# === 步驟 8: docker compose up ===
-echo "[8/9] docker compose up -d"
-docker compose up -d --remove-orphans
+# === 步驟 8: docker compose pull ===
+echo "[8/10] docker compose pull"
+cd /etc/alpha-lab
+sudo docker compose pull
 
-# === 步驟 9: verify ===
-echo "[9/9] verify"
+# === 步驟 9: 啟動 systemd 服務 ===
+echo "[9/10] systemctl start alpha-lab-dagu.service"
+sudo systemctl start alpha-lab-dagu.service
+
+
+# === 步驟 10: verify ===
+echo "[10/10] verify"
 sleep 4
 if curl -fsS -o /dev/null -w "    dagu http: %{http_code}\n" http://127.0.0.1:8080/; then
   echo "    dags-sync container logs (last 20 lines):"
