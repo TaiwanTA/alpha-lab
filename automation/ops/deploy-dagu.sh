@@ -5,7 +5,7 @@
 # step 不會叫它,只有人在 local 跑的時候用。
 #
 # 流程 (compose 模式):
-#   1. 把 compose 檔部署到 VM 的 /etc/alpha-lab/
+#   1. 把 compose 檔部署到 VM 的 /opt/alpha-lab/compose.yml
 #   2. 從 GHCR pull 最新 runtime images (VM 必須先完成 ghcr.io
 #      login,使用 read:packages scope 的 PAT)
 #   3. systemctl reload alpha-lab-dagu.service,以
@@ -60,18 +60,18 @@ COMPOSE_FILE="${LOCAL_ROOT}/automation/deploy/docker-compose.yml"
 
 echo "[1/5] 部署 canonical Compose 到 VM 正式路徑"
 gcloud compute scp --zone "${ZONE}" "${COMPOSE_FILE}" \
-  "${INSTANCE}:/tmp/alpha-lab-docker-compose.yml" --project "${PROJECT}"
+  "${INSTANCE}:/tmp/alpha-lab-compose.yml" --project "${PROJECT}"
 "${SSH_CMD[@]}" --command 'set -e
-sudo mkdir -p /opt/alpha-lab/automation/deploy
-sudo install -m 0644 /tmp/alpha-lab-docker-compose.yml /opt/alpha-lab/automation/deploy/docker-compose.yml
-rm -f /tmp/alpha-lab-docker-compose.yml
+sudo mkdir -p /opt/alpha-lab
+sudo install -m 0644 /tmp/alpha-lab-compose.yml /opt/alpha-lab/compose.yml
+rm -f /tmp/alpha-lab-compose.yml
 sudo test -f /etc/alpha-lab/stack.env
-echo "    /opt/alpha-lab/automation/deploy/docker-compose.yml installed"'
+echo "    /opt/alpha-lab/compose.yml installed"'
 
 echo "[2/5] docker compose pull"
 "${SSH_CMD[@]}" --command 'set -e
 sudo /usr/bin/docker compose --env-file /etc/alpha-lab/stack.env \
-  -f /opt/alpha-lab/automation/deploy/docker-compose.yml pull
+  -f /opt/alpha-lab/compose.yml pull
 echo "    images pulled"'
 
 echo "[3/5] systemctl reload alpha-lab-dagu.service"
@@ -92,7 +92,7 @@ for i in $(seq 1 60); do
   sleep 1
 done
 sudo /usr/bin/docker compose --env-file /etc/alpha-lab/stack.env \
-  -f /opt/alpha-lab/automation/deploy/docker-compose.yml ps'
+  -f /opt/alpha-lab/compose.yml ps'
 
 
 echo "[5/5] verify"
@@ -112,7 +112,7 @@ VERIFY_CMD=$(printf '%s\n' \
   'echo "    systemd: active"' \
   '  cd /opt/alpha-lab' \
   '  sudo test -f /etc/alpha-lab/stack.env' \
-  '  compose() { sudo /usr/bin/docker compose --env-file /etc/alpha-lab/stack.env -f /opt/alpha-lab/automation/deploy/docker-compose.yml "$@"; }' \
+  '  compose() { sudo /usr/bin/docker compose --env-file /etc/alpha-lab/stack.env -f /opt/alpha-lab/compose.yml "$@"; }' \
   'missing=0' \
   "for d in ${PHASE4_DAGS}; do" \
   '  if sudo test -f "/var/lib/alpha-lab/dagu/dags/${d}.yaml"; then' \

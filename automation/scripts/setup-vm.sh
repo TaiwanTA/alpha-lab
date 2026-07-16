@@ -15,8 +15,8 @@
 #   - 執行者可提供 GHCR PAT（read:packages scope）
 #
 # VM 不需要 alpha-lab source checkout；這支腳本會把 canonical
-# Compose 檔安裝到 /opt/alpha-lab/automation/deploy，runtime
-# scripts 都在 GHCR image 內。
+# Compose 檔安裝到 /opt/alpha-lab，runtime scripts 都在
+# GHCR image 內。
 #
 # 步驟：
 #   1. 建立 alpha-lab-dagu user（uid=999、gid=982）
@@ -51,7 +51,7 @@ fi
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 DAGU_DEPLOY_DIR="${REPO_ROOT}/automation/deploy/dagu"
 CANONICAL_COMPOSE_SRC="${REPO_ROOT}/automation/deploy/docker-compose.yml"
-CANONICAL_COMPOSE_TARGET="/opt/alpha-lab/automation/deploy/docker-compose.yml"
+CANONICAL_COMPOSE_TARGET="/opt/alpha-lab/compose.yml"
 DAGU_ENV_TEMPLATE="${DAGU_DEPLOY_DIR}/dagu.env.template"
 DAGU_ENV_TARGET="/etc/alpha-lab/dagu.env"
 SECRETS_DIR="/etc/alpha-lab/secrets"
