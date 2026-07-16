@@ -1,20 +1,21 @@
-# Dagu runtime as a Docker compose stack on the alpha-lab VM.
+# Dagu runtime compose：runtime image 由 GitHub Actions build 後推送到
+# GHCR，VM 只需 pull image，不需要把 `/opt/alpha-lab/automation`
+# source checkout bind mount 進 dagu container。
 #
-# 設計目標:在另一台 VM 上還原這份 compose + automation/scripts/
-# setup-vm.sh 就能跑出跟現在 production 一樣的 dagu runtime
-# + DAG 同步機制,不需要再手動跑 deploy-dagu.sh。
+# 服務:
+#   - `dagu`:Dagu 排程器，執行 GHCR 上的 alpha-lab-dagu image。
+#     image 內含 git/node22/bun/ssh/rsync 與 automation scripts、
+#     production node_modules、dags、config、migrations。
+#   - `dags-sync`:sidecar 服務，執行 GHCR 上的 dags-sync image。
+#     它仍從 GitHub sparse clone 最新 automation/dags，再 rsync
+#     到 Dagu state 的 dags 子目錄；DAG 定義可獨立於 runtime image 更新。
 #
-# 三個服務:
-#   - `dagu`:Dagu 排程器,跑 999:982 (對應 host alpha-lab-dagu
-#     user)。自建 image `Dockerfile.dagu` 在官方 dagu:2.10.7
-#     上補 git/node22/bun/ssh/rsync。Persistent state (data /
-#     logs / dags / ssh key / workspace) 走 host bind mount
-#     /var/lib/alpha-lab/dagu。DAG 引用的 scripts 走另一個
-#     bind mount /opt/alpha-lab/automation:ro。
-#   - `dags-sync`:sidecar 服務,alpine + git + openssh-client。
-#     Entry script `dags-sync.sh` 第一次跑 `git clone`,之後
-#     每 5 分鐘 `git pull`,rsync 到 dags_dir 子目錄。使用
-#     SSH deploy key 同步 automation/dags/。
+# Persistent dagu state（data/logs/dags/ssh keys/workspace）仍走
+# `/var/lib/alpha-lab/dagu` data mount；本次移除的是原始碼 mount。
+#
+# Dagu image tag:
+#   `ALPHA_LAB_IMAGE_TAG` 可指定 immutable commit SHA；未指定時用 latest。
+#   production 建議由部署環境固定 SHA，避免 latest 在重啟時漂移。
 #
 # PUID/PGID 機制:
 #   官方 entrypoint.sh (/usr/local/bin/tini -g -- /entrypoint.sh)
@@ -59,16 +60,15 @@ name: alpha-lab-dagu
 
 services:
   dagu:
-    build:
-      context: .
-      dockerfile: Dockerfile.dagu
-    image: alpha-lab-dagu:local
+    # image 由 .github/workflows/build-images.yml 推送到 GHCR。
+    # VM 只需 `docker compose pull`，不需 repo source/build context。
+    image: ghcr.io/taiwanta/alpha-lab-dagu:${ALPHA_LAB_IMAGE_TAG:-latest}
     container_name: alpha-lab-dagu
     restart: unless-stopped
-    # 不設 `user:` — 官方 entrypoint.sh 以 root 啟動,透過
+    # 不設 `user:` — 官方 entrypoint.sh 以 root 啟動，透過
     # PUID/PGID 環境變數降權到 999:982。
-    # 覆蓋官方 Cmd:entrypoint.sh 的 `sudo -u` 執行 command,
-    # sudo 不繼承 root 的 PATH,所以要用完整 binary path。
+    # 覆蓋官方 Cmd：entrypoint.sh 的 sudo -u 執行 command，
+    # sudo 不繼承 root 的 PATH，所以要用完整 binary path。
     command: ["dagu", "start-all"]
     ports:
       - "127.0.0.1:8080:8080"
@@ -98,11 +98,6 @@ services:
       # Persistent dagu state (data, logs, admin, dags, .ssh,
       # workspace) 全走這個 bind mount。
       - /var/lib/alpha-lab/dagu:/var/lib/alpha-lab/dagu
-      # DAG step 引用 /opt/alpha-lab/automation/scripts/ —
-      # clone-fixture.sh, clone-publish.sh, git-askpass.sh,
-      # research-agent.ts, publish-draft.ts 都在這。:ro 因為
-      # DAG step 只讀不改。
-      - /opt/alpha-lab/automation:/opt/alpha-lab/automation:ro
       # /etc/alpha-lab/dagu.env — env_file 只注入變數,檔案
       # 不在 container fs。DAG step 做 `. /etc/alpha-lab/dagu.env`
       # 需要這個 bind mount。
@@ -116,16 +111,9 @@ services:
       - research_default
 
   dags-sync:
-    # 用 repo 內 Dockerfile.dags-sync build image:USER 999:982、
-    # dags-sync.sh + git + openssh-client + rsync 都在 build
-    # 階段裝好。改 dags-sync.sh / Dockerfile 需要
-    # `docker compose build` 重 build;setup-vm.sh 跟
-    # deploy-dagu.sh 都會跑。
-    # 注意:dags-sync 不 join research_default — 它只跟
-    # GitHub 用 SSH 講話,不需要接 DB。
-    build:
-      context: .
-      dockerfile: Dockerfile.dags-sync
+    # image 由 .github/workflows/build-images.yml 推送到 GHCR；
+    # VM 不需 automation source/build context。
+    image: ghcr.io/taiwanta/alpha-lab-dags-sync:${ALPHA_LAB_IMAGE_TAG:-latest}
     container_name: alpha-lab-dags-sync
     restart: unless-stopped
     entrypoint: ["/usr/local/bin/dags-sync.sh"]
