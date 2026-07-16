@@ -138,15 +138,23 @@ VERIFY_CMD=$(printf '%s\n' \
   '    fi' \
   '  done' \
   '  for c in hindsight hindsight-db alpha-lab-postgres mastra-app; do' \
-  '    health=$(sudo docker inspect -f "{{.State.Health.Status}}" "${c}" 2>/dev/null || true)' \
+  '    for i in $(seq 1 45); do' \
+  '      health=$(sudo docker inspect -f "{{.State.Health.Status}}" "${c}" 2>/dev/null || true)' \
+  '      if [ "${health}" = "healthy" ]; then break; fi' \
+  '      sleep 1' \
+  '    done' \
   '    if [ "${health}" != "healthy" ]; then' \
-  '      echo "    ERROR: ${c} health=${health}"' \
+  '      echo "    ERROR: ${c} health=${health} (after wait)"' \
   '      sudo docker logs --tail 30 "${c}" 2>&1 | sed "s/^/      /"' \
   '      exit 1' \
   '    fi' \
   '  done' \
   '  echo "    compose services: 6/6 running; healthchecks passed"' \
-  "  code=\$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8080/)" \
+  '  for i in $(seq 1 15); do' \
+  "    code=\$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8080/ || true)" \
+  '    if [ "${code}" = "200" ]; then break; fi' \
+  '    sleep 1' \
+  '  done' \
   '  if [ "${code}" != "200" ]; then' \
   '    echo "    ERROR: dagu http ${code}"' \
   '    sudo docker logs --tail 30 alpha-lab-dagu 2>&1 | sed "s/^/      /"' \
