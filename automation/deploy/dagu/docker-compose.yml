@@ -1,3 +1,6 @@
+# 已棄用：正式環境請使用上一層的 ../docker-compose.yml canonical 六服務 stack。
+# 本檔僅保留供 rollback 參考，不應再由 systemd 或 deploy-dagu.sh 啟動。
+
 # Dagu runtime compose：runtime image 由 GitHub Actions build 後推送到
 # GHCR，VM 只需 pull image，不需要把 `/opt/alpha-lab/automation`
 # source checkout bind mount 進 dagu container。

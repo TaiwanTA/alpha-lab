@@ -7,38 +7,30 @@
 # 的單一 entry point。新 VM 跑一次就具備跟現有 production
 # 等價的 dagu runtime。
 #
-# 已知先決條件 (在跑這支之前必須先完成):
+# 已知先決條件（在跑這支之前必須先完成）：
 #   - GCP VM 已建好並用 SSH 可連
-#   - docker 已裝 (docker version >= 20)
+#   - docker 已裝（docker version >= 20）
 #   - VM 可連線到 ghcr.io 與 GitHub
-#   - hindsight-net 外部 docker network 已建好
-#     (Hindsight container 跟 alpha-lab-dagu 共用)
-#   - 執行者可提供 GHCR PAT (read:packages scope)
+#   - /etc/alpha-lab/stack.env 與各服務秘密檔已由受控流程建立
+#   - 執行者可提供 GHCR PAT（read:packages scope）
 #
-# VM 不需要 alpha-lab source checkout；這支腳本只會把 compose
-# 檔安裝到 /etc/alpha-lab，runtime scripts 都在 GHCR image 內。
+# VM 不需要 alpha-lab source checkout；這支腳本會把 canonical
+# Compose 檔安裝到 /opt/alpha-lab/automation/deploy，runtime
+# scripts 都在 GHCR image 內。
 #
-# 步驟:
-#   1. 建立 alpha-lab-dagu user (uid=999, gid=982)
-#   2. 建 /var/lib/alpha-lab/dagu/{,data,logs} + dags-dirs
-#   3. 生成或還原 SSH deploy key
-#      (備援用 — 互動讀 public key path,或用 backup)
-#   4. 從 dagu.env.template 生成 /etc/alpha-lab/dagu.env
-#      (互動讀 secret 值,不入 repo)
-#   5. 安裝 compose 檔與 systemd unit
-#   6. 預先建 hindsight-net (如果還沒)
-#   7. 互動登入 GHCR (read:packages PAT)
-#   8. docker compose pull
-#   9. 透過 systemd 啟動服務 (ExecStart 執行 docker compose up -d)
-#  10. verify (curl dagu http base URL)
+# 步驟：
+#   1. 建立 alpha-lab-dagu user（uid=999、gid=982）
+#   2. 建立 Dagu state 與 SSH deploy key
+#   3. 從 dagu.env.template 生成 Dagu 秘密檔（互動讀值）
+#   4. 安裝 canonical Compose 與 systemd unit
+#   5. 互動登入 GHCR（read:packages PAT）
+#   6. pull 並啟動六服務 Compose，執行健康檢查
 #
-# Idempotent:重跑不會破壞既有狀態。`useradd` 重複跑會跳過,
-# `mkdir -p` 不會壞,systemd unit 永遠覆蓋,`systemctl start`
-# 會重用既有 compose containers。
+# Idempotent：重跑不會破壞既有狀態；既有 user、state、key、秘密檔
+# 與 named volumes 都會保留。
 #
-# 互動模式:每個 secret 值用 read -s 隱藏輸入,非 secret 用
-# read。沒有 --batch / non-interactive mode — 這是故意,新 VM
-# 設置是 user-driven 操作,不是 CI 流程。
+# 互動模式：每個秘密值用 read -s 隱藏輸入。Hindsight、research
+# Postgres、Mastra 的 env 檔與 stack.env 必須先由受控遷移流程建立。
 
 set -euo pipefail
 
@@ -58,10 +50,13 @@ fi
 
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 DAGU_DEPLOY_DIR="${REPO_ROOT}/automation/deploy/dagu"
-DAGU_COMPOSE_SRC="${DAGU_DEPLOY_DIR}/docker-compose.yml"
-DAGU_COMPOSE_TARGET="/etc/alpha-lab/docker-compose.yml"
+CANONICAL_COMPOSE_SRC="${REPO_ROOT}/automation/deploy/docker-compose.yml"
+CANONICAL_COMPOSE_TARGET="/opt/alpha-lab/automation/deploy/docker-compose.yml"
 DAGU_ENV_TEMPLATE="${DAGU_DEPLOY_DIR}/dagu.env.template"
 DAGU_ENV_TARGET="/etc/alpha-lab/dagu.env"
+SECRETS_DIR="/etc/alpha-lab/secrets"
+DAGU_SECRET_TARGET="${SECRETS_DIR}/dagu.env"
+STACK_ENV_TARGET="/etc/alpha-lab/stack.env"
 SYSTEMD_UNIT_SRC="${DAGU_DEPLOY_DIR}/alpha-lab-dagu.service"
 SYSTEMD_UNIT_TARGET="/etc/systemd/system/alpha-lab-dagu.service"
 SSH_DIR="/var/lib/alpha-lab/dagu/.ssh"
@@ -127,7 +122,7 @@ sudo chmod 0644 "${SSH_DIR}/known_hosts"
 
 # === 步驟 4: dagu.env ===
 echo "[4/10] /etc/alpha-lab/dagu.env (互動讀值)"
-sudo mkdir -p /etc/alpha-lab
+sudo mkdir -p /etc/alpha-lab "${SECRETS_DIR}"
 if [ -f "${DAGU_ENV_TARGET}" ]; then
   echo "    既有 ${DAGU_ENV_TARGET} 保留 (刪除檔案後重跑才會重新生成)"
 else
@@ -157,15 +152,9 @@ else
           # PUBLISH_TOKEN 暫停用,跳過
           continue
         fi
-        # Phase 4 event-ledger runtime contract — Phase 4
-        # workers (capture / research / settlement) read these.
-        # DATABASE_URL 必須用容器 DNS alias `alpha-lab-postgres`,
-        # 不是 host.docker.internal — dagu container 已 join
-        # `research_default` external docker network(見
-        # deploy/dagu/docker-compose.yml 的 dagu.networks),
-        # 所以容器內 alpha-lab-postgres 解析到 postgres
-        # container 的 IP。docker-compose 不再需要
-        # extra_hosts:host-gateway。
+        # Phase 4 event-ledger workers 使用 alpha-lab-postgres
+        # Compose DNS；六個服務都加入 canonical alpha-lab-net，
+        # 不再依賴 research_default 或 host.docker.internal。
         # 一般 secret
         # < /dev/tty:while 迴圈 stdin 被 template file 佔用,
         # read 需要從 terminal 讀使用者輸入
@@ -180,19 +169,32 @@ else
   sudo install -m 0640 -o root -g alpha-lab-dagu "${TMP_ENV}" "${DAGU_ENV_TARGET}"
   rm -f "${TMP_ENV}"
 fi
+sudo install -m 0640 -o root -g alpha-lab-dagu "${DAGU_ENV_TARGET}" "${DAGU_SECRET_TARGET}"
 
-# === 步驟 5: compose 檔與 systemd unit ===
-echo "[5/10] /etc/alpha-lab/docker-compose.yml 與 systemd unit"
-sudo install -m 0644 "${DAGU_COMPOSE_SRC}" "${DAGU_COMPOSE_TARGET}"
+# === 步驟 5: canonical Compose 檔與 systemd unit ===
+echo "[5/10] 安裝 canonical Compose 與 systemd unit"
+sudo mkdir -p "$(dirname "${CANONICAL_COMPOSE_TARGET}")"
+sudo install -m 0644 "${CANONICAL_COMPOSE_SRC}" "${CANONICAL_COMPOSE_TARGET}"
 sudo install -m 0644 "${SYSTEMD_UNIT_SRC}" "${SYSTEMD_UNIT_TARGET}"
 sudo systemctl daemon-reload
 sudo systemctl enable alpha-lab-dagu.service
 
-# === 步驟 6: hindsight-net ===
-echo "[6/10] docker network hindsight-net"
-if ! docker network ls --format '{{.Name}}' | grep -qx hindsight-net; then
-  docker network create --driver bridge hindsight-net
+# canonical Compose 由這些 VM-only 檔案提供 interpolation 與秘密值。
+if [ ! -f "${STACK_ENV_TARGET}" ]; then
+  echo "ERROR: 缺少 ${STACK_ENV_TARGET}，請先完成服務秘密遷移" >&2
+  exit 1
 fi
+for secret_file in \
+  "${DAGU_SECRET_TARGET}" \
+  "${SECRETS_DIR}/hindsight.env" \
+  "${SECRETS_DIR}/hindsight-db.env" \
+  "${SECRETS_DIR}/research-postgres.env" \
+  "${SECRETS_DIR}/mastra.env"; do
+  if [ ! -f "${secret_file}" ]; then
+    echo "ERROR: 缺少秘密檔 ${secret_file}" >&2
+    exit 1
+  fi
+done
 
 # === 步驟 7: GHCR login ===
 echo "[7/10] GHCR login (需要 read:packages PAT)"
@@ -207,8 +209,8 @@ unset GHCR_PAT
 
 # === 步驟 8: docker compose pull ===
 echo "[8/10] docker compose pull"
-cd /etc/alpha-lab
-sudo docker compose pull
+sudo docker compose --env-file "${STACK_ENV_TARGET}" \
+  -f "${CANONICAL_COMPOSE_TARGET}" pull
 
 # === 步驟 9: 啟動 systemd 服務 ===
 echo "[9/10] systemctl start alpha-lab-dagu.service"
