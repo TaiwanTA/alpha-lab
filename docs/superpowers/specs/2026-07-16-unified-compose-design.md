@@ -81,19 +81,15 @@ services:
     command: ["dagu", "start-all"]
     ports:
       - "127.0.0.1:8080:8080"
+    env_file:
+      - /etc/alpha-lab/secrets/dagu.env
     environment:
       PUID: "999"
       PGID: "982"
       HOME: /var/lib/alpha-lab/dagu
       DAGU_HOME: /var/lib/alpha-lab/dagu
-      HINDSIGHT_BASE_URL: ${HINDSIGHT_BASE_URL:?set container URL}
-      DATABASE_URL: ${DATABASE_URL:?set research DB URL}
-      MINIMAX_API_KEY: ${MINIMAX_API_KEY:?set secret}
-      X_BEARER_TOKEN: ${X_BEARER_TOKEN:?set secret}
-      TWELVE_DATA_API_KEY: ${TWELVE_DATA_API_KEY:?set secret}
-      HINDSIGHT_API_KEY: ${HINDSIGHT_API_KEY:-}
-      HINDSIGHT_BANK_ID: ${HINDSIGHT_BANK_ID:-alpha-lab}
-      GIT_READ_TOKEN: ${GIT_READ_TOKEN:-}
+      # Secrets 由 env_file 注入；environment 只覆寫 Compose DNS 設定。
+      HINDSIGHT_BASE_URL: http://hindsight:8888
     volumes:
       - dagu_state:/var/lib/alpha-lab/dagu
     secrets:
@@ -122,7 +118,9 @@ services:
       HOME: /var/lib/alpha-lab/dagu
       GIT_SSH_COMMAND: >-
         ssh -i /var/lib/alpha-lab/dagu/.ssh/id_ed25519
-        -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new
+        -o IdentitiesOnly=yes
+        -o UserKnownHostsFile=/var/lib/alpha-lab/dagu/.ssh/known_hosts
+        -o StrictHostKeyChecking=yes
     volumes:
       - dagu_state:/var/lib/alpha-lab/dagu
     networks: [alpha_lab_net]
@@ -364,6 +362,9 @@ VM 上建議使用以下 root-owned、group-readable 檔案（`0440 root:<runtim
 ### 操作規則
 
 - Dagu 保留 `env_file`/Compose secret mount 的功能：process env 供 DAG 使用，`/etc/alpha-lab/dagu.env` 供現有 step 的 `source` 契約使用。正式檔由 Compose `secrets` 掛入 container，不再是 automation source bind mount。
+  Canonical Dagu service 必須宣告上述 `env_file`；`environment` 僅覆寫
+  container DNS（例如 `HINDSIGHT_BASE_URL`），不得以 `${MINIMAX_API_KEY}`
+  等 interpolation 取代 secret，避免依賴 `stack.env` 提供 API key。
 - Secrets 不得出現在 Dockerfile `ARG`、`ENV`、image label、build cache、Git commit、Compose YAML 或 CI log。
 - `docker compose config` 可能展開 secret；驗證時輸出導向受控檔案並清理，或只執行 `--quiet`。
 - Hindsight DB password 若嵌入 `HINDSIGHT_API_DATABASE_URL`，生成 URL 時必須 percent-encode；不要手工把含 `@`、`:`、`#` 的 password 拼進 URL。
@@ -398,6 +399,13 @@ VM 上建議使用以下 root-owned、group-readable 檔案（`0440 root:<runtim
 10. 產生 `/etc/alpha-lab/stack.env` 及三份服務 secret file；把
     Dagu/Hindsight/Postgres 的 endpoint 改為 compose DNS 名稱，但保留原始
     secret value。以 `docker compose config --quiet` 驗證 interpolations。
+10a. 在任何 dags-sync clone 前，建立並驗證 GitHub host key：
+    從 GitHub 官方公布的 SSH fingerprint（或受控的 out-of-band 管道）
+    取得預期值，對 `ssh-keyscan -t ed25519 github.com` 的結果執行
+    `ssh-keygen -lf` 比對；只有比對成功才將結果以 mode `0644`、
+    owner `999:982` 寫入 `/var/lib/alpha-lab/dagu/.ssh/known_hosts`。
+    不得在未驗證時使用 `accept-new`；sidecar 使用
+    `StrictHostKeyChecking=yes`，clone 前必須先完成這個步驟。
 
 ### Phase C：停寫與切換
 
@@ -412,7 +420,9 @@ VM 上建議使用以下 root-owned、group-readable 檔案（`0440 root:<runtim
       up -d --remove-orphans
     ```
 
-15. `up` 後立即檢查六個 service 都是 running，且 `hindsight-db`、research Postgres、Hindsight、Mastra healthcheck 先通過再宣告應用可用。不要用 `depends_on` 的啟動順序代替 readiness。
+15. `up` 後立即檢查六個 service 都是 running，且已定義 healthcheck 的
+    `hindsight-db`、research Postgres、Hindsight、Mastra healthcheck
+    先通過再宣告應用可用。不要用 `depends_on` 的啟動順序代替 readiness。
 
 ### Phase D：驗證與收尾
 
@@ -429,11 +439,28 @@ VM 上建議使用以下 root-owned、group-readable 檔案（`0440 root:<runtim
 
 ### Rollback
 
-若任何資料/API 驗證失敗：停止 canonical Compose（不刪 volume），重新啟動原四個 Compose project，使用未改動的舊 bind directory、舊 named volume 與舊 networks。切換期間不刪原目錄、不覆蓋舊 image、不輪換 credentials，確保 rollback 是可執行的操作而非理論方案。
+Rollback 的有效邊界是 **任何 production write 發生之前**。切換前必須
+先停用 Dagu production schedule、外部觸發器與寫入流量；canonical Compose
+啟動後只做 read-only health/DNS/data 驗證，尚未通過 rollback gate 前不得
+讓 production DAG 或 API 寫入資料。
+
+若在 rollback gate 前任一驗證失敗：停止 canonical Compose（不得使用 `-v`，
+保留新 volumes），確認沒有寫入，再重新啟動原四個 Compose project，使用
+未改動的舊 bind directory、舊 named volume 與舊 networks。切換期間不刪
+原目錄、不覆蓋舊 image、不輪換 credentials。
+
+一旦已發生 production write，不得直接啟動仍指向舊資料的 Compose project；
+必須先備份新 volumes，將 run records、logs、artifacts、memory 與 DB 變更
+反向同步或以受控 restore/reconciliation 寫回舊資料位置，重新計算 checksum、
+row count 並完成 read/write 驗證後，才可重啟舊 project。若無法完成該
+reconciliation，維持 canonical Compose 並採 forward fix，避免資料遺失或雙寫
+分叉。
 
 ## 9. 驗收清單
 
-- [ ] canonical Compose 只有 6 個 services，且 `docker compose ps` 六個都 healthy/running。
+- [ ] canonical Compose 只有 6 個 services，且六個都 running；所有已定義
+  healthcheck 的 service（目前為 `hindsight-db`、research Postgres、
+  Hindsight、Mastra）均 healthy。
 - [ ] 六個 services 都在 `alpha-lab-net`；不依賴 `hindsight-net`、`research_default`、`mastra_default`。
 - [ ] Dagu image 內存在 `/opt/alpha-lab/automation/scripts`、`node_modules`、`dags`；`docker inspect` 沒有 `/opt/alpha-lab/automation` host mount。
 - [ ] `dags-sync` 仍執行，每 300 秒可從 GitHub 更新 DAG；Dagu 使用 named volume 的 `dags/`。
