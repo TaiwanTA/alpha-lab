@@ -23,12 +23,11 @@
 #   - 不會動 dags 內容 (改由 dags-sync sidecar 從 git pull)
 #   - 不會動 SSH deploy key (由 setup-vm.sh 一次性處理)
 #
+# 每次部署都會同步 repository 維護的 systemd unit 到 VM 並執行
+# daemon-reload,確保 compose 路徑與 ExecReload 保持一致。
 # 第一次切換:跟 dagu native binary 模式轉換到 compose 模式
-# 時,這支腳本要額外做:
+# 時,這支腳本仍要額外做:
 #   - systemctl stop alpha-lab-dagu.service (停 native)
-#   - cp automation/deploy/dagu/alpha-lab-dagu.service
-#     /etc/systemd/system/alpha-lab-dagu.service (改為 compose
-#     wrapper)
 #   - systemctl daemon-reload + start alpha-lab-dagu.service
 #   - dags 不需要搬家:/var/lib/alpha-lab/dagu/dags 在
 #     native 跟 compose 模式都一樣 (bind mount 子目錄)
@@ -57,16 +56,20 @@ LOCAL_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "${LOCAL_ROOT}"
 
 COMPOSE_FILE="${LOCAL_ROOT}/automation/deploy/docker-compose.yml"
+SERVICE_FILE="${LOCAL_ROOT}/automation/deploy/dagu/alpha-lab-dagu.service"
 
-echo "[1/5] 部署 canonical Compose 到 VM 正式路徑"
-gcloud compute scp --zone "${ZONE}" "${COMPOSE_FILE}" \
-  "${INSTANCE}:/tmp/alpha-lab-compose.yml" --project "${PROJECT}"
+echo "[1/5] 部署 canonical Compose 與 systemd unit 到 VM"
+gcloud compute scp --zone "${ZONE}" "${COMPOSE_FILE}" "${SERVICE_FILE}" \
+  "${INSTANCE}:/tmp/" --project "${PROJECT}"
 "${SSH_CMD[@]}" --command 'set -e
 sudo mkdir -p /opt/alpha-lab
-sudo install -m 0644 /tmp/alpha-lab-compose.yml /opt/alpha-lab/compose.yml
-rm -f /tmp/alpha-lab-compose.yml
+sudo install -m 0644 /tmp/docker-compose.yml /opt/alpha-lab/compose.yml
+sudo install -m 0644 /tmp/alpha-lab-dagu.service \
+  /etc/systemd/system/alpha-lab-dagu.service
+sudo systemctl daemon-reload
+rm -f /tmp/docker-compose.yml /tmp/alpha-lab-dagu.service
 sudo test -f /etc/alpha-lab/stack.env
-echo "    /opt/alpha-lab/compose.yml installed"'
+echo "    /opt/alpha-lab/compose.yml and systemd unit installed"'
 
 echo "[2/5] docker compose pull"
 "${SSH_CMD[@]}" --command 'set -e

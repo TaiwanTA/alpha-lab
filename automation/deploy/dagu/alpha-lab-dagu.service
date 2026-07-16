@@ -4,6 +4,7 @@ Description=Alpha Lab unified Compose runtime
 After=network-online.target docker.service
 Wants=network-online.target
 Requires=docker.service
+ConditionPathExists=/opt/alpha-lab/compose.yml
 
 [Service]
 Type=oneshot
