@@ -62,9 +62,9 @@ services:
   dagu:
     # image 由 .github/workflows/build-images.yml 推送到 GHCR。
     # VM 只需 `docker compose pull`，不需 repo source/build context。
-    # production 必須由部署環境明確指定 immutable commit SHA；
-    # 若要測試 latest，仍需顯式設定 ALPHA_LAB_IMAGE_TAG=latest。
-    image: ghcr.io/taiwanta/alpha-lab-dagu:${ALPHA_LAB_IMAGE_TAG:?set immutable image tag}
+    # production 可由部署環境指定 immutable commit SHA；
+    # 未指定時使用 latest。
+    image: ghcr.io/taiwanta/alpha-lab-dagu:${ALPHA_LAB_IMAGE_TAG:-latest}
     container_name: alpha-lab-dagu
     restart: unless-stopped
     # 不設 `user:` — 官方 entrypoint.sh 以 root 啟動，透過
@@ -115,7 +115,7 @@ services:
   dags-sync:
     # image 由 .github/workflows/build-images.yml 推送到 GHCR；
     # VM 不需 automation source/build context。
-    image: ghcr.io/taiwanta/alpha-lab-dags-sync:${ALPHA_LAB_IMAGE_TAG:?set immutable image tag}
+    image: ghcr.io/taiwanta/alpha-lab-dags-sync:${ALPHA_LAB_IMAGE_TAG:-latest}
     container_name: alpha-lab-dags-sync
     restart: unless-stopped
     entrypoint: ["/usr/local/bin/dags-sync.sh"]
