@@ -44,16 +44,34 @@ jobs:
             sudo install -m 0644 /tmp/compose.yml /opt/alpha-lab/compose.yml
             sudo install -m 0644 /tmp/alpha-lab-dagu.service /etc/systemd/system/alpha-lab-dagu.service
             sudo systemctl daemon-reload
+            sudo test -f /etc/alpha-lab/stack.env || { echo "ERROR: missing /etc/alpha-lab/stack.env"; exit 1; }
             sudo /usr/bin/docker compose --env-file /etc/alpha-lab/stack.env \
-              -f /opt/alpha-lab/compose.yml pull --ignore-pull-failures
+              -f /opt/alpha-lab/compose.yml pull alpha-lab-dagu alpha-lab-dags-sync
+            # alpha-lab-dagu.service ExecReload uses --force-recreate.
             sudo systemctl reload alpha-lab-dagu.service
           '
 
       # verify
       - name: Verify
         run: |
-          sleep 15
           gcloud compute ssh --zone "asia-east1-b" alpha-lab --project "g6online-352310" --command '
+            set -e
+            expected="alpha-lab-dagu alpha-lab-dags-sync hindsight hindsight-db alpha-lab-postgres mastra-app"
+            for service in ${expected}; do
+              if ! sudo docker inspect -f "{{.State.Status}}" "${service}" 2>/dev/null | grep -qx running; then
+                echo "ERROR: ${service} is not running"
+                sudo docker ps --format "table {{.Names}}\t{{.Status}}"
+                exit 1
+              fi
+            done
             sudo docker ps --format "table {{.Names}}\t{{.Status}}"
+            for i in $(seq 1 30); do
+              if curl -fsS -o /dev/null http://127.0.0.1:8080/; then
+                echo "dagu ready"
+                break
+              fi
+              sleep 2
+            done
             curl -fsS -o /dev/null -w "dagu http: %{http_code}\n" http://127.0.0.1:8080/
+            curl -fsS -o /dev/null -w "hindsight api: %{http_code}\n" http://127.0.0.1:8888/health
           '
