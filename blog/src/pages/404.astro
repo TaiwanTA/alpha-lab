@@ -18,10 +18,10 @@ const recent = posts.slice(0, 5);
       <h2>怎麼辦</h2>
       <ul class="actions">
         <li><a href="/">回首頁</a></li>
-        <li><a href="/search/">用搜尋找內容</a></li>
-        <li><a href="/tags/">看所有 Tags</a></li>
-        <li><a href="/investors/">投資人索引</a></li>
-        <li><a href="/archive/">完整 Archive</a></li>
+        <li><a href="/search">用搜尋找內容</a></li>
+        <li><a href="/tags">看所有 Tags</a></li>
+        <li><a href="/investors">投資人索引</a></li>
+        <li><a href="/archive">完整 Archive</a></li>
       </ul>
     </section>
 
@@ -31,7 +31,7 @@ const recent = posts.slice(0, 5);
         <ol class="recent-list">
           {recent.map(post => (
             <li>
-              <a href={`/posts/${post.id}/`}>{post.data.title}</a>
+              <a href={`/posts/${post.id}`}>{post.data.title}</a>
               <time>{post.data.date}</time>
             </li>
           ))}

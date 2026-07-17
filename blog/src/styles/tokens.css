@@ -1,62 +1,68 @@
-/* Design tokens — applied via :root & :global is via Layout.astro <style> */
+/* Design tokens — 在 Layout.astro 的 :root 和全局样式中使用 */
 
 :root {
-  /* Type */
+  /* 类型 */
+  color-scheme: light;
   --font-serif: 'Iowan Old Style', 'Charter', 'Georgia', 'Source Han Serif TC', 'Noto Serif CJK TC', 'Songti TC', serif;
-  --font-sans: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', system-ui, 'PingFang TC', 'Microsoft JhengHei', sans-serif;
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, 'PingFang TC', 'Microsoft JhengHei', sans-serif;
   --font-mono: ui-monospace, 'SFMono-Regular', 'JetBrains Mono', Menlo, Consolas, monospace;
 
-  /* Color — neutral-leaning */
+  /* 色彩 */
   --color-fg: #111418;
   --color-fg-2: #2a2f38;
   --color-fg-muted: #5a6270;
   --color-fg-subtle: #8a929e;
   --color-bg: #ffffff;
-  --color-bg-2: #f7f7f5;
-  --color-bg-3: #efece7;
-  --color-border: #e8e6e1;
-  --color-border-2: #d4d1ca;
+  --color-bg-2: #f8f9ff;
+  --color-bg-3: #eef2ff;
+  --color-border: #e6e8f0;
+  --color-border-2: #cfd3e2;
 
-  /* Accent — desaturated indigo */
-  --color-accent: #3a3a8a;
+  /* 强调色 */
+  --color-accent: #6366f1;
   --color-accent-2: #4f46e5;
-  --color-accent-soft: #ecebf6;
-  --color-link: var(--color-accent-2);
-  --color-link-hover: #312e81;
-  --color-accent-tint: #f3f2fb;
+  --color-accent-soft: #eef2ff;
+  --color-link: #4f46e5;
+  --color-link-hover: #3730a3;
+  --color-accent-tint: #f5f3ff;
 
-  /* Surfaces */
-  --shadow-card: 0 1px 2px rgb(15 18 23 / 0.04), 0 2px 8px rgb(15 18 23 / 0.04);
-  --shadow-card-hover: 0 4px 16px rgb(15 18 23 / 0.08), 0 12px 32px rgb(15 18 23 / 0.06);
+  /* 表面 */
+  --shadow-card: 0 1px 3px rgb(15 18 23 / 0.05), 0 1px 2px rgb(15 18 23 / 0.03);
+  --shadow-card-hover: 0 8px 24px rgb(15 18 23 / 0.10), 0 4px 8px rgb(15 18 23 / 0.06);
   --shadow-focus: 0 0 0 3px rgb(79 70 229 / 0.18);
 
-  /* Radii */
-  --radius-sm: 4px;
-  --radius-md: 8px;
-  --radius-lg: 14px;
-  --radius-xl: 22px;
+  /* 圆角 */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+  --radius-xl: 24px;
+  --radius-pill: 999px;
 
-  /* Layout */
+  /* 布局 */
   --max-width: 720px;
+  --max-width-article: 1008px;
   --max-width-wide: 1080px;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --color-fg: #ebe8df;
-    --color-fg-2: #d4d0c4;
-    --color-fg-muted: #948c7d;
-    --color-fg-subtle: #5e5849;
-    --color-bg: #0e0f12;
-    --color-bg-2: #16181c;
-    --color-bg-3: #1f2127;
-    --color-border: #2a2d34;
-    --color-border-2: #3a3d44;
-    --color-accent: #a5a5e3;
-    --color-accent-2: #b3b3f0;
-    --color-accent-soft: #1c1c2e;
-    --color-accent-tint: #14142a;
-    --shadow-card: 0 1px 2px rgb(0 0 0 / 0.3), 0 2px 8px rgb(0 0 0 / 0.25);
-    --shadow-card-hover: 0 4px 16px rgb(0 0 0 / 0.4), 0 12px 32px rgb(0 0 0 / 0.3);
+    color-scheme: dark;
+    --color-fg: #f3f4f6;
+    --color-fg-2: #d7dbea;
+    --color-fg-muted: #a4acc0;
+    --color-fg-subtle: #70788e;
+    --color-bg: #0e1018;
+    --color-bg-2: #171a26;
+    --color-bg-3: #22263a;
+    --color-border: #2a3042;
+    --color-border-2: #3d4660;
+    --color-accent: #818cf8;
+    --color-accent-2: #a5b4fc;
+    --color-accent-soft: #1e1b4b;
+    --color-link: #a5b4fc;
+    --color-link-hover: #c7d2fe;
+    --color-accent-tint: #312e81;
+    --shadow-card: 0 1px 3px rgb(0 0 0 / 0.36), 0 1px 2px rgb(0 0 0 / 0.24);
+    --shadow-card-hover: 0 8px 24px rgb(0 0 0 / 0.48), 0 4px 8px rgb(0 0 0 / 0.34);
   }
 }

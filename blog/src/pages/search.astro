@@ -41,14 +41,14 @@ function escapeHTML(s: string): string {
 
 function renderResults(matches: { id: string; title: string; summary: string; date: string; tags: string[]; investors: string[] }[]): void {
   if (matches.length === 0) {
-    resultsEl.innerHTML = '<li class="empty">沒有符合的內容。試試別的關鍵字,或去 <a href="/tags/">/tags/</a> 看看。</li>';
+    resultsEl.innerHTML = '<li class="empty">沒有符合的內容。試試別的關鍵字,或去 <a href="/tags">/tags</a> 看看。</li>';
     return;
   }
   const html = matches.map((m) => {
-    const tagLinks = m.tags.map(t => `<a class="tag" href="/tags/${encodeURIComponent(t)}/">#${escapeHTML(t)}</a>`).join('');
-    const invLinks = m.investors.map(inv => `<a class="investor" href="/investors/${encodeURIComponent(inv)}/">${escapeHTML(inv)}</a>`).join('');
+    const tagLinks = m.tags.map(t => `<a class="tag" href="/tags/${encodeURIComponent(t)}">#${escapeHTML(t)}</a>`).join('');
+    const invLinks = m.investors.map(inv => `<a class="investor" href="/investors/${encodeURIComponent(inv)}">${escapeHTML(inv)}</a>`).join('');
     return `<li class="result">
-          <a class="result-title" href="/posts/${escapeHTML(m.id)}/">${escapeHTML(m.title)}</a>
+          <a class="result-title" href="/posts/${escapeHTML(m.id)}">${escapeHTML(m.title)}</a>
           <p class="result-summary">${escapeHTML(m.summary)}</p>
           <div class="result-meta">
             <span class="date">${escapeHTML(m.date)}</span>
@@ -76,7 +76,7 @@ const doSearch = debounce((): void => {
     statusEl.textContent = '索引就緒';
     return;
   }
-  const matches = mini.search(q) as { id: string; title: string; summary: string; date: string; tags: string[]; investors: string[] }[];
+  const matches = mini.search(q) as unknown as { id: string; title: string; summary: string; date: string; tags: string[]; investors: string[] }[];
   statusEl.textContent = matches.length === 0 ? '沒有結果' : `${matches.length} 個結果`;
   renderResults(matches.slice(0, 50));
 }, 150);

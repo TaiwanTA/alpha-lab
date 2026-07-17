@@ -4,91 +4,161 @@ import { getAllTags, getPublishedPosts } from '../../lib/posts';
 
 const posts = await getPublishedPosts();
 const tagCounts = getAllTags(posts);
-const tags = [...tagCounts.entries()];
+const tags = [...tagCounts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
 ---
 
 <Layout title="所有 Tags — alpha-lab" description="依主題瀏覽 alpha-lab 所有文章。">
   <header class="page-head">
-    <nav class="breadcrumb">
+    <nav class="breadcrumb" aria-label="麵包屑">
       <a href="/">Home</a>
       <span class="breadcrumb-sep">/</span>
       <span aria-current="page">Tags</span>
     </nav>
+    <p class="page-kicker">Topic directory</p>
     <h1>所有 Tags</h1>
     <p class="lede">{tags.length} 個主題 · {posts.length} 篇文章</p>
   </header>
 
-  <ul class="tag-grid">
-    {tags.map(([tag, count]) => (
-      <li>
-        <a href={`/tags/${encodeURIComponent(tag)}/`} class="tag-card">
-          <span class="tag-name">#{tag}</span>
-          <span class="tag-count">{count}</span>
-        </a>
-      </li>
-    ))}
-  </ul>
+  <section class="directory" aria-labelledby="tag-directory-heading">
+    <header class="directory-head">
+      <div>
+        <p class="section-kicker">Browse by topic</p>
+        <h2 id="tag-directory-heading">探索研究主題</h2>
+      </div>
+      <a href="/" class="back-link">回到首頁 <span aria-hidden="true">→</span></a>
+    </header>
+    <ul class="tag-grid">
+      {tags.map(([tag, count]) => (
+        <li>
+          <a href={`/tags/${encodeURIComponent(tag)}`} class="tag-card">
+            <span class="tag-card-main"><span class="tag-mark" aria-hidden="true">#</span><span class="tag-name">{tag}</span></span>
+            <span class="tag-count">{count}</span>
+          </a>
+        </li>
+      ))}
+    </ul>
+  </section>
 </Layout>
 
 <style>
-  .page-head { margin-bottom: 3rem; }
+  /* 頁首 */
+  .page-head { margin-bottom: 2.5rem; }
   .breadcrumb {
     display: flex;
     align-items: center;
     gap: 0.5rem;
-    font-family: var(--font-mono);
-    font-size: 0.75rem;
+    margin-bottom: 1.25rem;
     color: var(--color-fg-muted);
-    margin-bottom: 1rem;
-    text-transform: uppercase;
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
     letter-spacing: 0.05em;
+    text-transform: uppercase;
   }
   .breadcrumb a { color: var(--color-fg-muted); text-decoration: none; }
   .breadcrumb a:hover { color: var(--color-accent-2); }
   .breadcrumb-sep { color: var(--color-fg-subtle); }
   .breadcrumb [aria-current] { color: var(--color-fg); }
-  .page-head h1 {
-    font-family: var(--font-sans);
-    font-size: clamp(2rem, 5vw, 2.75rem);
-    font-weight: 700;
-    letter-spacing: -0.03em;
-    margin: 0 0 0.5rem;
+  .page-kicker, .section-kicker {
+    color: var(--color-accent-2);
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
   }
-  .lede { color: var(--color-fg-muted); font-size: 1rem; margin: 0; }
+  .page-kicker { margin: 0 0 0.4rem; }
+  .page-head h1 {
+    margin: 0 0 0.5rem;
+    color: var(--color-fg);
+    font-size: clamp(2rem, 5vw, 3rem);
+    font-weight: 800;
+    letter-spacing: -0.05em;
+    line-height: 1.1;
+  }
+  .lede { margin: 0; color: var(--color-fg-muted); font-size: 1rem; }
 
+  /* 標籤目錄 */
+  .directory {
+    padding: clamp(1rem, 3vw, 1.75rem);
+    background: var(--color-bg-2);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-card);
+  }
+  .directory-head {
+    display: flex;
+    align-items: end;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-bottom: 1.25rem;
+    padding-bottom: 1rem;
+    border-bottom: 1px solid var(--color-border);
+  }
+  .section-kicker { margin: 0 0 0.2rem; }
+  .directory-head h2 {
+    margin: 0;
+    color: var(--color-fg);
+    font-size: 1.35rem;
+    font-weight: 750;
+    letter-spacing: -0.035em;
+  }
+  .back-link {
+    flex-shrink: 0;
+    color: var(--color-link);
+    font-size: 0.82rem;
+    font-weight: 600;
+    text-decoration: none;
+  }
+  .back-link:hover { color: var(--color-link-hover); text-decoration: none; }
   .tag-grid {
-    list-style: none;
-    padding: 0;
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
     gap: 0.75rem;
+    list-style: none;
+    margin: 0;
+    padding: 0;
   }
   .tag-card {
     display: flex;
-    justify-content: space-between;
     align-items: center;
-    padding: 0.85rem 1.1rem;
-    background: var(--color-bg-2);
+    justify-content: space-between;
+    gap: 0.75rem;
+    min-height: 3.3rem;
+    padding: 0.75rem 0.85rem;
+    background: var(--color-bg);
     border: 1px solid var(--color-border);
     border-radius: var(--radius-md);
-    text-decoration: none;
+    box-shadow: var(--shadow-card);
     color: var(--color-fg);
-    transition: border-color 150ms ease, background-color 150ms ease, transform 150ms ease;
+    text-decoration: none;
+    transition: transform 150ms ease, border-color 150ms ease, box-shadow 150ms ease, color 150ms ease;
   }
   .tag-card:hover {
-    border-color: var(--color-accent-2);
-    background: var(--color-accent-tint);
     transform: translateY(-2px);
+    border-color: var(--color-accent);
+    box-shadow: var(--shadow-card-hover);
+    color: var(--color-accent-2);
     text-decoration: none;
   }
-  .tag-name { font-family: var(--font-mono); font-size: 0.9rem; color: var(--color-fg-2); }
+  .tag-card-main { display: inline-flex; align-items: center; gap: 0.35rem; min-width: 0; }
+  .tag-mark { color: var(--color-accent); font-weight: 800; }
+  .tag-name { overflow: hidden; font-size: 0.9rem; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
   .tag-count {
-    font-size: 0.8rem;
-    color: var(--color-fg-subtle);
-    background: var(--color-bg);
-    padding: 0.1rem 0.45rem;
-    border-radius: 100px;
+    flex: 0 0 auto;
+    min-width: 1.8rem;
+    padding: 0.15rem 0.45rem;
     border: 1px solid var(--color-border);
+    border-radius: var(--radius-pill);
+    background: var(--color-bg-2);
+    color: var(--color-fg-muted);
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    text-align: center;
     font-variant-numeric: tabular-nums;
+  }
+
+  @media (max-width: 767px) {
+    .page-head { margin-bottom: 2rem; }
+    .directory-head { align-items: flex-start; }
+    .tag-grid { grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); }
   }
 </style>

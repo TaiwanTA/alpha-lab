@@ -6,13 +6,13 @@ export async function getStaticPaths() {
   const posts = await getPublishedPosts();
   const investorSet = new Set<string>();
   for (const post of posts) {
-    for (const i of post.data.investors) investorSet.add(i);
+    for (const investor of post.data.investors) investorSet.add(investor);
   }
   return [...investorSet].map(investor => ({
     params: { investor },
     props: {
       investor,
-      posts: posts.filter(p => p.data.investors.includes(investor)),
+      posts: posts.filter(post => post.data.investors.includes(investor)),
     },
   }));
 }
@@ -25,25 +25,34 @@ const last = timeline[timeline.length - 1];
 
 <Layout title={investor} description={`所有提及 ${investor} 的研究文章`}>
   <header class="page-head">
-    <nav class="breadcrumb">
+    <nav class="breadcrumb" aria-label="麵包屑">
       <a href="/">Home</a>
       <span class="breadcrumb-sep">/</span>
-      <a href="/investors/">Investors</a>
+      <a href="/investors">Investors</a>
       <span class="breadcrumb-sep">/</span>
       <span aria-current="page">{investor}</span>
     </nav>
+    <p class="page-kicker">Investor profile</p>
     <h1>{investor}</h1>
     <p class="lede">{posts.length} 篇研究 · 從 {first?.data.date} 到 {last?.data.date}</p>
   </header>
 
-  <section class="card">
-    <h2 class="section-title">立場演變時間軸</h2>
+  <section class="card" aria-labelledby="timeline-heading">
+    <header class="section-head">
+      <div>
+        <p class="section-kicker">Research timeline</p>
+        <h2 id="timeline-heading">立場演變時間軸</h2>
+      </div>
+      <a href="/investors" class="back-link">所有投資人 <span aria-hidden="true">→</span></a>
+    </header>
     <ol class="timeline">
       {timeline.map(post => (
         <li class="timeline-item">
-          <time>{formatDate(post.data.date)}</time>
-          <a href={`/posts/${post.id}/`}>{post.data.title}</a>
-          <span class={`status-pill status-${post.data.status}`}><span class="pill-dot"></span>{STATUS_LABELS[post.data.status]?.label}</span>
+          <time datetime={post.data.date}>{formatDate(post.data.date)}</time>
+          <div class="timeline-title-row">
+            <a href={`/posts/${post.id}`}>{post.data.title}</a>
+            <span class={`status-pill status-${post.data.status}`}><span class="pill-dot" aria-hidden="true"></span>{STATUS_LABELS[post.data.status]?.label}</span>
+          </div>
           <p class="summary">{post.data.summary}</p>
         </li>
       ))}
@@ -52,106 +61,165 @@ const last = timeline[timeline.length - 1];
 </Layout>
 
 <style>
-  .page-head { margin-bottom: 3rem; }
+  /* 頁首 */
+  .page-head { margin-bottom: 2.5rem; }
   .breadcrumb {
-    display: flex; align-items: center; gap: 0.5rem;
-    font-family: var(--font-mono); font-size: 0.75rem;
-    color: var(--color-fg-muted); margin-bottom: 1rem;
-    text-transform: uppercase; letter-spacing: 0.05em;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 1.25rem;
+    color: var(--color-fg-muted);
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
   }
   .breadcrumb a { color: var(--color-fg-muted); text-decoration: none; }
   .breadcrumb a:hover { color: var(--color-accent-2); }
   .breadcrumb-sep { color: var(--color-fg-subtle); }
   .breadcrumb [aria-current] { color: var(--color-fg); }
-  .page-head h1 {
-    font-family: var(--font-sans);
-    font-size: clamp(2rem, 5vw, 2.75rem);
-    font-weight: 700;
-    letter-spacing: -0.03em;
-    margin: 0 0 0.5rem;
+  .page-kicker {
+    margin: 0 0 0.4rem;
+    color: var(--color-accent-2);
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
   }
-  .lede { color: var(--color-fg-muted); font-size: 1rem; margin: 0; }
+  .page-head h1 {
+    margin: 0 0 0.5rem;
+    color: var(--color-fg);
+    font-size: clamp(2rem, 5vw, 3rem);
+    font-weight: 800;
+    letter-spacing: -0.05em;
+    line-height: 1.1;
+  }
+  .lede { margin: 0; color: var(--color-fg-muted); font-size: 1rem; }
 
+  /* 時間軸卡片 */
   .card {
+    padding: clamp(1rem, 3vw, 1.75rem);
+    background: var(--color-bg-2);
     border: 1px solid var(--color-border);
     border-radius: var(--radius-lg);
-    padding: 2rem;
-    background: var(--color-bg);
+    box-shadow: var(--shadow-card);
   }
-  .section-title {
-    font-family: var(--font-serif);
-    font-size: 1.25rem;
-    font-weight: 600;
-    margin: 0 0 1.5rem;
-    padding-bottom: 0.75rem;
+  .section-head {
+    display: flex;
+    align-items: end;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-bottom: 1.4rem;
+    padding-bottom: 1rem;
     border-bottom: 1px solid var(--color-border);
   }
-
-  .timeline {
-    list-style: none;
-    padding: 0;
+  .section-kicker {
+    margin: 0 0 0.2rem;
+    color: var(--color-accent-2);
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+  .section-head h2 {
     margin: 0;
+    color: var(--color-fg);
+    font-size: 1.35rem;
+    font-weight: 750;
+    letter-spacing: -0.035em;
+  }
+  .back-link {
+    flex-shrink: 0;
+    color: var(--color-link);
+    font-size: 0.82rem;
+    font-weight: 600;
+    text-decoration: none;
+  }
+  .back-link:hover { color: var(--color-link-hover); text-decoration: none; }
+  .timeline {
+    display: flex;
+    flex-direction: column;
+    gap: 0.85rem;
+    list-style: none;
+    margin: 0;
+    padding: 0;
   }
   .timeline-item {
-    border-left: 2px solid var(--color-border);
-    padding-left: 1.5rem;
-    margin-left: 0.5rem;
-    padding-bottom: 2rem;
     position: relative;
+    margin-left: 0.4rem;
+    padding: 1rem 1.1rem 1.1rem 1.35rem;
+    background: var(--color-bg);
+    border: 1px solid var(--color-border);
+    border-left: 3px solid var(--color-accent);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-card);
+    transition: transform 150ms ease, border-color 150ms ease, box-shadow 150ms ease;
   }
-  .timeline-item:last-child { padding-bottom: 0; }
+  .timeline-item:hover {
+    transform: translateY(-1px);
+    border-color: var(--color-accent);
+    box-shadow: var(--shadow-card-hover);
+  }
   .timeline-item::before {
     content: '';
     position: absolute;
-    left: -6px;
-    top: 0.4rem;
-    width: 10px;
-    height: 10px;
+    left: -0.58rem;
+    top: 1.15rem;
+    width: 0.65rem;
+    height: 0.65rem;
     background: var(--color-bg);
-    border: 2px solid var(--color-accent-2);
+    border: 2px solid var(--color-accent);
     border-radius: 50%;
   }
   .timeline-item time {
     display: block;
-    font-family: var(--font-mono);
-    font-size: 0.8rem;
+    margin-bottom: 0.45rem;
     color: var(--color-fg-subtle);
-    margin-bottom: 0.4rem;
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
     font-variant-numeric: tabular-nums;
   }
-  .timeline-item a {
-    font-family: var(--font-serif);
-    font-size: 1.1rem;
-    font-weight: 500;
-    color: var(--color-fg);
-    text-decoration: none;
-    line-height: 1.35;
-    margin-right: 0.5rem;
+  .timeline-title-row {
+    display: flex;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: 0.55rem 0.75rem;
   }
-  .timeline-item a:hover { color: var(--color-accent-2); }
+  .timeline-title-row a {
+    color: var(--color-fg);
+    font-size: 1.05rem;
+    font-weight: 650;
+    line-height: 1.4;
+    text-decoration: none;
+  }
+  .timeline-title-row a:hover { color: var(--color-accent-2); }
   .timeline-item .summary {
+    margin: 0.45rem 0 0;
+    color: var(--color-fg-muted);
     font-family: var(--font-serif);
-    margin: 0.4rem 0 0;
-    color: var(--color-fg-2);
-    font-size: 0.95rem;
+    font-size: 0.93rem;
     line-height: 1.55;
   }
-
   .status-pill {
-    display: inline-flex; align-items: center; gap: 0.35rem;
-    padding: 0.15rem 0.5rem; border-radius: 100px;
-    font-size: 0.7rem; font-weight: 500; text-transform: lowercase; letter-spacing: 0.04em;
-    vertical-align: middle;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    padding: 0.18rem 0.5rem;
+    border-radius: var(--radius-pill);
+    font-size: 0.65rem;
+    font-weight: 600;
+    white-space: nowrap;
   }
-  .pill-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+  .pill-dot { width: 0.35rem; height: 0.35rem; border-radius: 50%; background: currentColor; }
   .status-pill.status-unverified { background: #fef3c7; color: #92400e; }
   .status-pill.status-verified { background: #dcfce7; color: #14532d; }
   .status-pill.status-draft { background: #f3f4f6; color: #4b5563; }
   .status-pill.status-corrected { background: #dbeafe; color: #1e3a8a; }
-  @media (prefers-color-scheme: dark) {
-    .status-pill.status-unverified { background: #422006; color: #fde68a; }
-    .status-pill.status-verified { background: #052e1a; color: #86efac; }
-    .status-pill.status-draft { background: #1f2937; color: #d1d5db; }
-    .status-pill.status-corrected { background: #1e293b; color: #93c5fd; }
+
+  @media (max-width: 767px) {
+    .page-head { margin-bottom: 2rem; }
+    .section-head { align-items: flex-start; }
+    .timeline-item { margin-left: 0; }
+    .timeline-item::before { display: none; }
   }
 </style>

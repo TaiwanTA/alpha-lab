@@ -10,8 +10,8 @@ export const GET: APIRoute = async (context) => {
   const items = posts.map(post => `
     <entry>
       <title>${escapeXml(post.data.title)}</title>
-      <link href="${new URL(`/posts/${post.id}/`, context.site).toString()}"/>
-      <id>${new URL(`/posts/${post.id}/`, context.site).toString()}</id>
+      <link href="${new URL(`/posts/${post.id}`, context.site).toString()}"/>
+      <id>${new URL(`/posts/${post.id}`, context.site).toString()}</id>
       <updated>${new Date(post.data.lastmod ?? post.data.date).toISOString()}</updated>
       <published>${new Date(post.data.date).toISOString()}</published>
       <summary>${escapeXml(post.data.summary)}</summary>
