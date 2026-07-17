@@ -17,6 +17,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       # Workload Identity Federation 認證
       - uses: google-github-actions/auth@v2
@@ -53,5 +55,5 @@ jobs:
           sleep 15
           gcloud compute ssh --zone "asia-east1-b" alpha-lab --project "g6online-352310" --command '
             sudo docker ps --format "table {{.Names}}\t{{.Status}}"
-            curl -s -o /dev/null -w "dagu http: %{http_code}\n" http://127.0.0.1:8080/
+            curl -fsS -o /dev/null -w "dagu http: %{http_code}\n" http://127.0.0.1:8080/
           '

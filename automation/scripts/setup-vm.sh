@@ -51,6 +51,11 @@ fi
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 DAGU_DEPLOY_DIR="${REPO_ROOT}/automation/deploy/dagu"
 CANONICAL_COMPOSE_SRC="${REPO_ROOT}/compose.yml"
+if [ ! -f "${CANONICAL_COMPOSE_SRC}" ]; then
+  echo "ERROR: 找不到 ${CANONICAL_COMPOSE_SRC}。" >&2
+  echo "       compose.yml 位於 repository root，請確保已將 compose.yml 與 automation/ 一併複製到 VM 上。" >&2
+  exit 1
+fi
 CANONICAL_COMPOSE_TARGET="/opt/alpha-lab/compose.yml"
 DAGU_ENV_TEMPLATE="${DAGU_DEPLOY_DIR}/dagu.env.template"
 DAGU_ENV_TARGET="/etc/alpha-lab/dagu.env"
