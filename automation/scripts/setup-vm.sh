@@ -50,7 +50,7 @@ fi
 
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 DAGU_DEPLOY_DIR="${REPO_ROOT}/automation/deploy/dagu"
-CANONICAL_COMPOSE_SRC="${REPO_ROOT}/automation/deploy/docker-compose.yml"
+CANONICAL_COMPOSE_SRC="${REPO_ROOT}/compose.yml"
 CANONICAL_COMPOSE_TARGET="/opt/alpha-lab/compose.yml"
 DAGU_ENV_TEMPLATE="${DAGU_DEPLOY_DIR}/dagu.env.template"
 DAGU_ENV_TARGET="/etc/alpha-lab/dagu.env"

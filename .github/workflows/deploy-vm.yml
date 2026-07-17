@@ -1,0 +1,57 @@
+name: Deploy to VM
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - compose.yml
+      - automation/deploy/dagu/alpha-lab-dagu.service
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write  # Workload Identity Federation 需要
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Workload Identity Federation 認證
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      # scp compose.yml + systemd unit 到 VM
+      - name: Copy files to VM
+        run: |
+          gcloud compute scp --zone "asia-east1-b" \
+            compose.yml \
+            automation/deploy/dagu/alpha-lab-dagu.service \
+            alpha-lab:/tmp/ --project "g6online-352310"
+
+      # install + pull + reload
+      - name: Install and reload
+        run: |
+          gcloud compute ssh --zone "asia-east1-b" alpha-lab --project "g6online-352310" --command '
+            set -e
+            sudo install -m 0644 /tmp/compose.yml /opt/alpha-lab/compose.yml
+            sudo install -m 0644 /tmp/alpha-lab-dagu.service /etc/systemd/system/alpha-lab-dagu.service
+            sudo systemctl daemon-reload
+            sudo /usr/bin/docker compose --env-file /etc/alpha-lab/stack.env \
+              -f /opt/alpha-lab/compose.yml pull --ignore-pull-failures
+            sudo systemctl reload alpha-lab-dagu.service
+          '
+
+      # verify
+      - name: Verify
+        run: |
+          sleep 15
+          gcloud compute ssh --zone "asia-east1-b" alpha-lab --project "g6online-352310" --command '
+            sudo docker ps --format "table {{.Names}}\t{{.Status}}"
+            curl -s -o /dev/null -w "dagu http: %{http_code}\n" http://127.0.0.1:8080/
+          '
