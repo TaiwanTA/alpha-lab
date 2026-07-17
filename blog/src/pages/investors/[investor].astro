@@ -215,6 +215,12 @@ const last = timeline[timeline.length - 1];
   .status-pill.status-verified { background: #dcfce7; color: #14532d; }
   .status-pill.status-draft { background: #f3f4f6; color: #4b5563; }
   .status-pill.status-corrected { background: #dbeafe; color: #1e3a8a; }
+  @media (prefers-color-scheme: dark) {
+    .status-pill.status-unverified { background: #422006; color: #fde68a; }
+    .status-pill.status-verified { background: #052e1a; color: #86efac; }
+    .status-pill.status-draft { background: #1f2937; color: #d1d5db; }
+    .status-pill.status-corrected { background: #1e293b; color: #93c5fd; }
+  }
 
   @media (max-width: 767px) {
     .page-head { margin-bottom: 2rem; }

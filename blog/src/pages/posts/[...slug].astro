@@ -10,22 +10,25 @@ interface Props {
   post: Post;
   prev: Post | null;
   next: Post | null;
+  recentPosts: Post[];
 }
 
 export async function getStaticPaths() {
   const posts = await getPublishedPosts();
   const ascByDate = [...posts].sort((a, b) => a.data.date.localeCompare(b.data.date));
+  const descByDate = [...posts].sort((a, b) => b.data.date.localeCompare(a.data.date));
   return posts.map((post, i) => ({
     params: { slug: post.id },
     props: {
       post,
       prev: ascByDate[i - 1] ?? null,
       next: ascByDate[i + 1] ?? null,
+      recentPosts: descByDate.filter(candidate => candidate.id !== post.id).slice(0, 3),
     },
   }));
 }
 
-const { post, prev, next } = Astro.props as Props;
+const { post, prev, next, recentPosts } = Astro.props as Props;
 const { Content, headings } = await render(post);
 const stats = readingTime(post.body ?? '');
 const toc = buildToc(headings);
@@ -36,11 +39,6 @@ const diffDays = post.data.lastmod
   ? Math.floor((new Date(post.data.lastmod).getTime() - new Date(post.data.date).getTime()) / 86400000)
   : 0;
 const showLastmod = diffDays > 7;
-const allPosts = await getPublishedPosts();
-const recentPosts = allPosts
-  .filter(p => p.id !== post.id)
-  .sort((a, b) => b.data.date.localeCompare(a.data.date))
-  .slice(0, 3);
 ---
 
 <Layout title={post.data.title} description={post.data.summary} ogType="article" publishedDate={post.data.date} modifiedDate={post.data.lastmod ?? post.data.date} tags={post.data.tags}>
@@ -267,7 +265,7 @@ const recentPosts = allPosts
     }
     .toc, .post-meta-rail {
       position: sticky;
-      top: 5.5rem;
+      top: 4rem;
       max-height: calc(100vh - 7rem);
       overflow-y: auto;
     }
@@ -423,7 +421,7 @@ const recentPosts = allPosts
     font-size: 1.45rem;
     font-weight: 700;
     letter-spacing: -0.02em;
-    scroll-margin-top: 1rem;
+    scroll-margin-top: 6rem;
   }
   .post-body :global(h3) {
     font-family: var(--font-sans);
@@ -431,7 +429,7 @@ const recentPosts = allPosts
     font-weight: 600;
     letter-spacing: -0.015em;
     margin: 2em 0 0.5em;
-    scroll-margin-top: 1rem;
+    scroll-margin-top: 6rem;
   }
   .post-body :global(h1) { display: none; }
   .post-body :global(ul), .post-body :global(ol) {
@@ -629,7 +627,7 @@ const recentPosts = allPosts
   }
 
   @media print {
-    nav.site-nav, footer.site-footer, .toc, .post-share, .prev-next, .banner, .disclosure, .post-meta { display: none; }
+    nav.site-nav, footer.site-footer, .toc, .post-share, .prev-next, .banner, .disclosure, .post-meta-rail { display: none; }
     .post-body { font-size: 11pt; line-height: 1.4; max-width: none; }
     .post { max-width: none; }
   }
