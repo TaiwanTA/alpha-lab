@@ -45,8 +45,29 @@ jobs:
             sudo install -m 0644 /tmp/alpha-lab-dagu.service /etc/systemd/system/alpha-lab-dagu.service
             sudo systemctl daemon-reload
             sudo test -f /etc/alpha-lab/stack.env || { echo "ERROR: missing /etc/alpha-lab/stack.env"; exit 1; }
+            compose_config=$(sudo /usr/bin/docker compose --env-file /etc/alpha-lab/stack.env \
+              -f /opt/alpha-lab/compose.yml config)
+            ghcr_services=""
+            current_service=""
+            while IFS= read -r line; do
+              case "${line}" in
+                "  "[![:space:]]*:)
+                  current_service="${line#  }"
+                  current_service="${current_service%:}"
+                  ;;
+                "    image: ghcr.io/"*)
+                  ghcr_services="${ghcr_services} ${current_service}"
+                  ;;
+              esac
+            done <<EOF
+          ${compose_config}
+          EOF
+            if [ -z "${ghcr_services}" ]; then
+              echo "ERROR: no GHCR services found in compose configuration"
+              exit 1
+            fi
             sudo /usr/bin/docker compose --env-file /etc/alpha-lab/stack.env \
-              -f /opt/alpha-lab/compose.yml pull alpha-lab-dagu alpha-lab-dags-sync
+              -f /opt/alpha-lab/compose.yml pull ${ghcr_services}
             # alpha-lab-dagu.service ExecReload uses --force-recreate.
             sudo systemctl reload alpha-lab-dagu.service
           '
@@ -73,5 +94,12 @@ jobs:
               sleep 2
             done
             curl -fsS -o /dev/null -w "dagu http: %{http_code}\n" http://127.0.0.1:8080/
+            for i in $(seq 1 30); do
+              if curl -fsS -o /dev/null http://127.0.0.1:8888/health; then
+                echo "hindsight ready"
+                break
+              fi
+              sleep 2
+            done
             curl -fsS -o /dev/null -w "hindsight api: %{http_code}\n" http://127.0.0.1:8888/health
           '
