@@ -43,6 +43,7 @@ jobs:
             set -e
             sudo install -m 0644 /tmp/compose.yml /opt/alpha-lab/compose.yml
             sudo install -m 0644 /tmp/alpha-lab-dagu.service /etc/systemd/system/alpha-lab-dagu.service
+            sudo rm -f /tmp/compose.yml /tmp/alpha-lab-dagu.service
             sudo systemctl daemon-reload
             sudo test -f /etc/alpha-lab/stack.env || { echo "ERROR: missing /etc/alpha-lab/stack.env"; exit 1; }
             compose_config=$(sudo /usr/bin/docker compose --env-file /etc/alpha-lab/stack.env \
@@ -59,9 +60,7 @@ jobs:
                   ghcr_services="${ghcr_services} ${current_service}"
                   ;;
               esac
-            done <<EOF
-          ${compose_config}
-          EOF
+            done < <(printf '%s\n' "${compose_config}")
             if [ -z "${ghcr_services}" ]; then
               echo "ERROR: no GHCR services found in compose configuration"
               exit 1
@@ -77,29 +76,63 @@ jobs:
         run: |
           gcloud compute ssh --zone "asia-east1-b" alpha-lab --project "g6online-352310" --command '
             set -e
-            expected="alpha-lab-dagu alpha-lab-dags-sync hindsight hindsight-db alpha-lab-postgres mastra-app"
-            for service in ${expected}; do
-              if ! sudo docker inspect -f "{{.State.Status}}" "${service}" 2>/dev/null | grep -qx running; then
-                echo "ERROR: ${service} is not running"
-                sudo docker ps --format "table {{.Names}}\t{{.Status}}"
-                exit 1
+            expected_services=$(sudo /usr/bin/docker compose --env-file /etc/alpha-lab/stack.env \
+              -f /opt/alpha-lab/compose.yml config --services)
+            services_ready=0
+            for i in $(seq 1 120); do
+              services_ready=1
+              for service in ${expected_services}; do
+                container=$(sudo /usr/bin/docker compose --env-file /etc/alpha-lab/stack.env \
+                  -f /opt/alpha-lab/compose.yml ps -q "${service}" 2>/dev/null || true)
+                if [ -z "${container}" ]; then
+                  services_ready=0
+                  break
+                fi
+                state=$(sudo docker inspect -f "{{.State.Status}}" "${container}" 2>/dev/null || true)
+                health=$(sudo docker inspect -f "{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}" \
+                  "${container}" 2>/dev/null || true)
+                if [ "${state}" != "running" ] || { [ "${health}" != "none" ] && [ "${health}" != "healthy" ]; }; then
+                  services_ready=0
+                  break
+                fi
+              done
+              if [ "${services_ready}" -eq 1 ]; then
+                echo "compose services running and healthy"
+                break
               fi
+              sleep 2
             done
             sudo docker ps --format "table {{.Names}}\t{{.Status}}"
+            if [ "${services_ready}" -ne 1 ]; then
+              echo "ERROR: compose services not ready after 120 retries"
+              exit 1
+            fi
+            dagu_ready=0
             for i in $(seq 1 30); do
               if curl -fsS -o /dev/null http://127.0.0.1:8080/; then
+                dagu_ready=1
                 echo "dagu ready"
                 break
               fi
               sleep 2
             done
+            if [ "${dagu_ready}" -ne 1 ]; then
+              echo "ERROR: dagu not ready after 30 retries"
+              exit 1
+            fi
             curl -fsS -o /dev/null -w "dagu http: %{http_code}\n" http://127.0.0.1:8080/
+            hindsight_ready=0
             for i in $(seq 1 30); do
               if curl -fsS -o /dev/null http://127.0.0.1:8888/health; then
+                hindsight_ready=1
                 echo "hindsight ready"
                 break
               fi
               sleep 2
             done
+            if [ "${hindsight_ready}" -ne 1 ]; then
+              echo "ERROR: hindsight not ready after 30 retries"
+              exit 1
+            fi
             curl -fsS -o /dev/null -w "hindsight api: %{http_code}\n" http://127.0.0.1:8888/health
           '
