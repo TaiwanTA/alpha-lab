@@ -1,417 +1,503 @@
 ---
+import type { Post } from '../lib/posts';
 import Layout from '../layouts/Layout.astro';
 import { getAllInvestors, getAllTags, getPublishedPosts, STATUS_LABELS } from '../lib/posts';
 
 const posts = await getPublishedPosts();
 const tags = getAllTags(posts);
 const investors = getAllInvestors(posts);
-const sortedByInvestorCount = [...investors.entries()].sort((a, b) => b[1].length - a[1].length).slice(0, 5);
+const sortedTags = [...tags.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+const sortedInvestors = [...investors.entries()].sort((a, b) => b[1].length - a[1].length || a[0].localeCompare(b[0]));
+
+type PostWithOptionalCover = Post & { data: Post['data'] & { coverImage?: string } };
+const getCoverImage = (post: Post) => (post as PostWithOptionalCover).data.coverImage;
 ---
 
 <Layout title="alpha-lab — 知名投資人研究">
-  <section class="hero">
-    <div class="hero-eyebrow">
-      <span class="hero-dot"></span>
-      <span>research · open sources · openly checked</span>
+  <section class="hub-hero">
+    <div class="hero-copy">
+      <p class="hero-eyebrow"><span class="hero-dot" aria-hidden="true"></span> research · open sources · openly checked</p>
+      <h1>alpha-lab</h1>
+      <p class="hero-lede">研究公開投資人的言論、論點、與決策。每一篇明示來源,可重複查證,或標為未驗證。</p>
+      <div class="hero-actions">
+        <a href="/archive" class="button button-primary">瀏覽完整 archive <span aria-hidden="true">→</span></a>
+        <a href="/methodology" class="button button-quiet">了解研究方法</a>
+      </div>
     </div>
-    <h1>alpha-lab</h1>
-    <p class="hero-lede">研究公開投資人的言論、論點、與決策。<br />每一篇明示來源,可重複查證,或標為未驗證。</p>
 
-    <ul class="hero-stats">
-      <li><span class="stat-num">{posts.length}</span><span class="stat-label">篇文章</span></li>
-      <li><span class="stat-num">{tags.size}</span><span class="stat-label">個主題</span></li>
-      <li><span class="stat-num">{investors.size}</span><span class="stat-label">位追蹤投資人</span></li>
-    </ul>
+    <dl class="hero-stats">
+      <div><dt>{posts.length}</dt><dd>篇文章</dd></div>
+      <div><dt>{tags.size}</dt><dd>個主題</dd></div>
+      <div><dt>{investors.size}</dt><dd>位投資人</dd></div>
+    </dl>
   </section>
 
-  <div class="home-grid">
-    <section class="posts-section">
-      <header class="section-header">
-        <h2>最新文章</h2>
-        <a href="/archive/" class="section-link">完整 archive →</a>
-      </header>
-
-      <ol class="post-list">
-        {posts.map(post => (
-          <li class={`post-card status-${post.data.status}`}>
-            <article>
-              <header class="post-card-head">
-                <a href={`/posts/${post.id}/`} class="post-card-title">{post.data.title}</a>
-                <span class={`status-pill status-${post.data.status}`} title={STATUS_LABELS[post.data.status]?.hex ?? ''}>
-                  <span class="pill-dot"></span>
-                  {STATUS_LABELS[post.data.status]?.label ?? post.data.status}
-                </span>
-              </header>
-
-              <p class="post-card-summary">{post.data.summary}</p>
-
-              <footer class="post-card-foot">
-                <time datetime={post.data.date}>{post.data.date}</time>
-                {post.data.investors.map((inv: string) => (
-                  <a class="meta-link investor-link" href={`/investors/${encodeURIComponent(inv)}/`}>{inv}</a>
-                ))}
-                {post.data.tags.map((t: string) => (
-                  <a class="meta-link tag-link" href={`/tags/${encodeURIComponent(t)}/`}>#{t}</a>
-                ))}
-              </footer>
-            </article>
-          </li>
-        ))}
-      </ol>
-    </section>
-
-    <aside class="side">
-      <section class="side-block">
-        <h3>熱門 Tags</h3>
-        <ul class="tag-cloud">
-          {[...tags.entries()].slice(0, 8).map(([tag, count]) => (
-            <li><a href={`/tags/${encodeURIComponent(tag)}/`}><span class="tag-name">#{tag}</span><span class="tag-count">{count}</span></a></li>
-          ))}
-          {tags.size > 8 && <li><a class="see-all" href="/tags/">全部 {tags.size} tags →</a></li>}
-        </ul>
-      </section>
-
-      <section class="side-block">
-        <h3>追蹤的投資人</h3>
-        <ul class="investor-list">
-          {sortedByInvestorCount.map(([inv, list]) => (
+  <div class="hub-layout">
+    <aside class="filters" aria-label="文章篩選">
+      <section class="filter-group">
+        <div class="filter-heading">
+          <h2>投資人</h2>
+          <span>{investors.size}</span>
+        </div>
+        <ul class="filter-list">
+          {sortedInvestors.map(([investor, list]) => (
             <li>
-              <a href={`/investors/${encodeURIComponent(inv)}/`} class="investor-name">{inv}</a>
-              <span class="investor-count">{list.length} 篇</span>
+              <a class="filter-link" href={`/investors/${encodeURIComponent(investor)}`}>
+                <span>{investor}</span>
+                <span class="filter-badge">{list.length}</span>
+              </a>
             </li>
           ))}
-          {investors.size > 5 && <li><a class="see-all" href="/investors/">全部 →</a></li>}
         </ul>
       </section>
 
-      <section class="side-block subscribe-block">
-        <h3>訂閱</h3>
-        <p class="subscribe-blurb">本站會每天更新(目標)。RSS 是最可靠的訂閱管道。</p>
-        <ul class="subscribe-list">
-          <li><a href="/feed.xml" class="sub-link"><strong>RSS</strong><span class="sub-hint">日常 reader</span></a></li>
-          <li><a href="/feed.atom.xml" class="sub-link"><strong>Atom</strong><span class="sub-hint">Akregator 用</span></a></li>
-          <li><a href="/feed.json" class="sub-link"><strong>JSON Feed</strong><span class="sub-hint">automation</span></a></li>
+      <section class="filter-group">
+        <div class="filter-heading">
+          <h2>標籤</h2>
+          <span>{tags.size}</span>
+        </div>
+        <ul class="filter-list">
+          {sortedTags.map(([tag, count]) => (
+            <li>
+              <a class="filter-link" href={`/tags/${encodeURIComponent(tag)}`}>
+                <span>#{tag}</span>
+                <span class="filter-badge">{count}</span>
+              </a>
+            </li>
+          ))}
         </ul>
       </section>
     </aside>
+
+    <section class="posts-panel" aria-labelledby="latest-heading">
+      <header class="posts-header">
+        <div>
+          <p class="section-kicker">Editorial desk</p>
+          <h2 id="latest-heading">最新文章</h2>
+        </div>
+        <a href="/archive" class="section-link">查看全部 <span aria-hidden="true">→</span></a>
+      </header>
+
+      {posts.length > 0 && (
+        <div class="post-grid">
+          {posts.map((post, index) => {
+            const coverImage = getCoverImage(post);
+            return (
+              <article class={`post-card status-${post.data.status}`}>
+                <a href={`/posts/${post.id}`} class="post-card-link">
+                  <div class="post-card-media" class:list={{ 'card-placeholder': !coverImage }}>
+                    {coverImage && <img src={coverImage} alt="" loading="lazy" />}
+                    {!coverImage && <span aria-hidden="true">AL / {String(index + 1).padStart(2, '0')}</span>}
+                  </div>
+
+                  <div class="post-card-body">
+                    <div class="tag-row">
+                      {post.data.tags.slice(0, 3).map((tag: string) => <span class="tag-chip">#{tag}</span>)}
+                      <span class={`status-pill status-${post.data.status}`}>
+                        <span class="pill-dot" aria-hidden="true"></span>
+                        {STATUS_LABELS[post.data.status]?.label ?? post.data.status}
+                      </span>
+                    </div>
+                    <h3 class="post-card-title">{post.data.title}</h3>
+                    <p class="post-card-excerpt">{post.data.summary}</p>
+                    <div class="post-card-foot">
+                      <time datetime={post.data.date}>{post.data.date}</time>
+                      <span class="read-more">閱讀更多 <span aria-hidden="true">→</span></span>
+                    </div>
+                  </div>
+                </a>
+              </article>
+            );
+          })}
+        </div>
+      )}
+      {posts.length === 0 && <p class="empty-state">目前沒有已發布的文章。</p>}
+    </section>
   </div>
 </Layout>
 
 <style>
-  /* ─────── Hero ─────── */
-  .hero {
-    padding: 3.5rem 0 4rem;
-    border-bottom: 1px solid var(--color-border);
-    margin-bottom: 4rem;
+  /* 首頁導言 */
+  .hub-hero {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: end;
+    gap: 2.5rem;
+    padding: clamp(1.5rem, 4vw, 3rem);
+    margin-bottom: 2.75rem;
+    background: linear-gradient(135deg, var(--color-accent-tint) 0%, var(--color-bg) 70%);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-xl);
+    box-shadow: var(--shadow-card);
   }
+  .hero-copy { max-width: 42rem; }
   .hero-eyebrow {
     display: inline-flex;
     align-items: center;
-    gap: 0.5rem;
+    gap: 0.55rem;
+    margin: 0 0 1.25rem;
+    color: var(--color-accent-2);
     font-family: var(--font-mono);
-    font-size: 0.75rem;
-    letter-spacing: 0.04em;
-    color: var(--color-fg-muted);
-    margin-bottom: 1.5rem;
-    text-transform: lowercase;
+    font-size: 0.72rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
   }
   .hero-dot {
-    width: 8px;
-    height: 8px;
+    width: 0.5rem;
+    height: 0.5rem;
+    flex: 0 0 auto;
     border-radius: 50%;
-    background: var(--color-accent-2);
-    box-shadow: 0 0 0 4px var(--color-accent-tint);
-    animation: pulse 2.4s ease-in-out infinite;
+    background: var(--color-accent);
+    box-shadow: 0 0 0 5px var(--color-accent-soft);
   }
-  @keyframes pulse {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.5; }
-  }
-
-  .hero h1 {
-    font-family: var(--font-sans);
-    font-size: clamp(2.5rem, 6vw, 3.5rem);
-    font-weight: 800;
-    letter-spacing: -0.04em;
-    line-height: 1;
-    margin: 0 0 1.25rem;
+  .hub-hero h1 {
+    margin: 0 0 0.85rem;
     color: var(--color-fg);
+    font-family: var(--font-sans);
+    font-size: clamp(2.5rem, 7vw, 4.5rem);
+    font-weight: 800;
+    letter-spacing: -0.06em;
+    line-height: 0.95;
   }
   .hero-lede {
-    font-family: var(--font-serif);
-    font-style: italic;
-    font-size: clamp(1.15rem, 2vw, 1.35rem);
-    line-height: 1.55;
-    color: var(--color-fg-2);
-    margin: 0 0 2rem;
-    max-width: 38ch;
-    letter-spacing: -0.005em;
-  }
-
-  .hero-stats {
-    list-style: none;
-    padding: 0;
+    max-width: 38rem;
     margin: 0;
-    display: flex;
-    gap: 0.75rem;
-    flex-wrap: wrap;
+    color: var(--color-fg-2);
+    font-family: var(--font-serif);
+    font-size: clamp(1rem, 2vw, 1.2rem);
+    line-height: 1.65;
   }
-  .hero-stats li {
+  .hero-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    margin-top: 1.5rem;
+  }
+  .button {
     display: inline-flex;
-    align-items: baseline;
+    align-items: center;
     gap: 0.4rem;
-    padding: 0.5rem 0.9rem;
-    background: var(--color-bg-2);
+    min-height: 2.5rem;
+    padding: 0.55rem 0.95rem;
+    border-radius: var(--radius-md);
+    font-size: 0.85rem;
+    font-weight: 600;
+    text-decoration: none;
+    transition: transform 150ms ease, background-color 150ms ease, border-color 150ms ease, color 150ms ease;
+  }
+  .button:hover { transform: translateY(-1px); text-decoration: none; }
+  .button-primary { background: var(--color-accent-2); color: white; }
+  .button-primary:hover { background: var(--color-link-hover); color: white; }
+  .button-quiet { border: 1px solid var(--color-border-2); color: var(--color-fg-2); }
+  .button-quiet:hover { border-color: var(--color-accent); background: var(--color-bg); color: var(--color-accent-2); }
+  .hero-stats {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(4.5rem, 1fr));
+    gap: 0.65rem;
+    min-width: 15rem;
+    margin: 0;
+  }
+  .hero-stats div {
+    padding: 0.8rem 0.75rem;
+    background: color-mix(in srgb, var(--color-bg) 72%, transparent);
     border: 1px solid var(--color-border);
     border-radius: var(--radius-md);
-    transition: background-color 150ms ease, border-color 150ms ease, transform 150ms ease;
+    text-align: center;
   }
-  .hero-stats li:hover {
-    background: var(--color-bg-3);
-    border-color: var(--color-border-2);
-    transform: translateY(-1px);
+  .hero-stats dt {
+    color: var(--color-accent-2);
+    font-size: 1.35rem;
+    font-weight: 800;
+    line-height: 1.2;
   }
-  .stat-num {
-    font-family: var(--font-sans);
-    font-weight: 700;
-    font-size: 1.1rem;
-    color: var(--color-fg);
-  }
-  .stat-label {
-    font-size: 0.85rem;
+  .hero-stats dd {
+    margin: 0.25rem 0 0;
     color: var(--color-fg-muted);
-  }
-
-  /* ─────── Grid ─────── */
-  .home-grid {
-    display: grid;
-    grid-template-columns: 1fr;
-    gap: 4rem;
-  }
-  @media (min-width: 1024px) {
-    .home-grid {
-      grid-template-columns: minmax(0, 1fr) 280px;
-      gap: 5rem;
-    }
-  }
-
-  .section-header {
-    display: flex;
-    align-items: baseline;
-    justify-content: space-between;
-    margin-bottom: 1.5rem;
-  }
-  .section-header h2 {
-    font-family: var(--font-serif);
-    font-size: 1.5rem;
-    font-weight: 600;
-    letter-spacing: -0.02em;
-    margin: 0;
-    color: var(--color-fg);
-  }
-  .section-link {
-    font-size: 0.85rem;
-    color: var(--color-link);
-    text-decoration: none;
+    font-size: 0.72rem;
     white-space: nowrap;
   }
 
-  /* ─────── Post cards ─────── */
-  .post-list {
-    list-style: none;
-    padding: 0;
-    margin: 0;
+  /* Hub 佈局與篩選 */
+  .hub-layout {
+    display: grid;
+    grid-template-columns: 220px minmax(0, 1fr);
+    gap: 2.5rem;
+    align-items: start;
+  }
+  .filters {
+    position: sticky;
+    top: 4rem;
     display: flex;
     flex-direction: column;
-    gap: 1.25rem;
+    gap: 1rem;
+  }
+  .filter-group {
+    padding: 1rem;
+    background: var(--color-bg-2);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-card);
+  }
+  .filter-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    margin-bottom: 0.65rem;
+    padding-bottom: 0.65rem;
+    border-bottom: 1px solid var(--color-border);
+  }
+  .filter-heading h2 {
+    margin: 0;
+    color: var(--color-fg);
+    font-size: 0.82rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+  }
+  .filter-heading > span {
+    color: var(--color-fg-subtle);
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
+  }
+  .filter-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+    max-height: 26rem;
+    margin: 0;
+    padding: 0;
+    overflow-y: auto;
+    list-style: none;
+  }
+  .filter-link {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    padding: 0.42rem 0.45rem;
+    border-radius: var(--radius-sm);
+    color: var(--color-fg-2);
+    font-size: 0.84rem;
+    text-decoration: none;
+    transition: background-color 120ms ease, color 120ms ease;
+  }
+  .filter-link:hover {
+    background: var(--color-accent-tint);
+    color: var(--color-accent-2);
+    text-decoration: none;
+  }
+  .filter-badge {
+    min-width: 1.7rem;
+    padding: 0.1rem 0.4rem;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-pill);
+    background: var(--color-bg);
+    color: var(--color-fg-muted);
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
+    line-height: 1.3;
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* 文章區 */
+  .posts-panel { min-width: 0; }
+  .posts-header {
+    display: flex;
+    align-items: end;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-bottom: 1.25rem;
+  }
+  .section-kicker {
+    margin: 0 0 0.25rem;
+    color: var(--color-accent-2);
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+  .posts-header h2 {
+    margin: 0;
+    color: var(--color-fg);
+    font-size: 1.6rem;
+    font-weight: 750;
+    letter-spacing: -0.04em;
+  }
+  .section-link {
+    flex-shrink: 0;
+    color: var(--color-link);
+    font-size: 0.82rem;
+    font-weight: 600;
+    text-decoration: none;
+  }
+  .section-link:hover { color: var(--color-link-hover); text-decoration: none; }
+  .post-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+    gap: 1.35rem;
   }
   .post-card {
+    min-width: 0;
+    overflow: hidden;
     background: var(--color-bg);
     border: 1px solid var(--color-border);
     border-radius: var(--radius-lg);
-    padding: 1.5rem 1.75rem;
+    box-shadow: var(--shadow-card);
     transition: transform 180ms cubic-bezier(0.4, 0, 0.2, 1), box-shadow 180ms ease, border-color 180ms ease;
   }
   .post-card:hover {
     transform: translateY(-2px);
+    border-color: var(--color-accent);
     box-shadow: var(--shadow-card-hover);
-    border-color: var(--color-border-2);
   }
-  .post-card.status-unverified {
-    border-left: 3px solid #d97706;
-  }
-  .post-card.status-verified {
-    border-left: 3px solid #15803d;
-  }
-  .post-card.status-corrected {
-    border-left: 3px solid #2563eb;
-  }
-  .post-card.status-draft {
-    border-left: 3px solid var(--color-fg-subtle);
-    opacity: 0.85;
-  }
-
-  .post-card-head {
+  .post-card-link {
     display: flex;
-    justify-content: space-between;
-    align-items: flex-start;
-    gap: 1rem;
-    margin-bottom: 0.5rem;
-  }
-  .post-card-title {
-    font-family: var(--font-serif);
-    font-size: 1.35rem;
-    font-weight: 600;
-    letter-spacing: -0.02em;
-    line-height: 1.3;
-    color: var(--color-fg);
+    flex-direction: column;
+    height: 100%;
+    color: inherit;
     text-decoration: none;
-    view-transition-name: post-title;
   }
-  .post-card-title:hover { color: var(--color-accent-2); text-decoration: none; }
-
-  .status-pill {
-    flex-shrink: 0;
-    display: inline-flex;
-    align-items: center;
-    gap: 0.35rem;
-    padding: 0.2rem 0.55rem;
-    border-radius: 100px;
+  .post-card-link:hover { color: inherit; text-decoration: none; }
+  .post-card-media {
+    position: relative;
+    height: 9.5rem;
+    overflow: hidden;
+    background: var(--color-bg-3);
+  }
+  .post-card-media img {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    transition: transform 300ms ease;
+  }
+  .post-card:hover .post-card-media img { transform: scale(1.03); }
+  .card-placeholder {
+    display: grid;
+    place-items: center;
+    background: linear-gradient(125deg, var(--color-accent) 0%, var(--color-accent-2) 58%, #c084fc 100%);
+  }
+  .card-placeholder span {
+    color: rgb(255 255 255 / 0.78);
+    font-family: var(--font-mono);
     font-size: 0.7rem;
-    font-weight: 500;
-    text-transform: lowercase;
-    letter-spacing: 0.04em;
+    letter-spacing: 0.12em;
   }
-  .pill-dot {
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    background: currentColor;
+  .post-card-body {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    padding: 1.05rem 1.15rem 1.15rem;
   }
-  .status-pill.status-unverified { background: #fef3c7; color: #92400e; }
-  .status-pill.status-verified   { background: #dcfce7; color: #14532d; }
-  .status-pill.status-draft      { background: #f3f4f6; color: #4b5563; }
-  .status-pill.status-corrected  { background: #dbeafe; color: #1e3a8a; }
-  @media (prefers-color-scheme: dark) {
-    .status-pill.status-unverified { background: #422006; color: #fde68a; }
-    .status-pill.status-verified   { background: #052e1a; color: #86efac; }
-    .status-pill.status-draft      { background: #1f2937; color: #d1d5db; }
-    .status-pill.status-corrected  { background: #1e293b; color: #93c5fd; }
-  }
-
-  .post-card-summary {
-    font-family: var(--font-serif);
-    font-size: 1.05rem;
-    line-height: 1.6;
-    color: var(--color-fg-2);
-    margin: 0.5rem 0 1rem;
-  }
-
-  .post-card-foot {
+  .tag-row {
     display: flex;
     flex-wrap: wrap;
-    gap: 0.5rem 1rem;
     align-items: center;
-    font-size: 0.8rem;
+    gap: 0.35rem;
+    min-height: 1.45rem;
+    margin-bottom: 0.7rem;
+  }
+  .tag-chip {
+    padding: 0.18rem 0.52rem;
+    border: 1px solid var(--color-accent-soft);
+    border-radius: var(--radius-pill);
+    background: var(--color-accent-tint);
+    color: var(--color-accent-2);
+    font-family: var(--font-mono);
+    font-size: 0.66rem;
+    line-height: 1.3;
+  }
+  .status-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    margin-left: auto;
+    padding: 0.18rem 0.5rem;
+    border-radius: var(--radius-pill);
+    font-size: 0.65rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    white-space: nowrap;
+  }
+  .pill-dot { width: 0.35rem; height: 0.35rem; border-radius: 50%; background: currentColor; }
+  .status-pill.status-unverified { background: #fef3c7; color: #92400e; }
+  .status-pill.status-verified { background: #dcfce7; color: #14532d; }
+  .status-pill.status-draft { background: #f3f4f6; color: #4b5563; }
+  .status-pill.status-corrected { background: #dbeafe; color: #1e3a8a; }
+  @media (prefers-color-scheme: dark) {
+    .status-pill.status-unverified { background: #422006; color: #fde68a; }
+    .status-pill.status-verified { background: #052e1a; color: #86efac; }
+    .status-pill.status-draft { background: #1f2937; color: #d1d5db; }
+    .status-pill.status-corrected { background: #1e293b; color: #93c5fd; }
+  }
+  .post-card-title {
+    display: -webkit-box;
+    margin: 0;
+    overflow: hidden;
+    color: var(--color-fg);
+    font-size: 1.1rem;
+    font-weight: 700;
+    letter-spacing: -0.025em;
+    line-height: 1.35;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+  }
+  .post-card:hover .post-card-title { color: var(--color-accent-2); }
+  .post-card-excerpt {
+    display: -webkit-box;
+    margin: 0.65rem 0 1.1rem;
+    overflow: hidden;
     color: var(--color-fg-muted);
+    font-family: var(--font-serif);
+    font-size: 0.93rem;
+    line-height: 1.55;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 3;
+  }
+  .post-card-foot {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    margin-top: auto;
+    padding-top: 0.8rem;
+    border-top: 1px solid var(--color-border);
+    color: var(--color-fg-subtle);
+    font-size: 0.72rem;
   }
   .post-card-foot time { font-variant-numeric: tabular-nums; }
-  .meta-link {
-    color: var(--color-fg-muted);
-    text-decoration: none;
-    transition: color 120ms ease;
-  }
-  .meta-link:hover { color: var(--color-accent-2); text-decoration: none; }
-  .investor-link::before { content: '◆ '; color: var(--color-accent-2); font-size: 0.65rem; }
-  .tag-link { color: var(--color-fg-subtle); }
-
-  /* ─────── Side ─────── */
-  .side-block { margin-bottom: 2.5rem; }
-  .side-block h3 {
-    font-family: var(--font-sans);
-    font-size: 0.75rem;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
-    color: var(--color-fg-muted);
-    margin: 0 0 1rem;
-    padding-bottom: 0.5rem;
-    border-bottom: 1px solid var(--color-border);
-  }
-
-  .tag-cloud {
-    list-style: none;
-    padding: 0;
+  .read-more { color: var(--color-link); font-weight: 600; }
+  .empty-state {
     margin: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 0.4rem;
-  }
-  .tag-cloud a {
-    display: flex;
-    justify-content: space-between;
-    align-items: baseline;
-    padding: 0.25rem 0;
-    text-decoration: none;
-    color: var(--color-fg-2);
-    transition: color 120ms ease, padding 120ms ease;
-  }
-  .tag-cloud a:hover { color: var(--color-accent-2); padding-left: 0.25rem; text-decoration: none; }
-  .tag-name { font-family: var(--font-mono); font-size: 0.85rem; }
-  .tag-count { font-size: 0.75rem; color: var(--color-fg-subtle); font-variant-numeric: tabular-nums; }
-
-  .investor-list { list-style: none; padding: 0; margin: 0; }
-  .investor-list li {
-    display: flex;
-    justify-content: space-between;
-    align-items: baseline;
-    padding: 0.4rem 0;
-    border-bottom: 1px dashed var(--color-border);
-  }
-  .investor-list li:last-child { border-bottom: none; }
-  .investor-name {
-    font-family: var(--font-serif);
-    font-size: 1rem;
-    font-weight: 500;
-    color: var(--color-fg);
-    text-decoration: none;
-  }
-  .investor-name:hover { color: var(--color-accent-2); }
-  .investor-count {
-    font-size: 0.75rem;
-    color: var(--color-fg-subtle);
-    font-variant-numeric: tabular-nums;
-  }
-
-  .see-all {
-    display: inline-block;
-    margin-top: 0.6rem;
-    font-size: 0.85rem;
-    color: var(--color-accent-2);
-  }
-
-  .subscribe-blurb {
-    font-family: var(--font-serif);
-    font-style: italic;
-    font-size: 0.9rem;
+    padding: 2rem;
+    border: 1px dashed var(--color-border-2);
+    border-radius: var(--radius-lg);
     color: var(--color-fg-muted);
-    margin: 0 0 1rem;
+    text-align: center;
   }
-  .subscribe-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 0.4rem; }
-  .sub-link {
-    display: flex;
-    flex-direction: column;
-    padding: 0.6rem 0.75rem;
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-md);
-    text-decoration: none;
-    transition: background-color 120ms ease, border-color 120ms ease;
+
+  @media (max-width: 767px) {
+    .hub-hero {
+      grid-template-columns: 1fr;
+      gap: 1.75rem;
+      margin-bottom: 2rem;
+    }
+    .hero-stats { min-width: 0; }
+    .hub-layout { grid-template-columns: 1fr; gap: 2rem; }
+    .filters {
+      position: static;
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 0.75rem;
+    }
+    .filter-group { padding: 0.8rem; }
+    .filter-list { max-height: 16rem; }
+    .post-grid { grid-template-columns: 1fr; }
   }
-  .sub-link:hover {
-    background: var(--color-accent-tint);
-    border-color: var(--color-accent-2);
-    text-decoration: none;
+
+  @media (max-width: 480px) {
+    .filters { grid-template-columns: 1fr; }
+    .hub-hero h1 { font-size: 3rem; }
   }
-  .sub-link strong { font-family: var(--font-mono); color: var(--color-fg); font-weight: 500; font-size: 0.95rem; }
-  .sub-hint { font-size: 0.75rem; color: var(--color-fg-subtle); }
 </style>

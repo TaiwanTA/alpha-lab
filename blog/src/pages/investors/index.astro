@@ -4,93 +4,191 @@ import { formatDate, getAllInvestors, getPublishedPosts } from '../../lib/posts'
 
 const posts = await getPublishedPosts();
 const investorMap = getAllInvestors(posts);
-const investors = [...investorMap.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+const investors = [...investorMap.entries()].sort((a, b) => b[1].length - a[1].length || a[0].localeCompare(b[0]));
 ---
 
 <Layout title="追蹤的投資人 — alpha-lab" description="本站所有追蹤的投資人清單。">
   <header class="page-head">
-    <nav class="breadcrumb">
+    <nav class="breadcrumb" aria-label="麵包屑">
       <a href="/">Home</a>
       <span class="breadcrumb-sep">/</span>
       <span aria-current="page">Investors</span>
     </nav>
+    <p class="page-kicker">Investor directory</p>
     <h1>追蹤的投資人</h1>
     <p class="lede">{investors.length} 位 · 從公開言論、SEC 13F、訪談、社群媒體抓取</p>
   </header>
 
-  <ol class="investor-list">
-    {investors.map(([name, list]) => {
-      const recent = [...list].sort((a, b) => b.data.date.localeCompare(a.data.date))[0];
-      return (
-        <li class="investor-row">
-          <a href={`/investors/${encodeURIComponent(name)}/`} class="name">{name}</a>
-          <span class="count">{list.length} 篇</span>
-          <span class="last"><span class="last-label">最近</span> {formatDate(recent.data.date)}</span>
-        </li>
-      );
-    })}
-  </ol>
+  <section class="directory" aria-labelledby="investor-directory-heading">
+    <header class="directory-head">
+      <div>
+        <p class="section-kicker">Browse by person</p>
+        <h2 id="investor-directory-heading">研究對象</h2>
+      </div>
+      <a href="/" class="back-link">回到首頁 <span aria-hidden="true">→</span></a>
+    </header>
+    <ul class="investor-grid">
+      {investors.map(([name, list]) => {
+        const recent = [...list].sort((a, b) => b.data.date.localeCompare(a.data.date))[0];
+        return (
+          <li>
+            <a href={`/investors/${encodeURIComponent(name)}`} class="investor-card">
+              <span class="investor-card-top">
+                <span class="investor-avatar" aria-hidden="true">{name.slice(0, 1).toUpperCase()}</span>
+                <span class="investor-count">{list.length} 篇</span>
+              </span>
+              <strong class="investor-name">{name}</strong>
+              <span class="investor-recent"><span>最近更新</span>{formatDate(recent.data.date)}</span>
+            </a>
+          </li>
+        );
+      })}
+    </ul>
+  </section>
 </Layout>
 
 <style>
-  .page-head { margin-bottom: 3rem; }
+  /* 頁首 */
+  .page-head { margin-bottom: 2.5rem; }
   .breadcrumb {
-    display: flex; align-items: center; gap: 0.5rem;
-    font-family: var(--font-mono); font-size: 0.75rem;
-    color: var(--color-fg-muted); margin-bottom: 1rem;
-    text-transform: uppercase; letter-spacing: 0.05em;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 1.25rem;
+    color: var(--color-fg-muted);
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
   }
   .breadcrumb a { color: var(--color-fg-muted); text-decoration: none; }
   .breadcrumb a:hover { color: var(--color-accent-2); }
   .breadcrumb-sep { color: var(--color-fg-subtle); }
   .breadcrumb [aria-current] { color: var(--color-fg); }
+  .page-kicker, .section-kicker {
+    color: var(--color-accent-2);
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+  .page-kicker { margin: 0 0 0.4rem; }
   .page-head h1 {
-    font-family: var(--font-sans);
-    font-size: clamp(2rem, 5vw, 2.75rem);
-    font-weight: 700;
-    letter-spacing: -0.03em;
     margin: 0 0 0.5rem;
+    color: var(--color-fg);
+    font-size: clamp(2rem, 5vw, 3rem);
+    font-weight: 800;
+    letter-spacing: -0.05em;
+    line-height: 1.1;
   }
-  .lede { color: var(--color-fg-muted); font-size: 1rem; margin: 0; }
+  .lede { margin: 0; color: var(--color-fg-muted); font-size: 1rem; }
 
-  .investor-list { list-style: none; padding: 0; margin: 0; }
-  .investor-row {
-    display: grid;
-    grid-template-columns: 1fr auto auto;
-    align-items: baseline;
-    gap: 0.5rem 1.25rem;
-    padding: 1.1rem 0;
-    border-bottom: 1px dashed var(--color-border);
-    transition: background-color 120ms ease, padding-left 120ms ease;
+  /* 投資人目錄 */
+  .directory {
+    padding: clamp(1rem, 3vw, 1.75rem);
+    background: var(--color-bg-2);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-card);
   }
-  .investor-row:hover { background: var(--color-bg-2); padding-left: 0.5rem; }
-  .investor-row .name {
-    font-family: var(--font-serif);
-    font-size: 1.1rem;
-    font-weight: 500;
+  .directory-head {
+    display: flex;
+    align-items: end;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-bottom: 1.25rem;
+    padding-bottom: 1rem;
+    border-bottom: 1px solid var(--color-border);
+  }
+  .section-kicker { margin: 0 0 0.2rem; }
+  .directory-head h2 {
+    margin: 0;
+    color: var(--color-fg);
+    font-size: 1.35rem;
+    font-weight: 750;
+    letter-spacing: -0.035em;
+  }
+  .back-link {
+    flex-shrink: 0;
+    color: var(--color-link);
+    font-size: 0.82rem;
+    font-weight: 600;
+    text-decoration: none;
+  }
+  .back-link:hover { color: var(--color-link-hover); text-decoration: none; }
+  .investor-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    gap: 0.85rem;
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+  .investor-card {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    min-height: 8.5rem;
+    padding: 1rem;
+    background: var(--color-bg);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-card);
+    color: var(--color-fg);
+    text-decoration: none;
+    transition: transform 150ms ease, border-color 150ms ease, box-shadow 150ms ease;
+  }
+  .investor-card:hover {
+    transform: translateY(-2px);
+    border-color: var(--color-accent);
+    box-shadow: var(--shadow-card-hover);
     color: var(--color-fg);
     text-decoration: none;
   }
-  .investor-row .name:hover { color: var(--color-accent-2); }
-  .investor-row .count {
-    font-family: var(--font-mono);
-    font-size: 0.75rem;
-    color: var(--color-fg-muted);
-    background: var(--color-bg-2);
-    padding: 0.15rem 0.5rem;
-    border-radius: 100px;
-    font-variant-numeric: tabular-nums;
-  }
-  .investor-row .last {
+  .investor-card-top { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; }
+  .investor-avatar {
+    display: grid;
+    place-items: center;
+    width: 2rem;
+    height: 2rem;
+    border-radius: 50%;
+    background: var(--color-accent-tint);
+    color: var(--color-accent-2);
     font-size: 0.8rem;
-    color: var(--color-fg-subtle);
+    font-weight: 800;
+  }
+  .investor-count {
+    padding: 0.18rem 0.5rem;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-pill);
+    background: var(--color-bg-2);
+    color: var(--color-fg-muted);
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
     font-variant-numeric: tabular-nums;
   }
-  .last-label {
-    font-family: var(--font-mono);
-    font-size: 0.7rem;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    margin-right: 0.4rem;
+  .investor-name {
+    color: var(--color-fg);
+    font-size: 1.02rem;
+    letter-spacing: -0.015em;
+  }
+  .investor-card:hover .investor-name { color: var(--color-accent-2); }
+  .investor-recent {
+    display: flex;
+    justify-content: space-between;
+    gap: 0.5rem;
+    margin-top: auto;
+    padding-top: 0.65rem;
+    border-top: 1px solid var(--color-border);
+    color: var(--color-fg-subtle);
+    font-size: 0.72rem;
+    font-variant-numeric: tabular-nums;
+  }
+  .investor-recent span { color: var(--color-fg-muted); }
+
+  @media (max-width: 767px) {
+    .page-head { margin-bottom: 2rem; }
+    .directory-head { align-items: flex-start; }
+    .investor-grid { grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); }
   }
 </style>

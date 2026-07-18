@@ -12,8 +12,8 @@ export const GET: APIRoute = async (context) => {
     language: 'zh-TW',
     description: '研究公開投資人的言論、論點、與決策。',
     items: posts.map(post => ({
-      id: new URL(`/posts/${post.id}/`, context.site).toString(),
-      url: new URL(`/posts/${post.id}/`, context.site).toString(),
+      id: new URL(`/posts/${post.id}`, context.site).toString(),
+      url: new URL(`/posts/${post.id}`, context.site).toString(),
       title: post.data.title,
       summary: post.data.summary,
       content_text: post.data.summary,

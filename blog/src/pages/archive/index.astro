@@ -25,7 +25,7 @@ const years = [...yearMap.entries()].sort((a, b) => b[0].localeCompare(a[0]));
         {[...list].sort((a, b) => b.data.date.localeCompare(a.data.date)).map(post => (
           <li>
             <time>{post.data.date.slice(5)}</time>
-            <a href={`/posts/${post.id}/`}>{post.data.title}</a>
+            <a href={`/posts/${post.id}`}>{post.data.title}</a>
           </li>
         ))}
       </ul>

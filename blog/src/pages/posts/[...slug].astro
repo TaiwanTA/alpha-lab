@@ -10,22 +10,25 @@ interface Props {
   post: Post;
   prev: Post | null;
   next: Post | null;
+  recentPosts: Post[];
 }
 
 export async function getStaticPaths() {
   const posts = await getPublishedPosts();
   const ascByDate = [...posts].sort((a, b) => a.data.date.localeCompare(b.data.date));
+  const descByDate = [...posts].sort((a, b) => b.data.date.localeCompare(a.data.date));
   return posts.map((post, i) => ({
     params: { slug: post.id },
     props: {
       post,
       prev: ascByDate[i - 1] ?? null,
       next: ascByDate[i + 1] ?? null,
+      recentPosts: descByDate.filter(candidate => candidate.id !== post.id).slice(0, 3),
     },
   }));
 }
 
-const { post, prev, next } = Astro.props as Props;
+const { post, prev, next, recentPosts } = Astro.props as Props;
 const { Content, headings } = await render(post);
 const stats = readingTime(post.body ?? '');
 const toc = buildToc(headings);
@@ -51,25 +54,19 @@ const showLastmod = diffDays > 7;
       <h1>{post.data.title}</h1>
       {post.data.summary && <p class="lede">{post.data.summary}</p>}
 
-      <div class="post-meta">
-        {post.data.investors.length > 0 && (
-          <span class="meta-row"><span class="meta-key">提及</span><span class="meta-vals">{post.data.investors.map((inv: string, i: number) => <><a href={`/investors/${encodeURIComponent(inv)}/`}>{inv}</a>{i < post.data.investors.length - 1 && ' · '}</>)}</span></span>
-        )}
-        <span class="meta-row"><span class="meta-key">標籤</span><span class="meta-vals tags-vals">{post.data.tags.map((t: string) => <a href={`/tags/${encodeURIComponent(t)}/`} class="tag-pill">#{t}</a>)}</span></span>
-      </div>
     </header>
 
     <div class="post-grid">
-      {toc.length > 1 && (
-        <aside class="toc" aria-label="目錄">
+      <aside class="toc" class:list={{ 'toc-empty': toc.length <= 1 }} aria-label="目錄">
+        {toc.length > 1 && (
           <details open>
             <summary>目錄</summary>
             <ol>
               {toc.map(h => <li class={`depth-${h.depth}`}><a href={`#${h.slug}`}>{h.text}</a></li>)}
             </ol>
           </details>
-        </aside>
-      )}
+        )}
+      </aside>
 
       <div class="post-body">
         {isUnverified && (
@@ -89,16 +86,54 @@ const showLastmod = diffDays > 7;
         )}
 
         <nav class="prev-next" aria-label="文章導航">
-          {prev ? <a class="pn prev" href={`/posts/${prev.id}/`}><span class="pn-label">← 上一篇</span><span class="pn-title">{prev.data.title}</span></a> : <span></span>}
-          {next ? <a class="pn next" href={`/posts/${next.id}/`}><span class="pn-label">下一篇 →</span><span class="pn-title">{next.data.title}</span></a> : <span></span>}
+          {prev ? <a class="pn prev" href={`/posts/${prev.id}`}><span class="pn-label">← 上一篇</span><span class="pn-title">{prev.data.title}</span></a> : <span></span>}
+          {next ? <a class="pn next" href={`/posts/${next.id}`}><span class="pn-label">下一篇 →</span><span class="pn-title">{next.data.title}</span></a> : <span></span>}
         </nav>
 
         <div class="post-share">
           <span class="share-label">分享</span>
-          <a href={`https://twitter.com/intent/tweet?text=${encodeURIComponent(post.data.title)}&url=${encodeURIComponent(new URL(`/posts/${post.id}/`, Astro.site).toString())}`} rel="noopener" target="_blank" class="share-link">X / Twitter</a>
-          <button class="share-link copy-link-btn" data-copy-url={new URL(`/posts/${post.id}/`, Astro.site).toString()} type="button">複製連結</button>
+          <a href={`https://twitter.com/intent/tweet?text=${encodeURIComponent(post.data.title)}&url=${encodeURIComponent(new URL(`/posts/${post.id}`, Astro.site).toString())}`} rel="noopener" target="_blank" class="share-link">X / Twitter</a>
+          <button class="share-link copy-link-btn" data-copy-url={new URL(`/posts/${post.id}`, Astro.site).toString()} type="button">複製連結</button>
         </div>
       </div>
+
+      <aside class="post-meta-rail" aria-label="相關資訊">
+        {post.data.investors.length > 0 && (
+          <section class="meta-card">
+            <h2 class="filter-heading">提及投資人</h2>
+            <ul class="meta-list">
+              {post.data.investors.map((investor: string) => (
+                <li><a class="rail-link" href={`/investors/${encodeURIComponent(investor)}`}>{investor}</a></li>
+              ))}
+            </ul>
+          </section>
+        )}
+
+        <section class="meta-card">
+          <h2 class="filter-heading">標籤</h2>
+          <div class="rail-tags">
+            {post.data.tags.map((tag: string) => (
+              <a href={`/tags/${encodeURIComponent(tag)}`} class="tag-pill">#{tag}</a>
+            ))}
+          </div>
+        </section>
+
+        {recentPosts.length > 0 && (
+          <section class="meta-card">
+            <h2 class="filter-heading">最近文章</h2>
+            <ul class="recent-list">
+              {recentPosts.map(recent => (
+                <li>
+                  <a class="recent-post" href={`/posts/${recent.id}`}>
+                    <h4>{recent.data.title}</h4>
+                    <time datetime={recent.data.date}>{formatDate(recent.data.date)}</time>
+                  </a>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
+      </aside>
     </div>
   </article>
 
@@ -125,60 +160,68 @@ const showLastmod = diffDays > 7;
 <style>
   /* ─────── Article frame ─────── */
   .post {
-    max-width: var(--max-width);
+    width: 100%;
+    max-width: var(--max-width-article);
     margin: 0 auto;
     padding: 0;
   }
 
   .post-header {
-    margin-bottom: 3rem;
-    padding-bottom: 2rem;
-    border-bottom: 1px solid var(--color-border);
+    margin-bottom: 3.5rem;
+    padding: clamp(1.5rem, 4vw, 2.75rem);
+    border-radius: var(--radius-xl);
+    background: linear-gradient(135deg, var(--color-accent-tint) 0%, var(--color-bg) 78%);
   }
   .post-header h1 {
-    font-family: var(--font-serif);
-    font-size: clamp(1.85rem, 4vw, 2.6rem);
-    font-weight: 700;
-    letter-spacing: -0.025em;
-    line-height: 1.18;
-    margin: 0 0 1rem;
+    margin: 0 0 1.1rem;
     color: var(--color-fg);
+    font-family: var(--font-sans);
+    font-size: clamp(2rem, 5vw, 3.25rem);
+    font-weight: 750;
+    letter-spacing: -0.05em;
+    line-height: 1.12;
     view-transition-name: post-title;
   }
   .post-header .lede {
-    font-family: var(--font-serif);
-    font-style: italic;
-    font-size: 1.2rem;
-    line-height: 1.5;
+    max-width: 46em;
+    margin: 0 0 1.75rem;
+    padding-left: 1rem;
+    border-left: 3px solid var(--color-accent-2);
     color: var(--color-fg-2);
-    margin: 0 0 1.5rem;
-    max-width: 36em;
+    font-family: var(--font-serif);
+    font-size: 1.2rem;
+    font-style: italic;
+    line-height: 1.6;
   }
 
-  /* Eyebrow / meta strip */
+  /* 文章摘要信息 */
   .post-eyebrow {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
     gap: 0.5rem 1rem;
-    margin-bottom: 1.25rem;
-    font-size: 0.8rem;
+    margin-bottom: 1.35rem;
     color: var(--color-fg-muted);
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
   }
   .post-eyebrow time { font-variant-numeric: tabular-nums; }
-  .post-eyebrow .updated { font-style: italic; color: var(--color-fg-subtle); }
-  .post-eyebrow .wordcount { margin-left: auto; font-family: var(--font-mono); font-size: 0.75rem; color: var(--color-fg-subtle); }
+  .post-eyebrow .updated { color: var(--color-fg-subtle); font-style: italic; }
+  .post-eyebrow .wordcount { margin-left: auto; color: var(--color-fg-subtle); font-family: var(--font-mono); font-size: 0.72rem; }
 
   .status-pill {
     display: inline-flex;
     align-items: center;
     gap: 0.35rem;
-    padding: 0.2rem 0.55rem;
-    border-radius: 100px;
-    font-size: 0.7rem;
-    font-weight: 500;
-    text-transform: lowercase;
-    letter-spacing: 0.04em;
+    padding: 0.22rem 0.6rem;
+    border-radius: var(--radius-pill);
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
   }
   .pill-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
   .status-pill.status-unverified { background: #fef3c7; color: #92400e; }
@@ -192,79 +235,50 @@ const showLastmod = diffDays > 7;
     .status-pill.status-corrected { background: #1e293b; color: #93c5fd; }
   }
 
-  /* Meta rows */
-  .post-meta {
-    display: flex;
-    flex-direction: column;
-    gap: 0.4rem;
-    font-size: 0.85rem;
-    color: var(--color-fg-muted);
-  }
-  .meta-row {
-    display: flex;
-    align-items: baseline;
-    gap: 0.6rem;
-    flex-wrap: wrap;
-  }
-  .meta-key {
-    flex: 0 0 4rem;
-    font-family: var(--font-mono);
-    font-size: 0.7rem;
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
-    color: var(--color-fg-subtle);
-  }
-  .meta-vals {
-    color: var(--color-fg-2);
-    font-family: var(--font-serif);
-    font-size: 0.95rem;
-  }
-  .meta-vals a {
-    color: var(--color-fg);
-    text-decoration: none;
-    transition: color 120ms ease;
-  }
-  .meta-vals a:hover { color: var(--color-accent-2); }
+
   .tag-pill {
     display: inline-block;
     margin-right: 0.4rem;
-    padding: 0.1rem 0.5rem;
-    background: var(--color-bg-2);
-    border: 1px solid var(--color-border);
-    border-radius: 100px;
+    padding: 0.18rem 0.55rem;
+    background: var(--color-accent-tint);
+    border: 1px solid var(--color-accent-soft);
+    border-radius: var(--radius-pill);
+    color: var(--color-accent-2);
     font-family: var(--font-mono);
-    font-size: 0.78rem;
-    color: var(--color-fg-muted);
+    font-size: 0.75rem;
     transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease;
   }
-  .tag-pill:hover { background: var(--color-accent-tint); border-color: var(--color-accent-2); color: var(--color-accent-2); }
+  .tag-pill:hover { background: var(--color-accent-soft); border-color: var(--color-accent); color: var(--color-link-hover); }
 
   /* ─────── Grid ─────── */
   .post-grid {
     display: grid;
-    grid-template-columns: 1fr;
+    min-width: 0;
+    grid-template-columns: minmax(0, 1fr);
     gap: 2rem;
   }
-  @media (min-width: 1024px) {
+  @media (min-width: 900px) {
     .post-grid {
-      grid-template-columns: 200px minmax(0, 1fr);
+      grid-template-columns: 180px minmax(0, 1fr) 180px;
       align-items: start;
-      gap: 3rem;
+      gap: 2rem;
     }
-    .toc {
+    .toc, .post-meta-rail {
       position: sticky;
-      top: 1.5rem;
-      max-height: calc(100vh - 3rem);
+      top: 4rem;
+      max-height: calc(100vh - 7rem);
       overflow-y: auto;
     }
   }
 
   /* ─────── TOC ─────── */
   .toc {
+    min-width: 0;
+    padding: 0.5rem 0 0.5rem 1rem;
     border-left: 2px solid var(--color-accent-tint);
-    padding-left: 1rem;
     font-size: 0.85rem;
   }
+  .toc.toc-empty { visibility: hidden; }
   .toc summary {
     font-family: var(--font-mono);
     font-size: 0.7rem;
@@ -306,23 +320,108 @@ const showLastmod = diffDays > 7;
   }
   .toc a:hover { color: var(--color-accent-2); text-decoration: none; }
 
+  /* ─────── Related metadata rail ─────── */
+  .post-meta-rail {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    gap: 1rem;
+  }
+  .meta-card {
+    padding: 0.5rem 0 0.5rem 1rem;
+    border-left: 2px solid var(--color-accent-tint);
+  }
+  .filter-heading {
+    margin: 0 0 0.75rem;
+    color: var(--color-fg-muted);
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+  }
+  .meta-list, .recent-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+  .rail-link {
+    display: block;
+    padding: 0.4rem 0.5rem;
+    border-radius: var(--radius-sm);
+    color: var(--color-fg-2);
+    font-size: 0.8rem;
+    text-decoration: none;
+    transition: background-color 120ms ease, color 120ms ease;
+  }
+  .rail-link:hover {
+    background: var(--color-accent-tint);
+    color: var(--color-accent-2);
+    text-decoration: none;
+  }
+  .rail-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+  }
+  .rail-tags .tag-pill {
+    margin: 0;
+    font-size: 0.68rem;
+  }
+  .recent-post {
+    display: block;
+    padding: 0.45rem 0;
+    border-bottom: 1px dashed var(--color-border);
+    color: var(--color-fg);
+    text-decoration: none;
+    transition: color 120ms ease;
+  }
+  .recent-list li:last-child .recent-post { border-bottom: none; }
+  .recent-post:hover { color: var(--color-accent-2); text-decoration: none; }
+  .recent-post h4 {
+    display: -webkit-box;
+    margin: 0 0 0.35rem;
+    overflow: hidden;
+    color: inherit;
+    font-family: var(--font-sans);
+    font-size: 0.8rem;
+    font-weight: 650;
+    line-height: 1.4;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+  }
+  .recent-post time {
+    color: var(--color-fg-subtle);
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
+    font-variant-numeric: tabular-nums;
+  }
+
   /* ─────── Body ─────── */
   .post-body {
-    font-family: var(--font-serif);
-    font-size: 1.075rem;
-    line-height: 1.7;
+    width: 100%;
+    min-width: 0;
+    justify-self: center;
+    max-width: 42em;
     color: var(--color-fg);
+    font-family: var(--font-serif);
+    font-size: 1.125rem;
+    line-height: 1.75;
   }
   .post-body :global(p) { margin: 1.25em 0; }
   .post-body :global(h2) {
+    margin: 3em 0 1em;
+    padding-top: 1em;
+    border-top: 1px solid var(--color-accent);
+    color: var(--color-fg);
     font-family: var(--font-sans);
     font-size: 1.45rem;
     font-weight: 700;
     letter-spacing: -0.02em;
-    margin: 3em 0 1em;
-    padding-top: 1em;
-    border-top: 1px solid var(--color-border);
-    scroll-margin-top: 1rem;
+    scroll-margin-top: 6rem;
   }
   .post-body :global(h3) {
     font-family: var(--font-sans);
@@ -330,7 +429,7 @@ const showLastmod = diffDays > 7;
     font-weight: 600;
     letter-spacing: -0.015em;
     margin: 2em 0 0.5em;
-    scroll-margin-top: 1rem;
+    scroll-margin-top: 6rem;
   }
   .post-body :global(h1) { display: none; }
   .post-body :global(ul), .post-body :global(ol) {
@@ -340,12 +439,14 @@ const showLastmod = diffDays > 7;
   .post-body :global(li) { margin: 0.4em 0; }
   .post-body :global(li::marker) { color: var(--color-fg-muted); }
   .post-body :global(blockquote) {
-    border-left: 3px solid var(--color-accent-2);
-    padding: 0.5em 0 0.5em 1.25em;
     margin: 1.5em 0;
-    font-style: italic;
-    color: var(--color-fg-2);
+    padding: 0.85em 1.25em;
+    border-left: 4px solid var(--color-accent);
+    border-radius: 0 var(--radius-md) var(--radius-md) 0;
     background: var(--color-bg-2);
+    box-shadow: inset 0 0 0 1px var(--color-accent-soft);
+    color: var(--color-fg-2);
+    font-style: italic;
   }
   .post-body :global(blockquote p) { margin: 0.5em 0; }
   .post-body :global(table) {
@@ -370,20 +471,29 @@ const showLastmod = diffDays > 7;
     color: var(--color-fg);
   }
   .post-body :global(th:last-child), .post-body :global(td:last-child) { border-right: none; }
-  .post-body :global(tr:last-child td) { border-bottom: none; }
   .post-body :global(code) {
+    padding: 0.12em 0.4em;
+    border-radius: var(--radius-sm);
+    background: var(--color-accent-soft);
+    color: var(--color-accent-2);
     font-family: var(--font-mono);
-    background: var(--color-bg-2);
-    padding: 0.1em 0.4em;
-    border-radius: 4px;
-    font-size: 0.88em;
+    font-size: 0.86em;
   }
   .post-body :global(pre) {
-    background: var(--color-bg-2);
-    padding: 1rem;
-    border-radius: var(--radius-md);
+    margin: 1.5em 0;
+    padding: 1.15rem 1.25rem;
     overflow-x: auto;
-    border: 1px solid var(--color-border);
+    border: 1px solid var(--color-border-2);
+    border-radius: var(--radius-lg);
+    background: var(--color-accent-soft);
+    box-shadow: var(--shadow-card);
+  }
+  .post-body :global(pre code) {
+    padding: 0;
+    background: transparent;
+    color: var(--color-fg-2);
+    font-size: 0.85em;
+    line-height: 1.65;
   }
   .post-body :global(hr) {
     border: none;
@@ -401,6 +511,7 @@ const showLastmod = diffDays > 7;
     color: var(--color-accent-2);
     text-decoration: underline;
     text-underline-offset: 0.18em;
+    overflow-wrap: anywhere;
     text-decoration-thickness: 1px;
     transition: color 120ms ease;
   }
@@ -414,7 +525,7 @@ const showLastmod = diffDays > 7;
     gap: 0.4rem;
     padding: 1rem 1.25rem;
     margin: 1.5rem 0;
-    border-radius: var(--radius-md);
+    border-radius: var(--radius-lg);
     font-size: 0.95rem;
     line-height: 1.5;
     border-left: 3px solid;
@@ -422,15 +533,15 @@ const showLastmod = diffDays > 7;
   .banner strong, .disclosure strong {
     font-family: var(--font-mono);
     font-size: 0.7rem;
-    text-transform: uppercase;
     letter-spacing: 0.08em;
+    text-transform: uppercase;
   }
   .banner p, .disclosure p { margin: 0; }
   .banner { background: #fffaf0; color: #92400e; border-left-color: #d97706; }
-  .disclosure { background: #faf9f6; color: var(--color-fg-2); border-left-color: var(--color-accent-2); }
+  .disclosure { background: var(--color-accent-tint); color: var(--color-fg-2); border-left-color: var(--color-accent-2); }
   @media (prefers-color-scheme: dark) {
     .banner { background: #2a1b07; color: #fde68a; border-left-color: #f59e0b; }
-    .disclosure { background: #16181c; color: var(--color-fg-muted); border-left-color: var(--color-accent-2); }
+    .disclosure { background: var(--color-accent-soft); color: var(--color-fg-muted); border-left-color: var(--color-accent-2); }
   }
 
   /* ─────── Prev/Next nav ─────── */
@@ -448,14 +559,16 @@ const showLastmod = diffDays > 7;
     gap: 0.4rem;
     padding: 1.25rem;
     border: 1px solid var(--color-border);
-    border-radius: var(--radius-md);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-card);
     text-decoration: none;
-    transition: border-color 150ms ease, transform 150ms ease, background-color 150ms ease;
+    transition: border-color 150ms ease, transform 150ms ease, background-color 150ms ease, box-shadow 150ms ease;
   }
   .prev-next .pn:hover {
     border-color: var(--color-accent-2);
     transform: translateY(-2px);
     background: var(--color-bg-2);
+    box-shadow: var(--shadow-card-hover);
     text-decoration: none;
   }
   .prev-next .pn.next { text-align: right; align-items: flex-end; }
@@ -497,7 +610,7 @@ const showLastmod = diffDays > 7;
     border: 1px solid var(--color-border);
     color: var(--color-fg-2);
     padding: 0.35rem 0.7rem;
-    border-radius: var(--radius-md);
+    border-radius: var(--radius-pill);
     font-size: 0.85rem;
     cursor: pointer;
     text-decoration: none;
@@ -508,11 +621,13 @@ const showLastmod = diffDays > 7;
     border-color: var(--color-accent-2);
     color: var(--color-accent-2);
     background: var(--color-accent-tint);
+    box-shadow: var(--shadow-card);
+    transform: translateY(-1px);
     text-decoration: none;
   }
 
   @media print {
-    nav.site-nav, footer.site-footer, .toc, .post-share, .prev-next, .banner, .disclosure, .post-meta { display: none; }
+    nav.site-nav, footer.site-footer, .toc, .post-share, .prev-next, .banner, .disclosure, .post-meta-rail { display: none; }
     .post-body { font-size: 11pt; line-height: 1.4; max-width: none; }
     .post { max-width: none; }
   }
