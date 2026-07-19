@@ -26,6 +26,7 @@ services:
       HOME: /var/lib/alpha-lab/dagu
       DAGU_HOME: /var/lib/alpha-lab/dagu
       # 以 Compose DNS 連線，不能在 container 內使用 127.0.0.1。
+      # GH_PR_TOKEN 由上面的 /etc/alpha-lab/secrets/dagu.env env_file 注入。
       HINDSIGHT_BASE_URL: http://hindsight:8888
     volumes:
       # 目前 systemd、Dagu 與 dags-sync 都依賴這個既有 state 路徑。

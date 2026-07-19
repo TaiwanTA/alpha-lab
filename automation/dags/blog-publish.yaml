@@ -1,40 +1,35 @@
-# 子 DAG,由 `publish-next-research` 以 stored research run 呼叫。
-# push 目標是 `main`,用 SSH deploy key (GitHub ruleset
-# DeployKey bypass)。Prerequisites:ruleset 18699827
-# (repo-level) + 6159190 (org-level) 都已加 DeployKey
-# bypass (always mode)。
+# 子 DAG,由 `publish-next-research` 以 stored research run 调用。
+# 发布只推送 `publish/<DAG_RUN_ID>` 分支并创建 PR,不直接推送 `main`。
 #
-# 已驗證 Dagu v2.10.7 語法:
-#   - `${env.NAME}` 是唯一能解析 process env 變數的 namespace。
-#   - `output: VARNAME` 把 step 的 stdout 收成字串變數。
-#   - `preconditions: [...]` 用 shell condition 或 value 比對
-#     gate step;這就是 diff-count gate 的實作方式。
+# 已验证 Dagu v2.10.7 语法:
+#   - `${env.NAME}` 是唯一能解析 process env 变量的 namespace。
+#   - `output: VARNAME` 把 step 的 stdout 收成字符串变量。
+#   - `preconditions: [...]` 使用 shell condition 或值比对作为
+#     gate step;这是 diff-count gate 的实现方式。
 #   - `working_dir:` (不是 `dir:`);`DAG_RUN_ID` (不是 `DAGU_RUN_ID`)。
-#   - `${DAG_RUN_WORK_DIR}` is the v2.10.7 built-in absolute `work/` path
-#     (verified with a success/failure exit-handler fixture).
+#   - `${DAG_RUN_WORK_DIR}` 是 v2.10.7 内置的绝对 `work/` 路径
+#     (已用 success/failure exit-handler fixture 验证)。
 #
-# 子 DAG 接收兩個參數:
+# 子 DAG 接收两个参数:
 #   - `research_run_id` (已接受且被 publication worker claim 的 UUID)
-#   - `runtime_sha` (發布 checkout 的 commit SHA)
+#   - `runtime_sha` (发布 checkout 的 commit SHA)
 #
 # 流程:
-#   1. 重新 checkout `main` 到一個新的 worktree
-#      (絕對不是產出 candidate 的那個)
+#   1. 重新 checkout `main` 到一个新的 worktree
+#      (绝不是产出 candidate 的那个)
 #   2. 把 candidate 放到新 worktree
-#   3. 跑純函式的 draft publisher (本輪加了 CLI 入口 ——
-#      見 scripts/publish-draft.ts)
-#   4. Astro `npm ci` / `npm run lint` / `npm run build`
-#   5. 決定論的 diff-count gate (恰好一個新增的 Markdown 檔)
-#   6. 一次 `git commit` + `git push` 到 `main`,
-#      用 SSH deploy key (見 push step 的 GIT_SSH_COMMAND)
+#   3. 运行纯函数 draft publisher (CLI 入口见 scripts/publish-draft.ts)
+#   4. 用确定性的 diff-count gate 确认只有一个新增 Markdown 文件
+#   5. 创建 `publish/<DAG_RUN_ID>` 分支,提交 Markdown 并推送到远程
+#   6. 使用 `gh pr create` 创建指向 `main` 的 PR
 #
-# 不會跑父 worktree 的任何 script;這裡的 checkout 跟父的
-# `workspace/app` 完全獨立。
+# 不运行父 worktree 的任何 script;这里的 checkout 跟父的
+# `workspace/app` 完全独立。
 #
-# checkout 委派給 `clone-publish.sh`,因為 Dagu 2.10.7 的
-# `git.checkout` 用 go-git,對 fine-grained PAT 會壞。wrapper
-# 用跟 clone-fixture.sh 一樣的 x-access-token 技巧
-# (GIT_ASKPASS,不走 argv)。
+# checkout 委托给 `clone-publish.sh`,因为 Dagu 2.10.7 的
+# `git.checkout` 使用 go-git,对 fine-grained PAT 会失败。wrapper
+# 使用跟 clone-fixture.sh 一样的 x-access-token 技巧
+# (GIT_ASKPASS,不通过 argv)。
 
 params:
   research_run_id: ""
@@ -54,6 +49,7 @@ shell: ["bash", "-e"]
 env:
   - DATABASE_URL=${DATABASE_URL}
   - GIT_READ_TOKEN=${GIT_READ_TOKEN}
+  - GH_PR_TOKEN=${GH_PR_TOKEN}
 handler_on:
   failure:
     run: |
@@ -113,18 +109,9 @@ steps:
         --runtime-sha "$RUNTIME_SHA"
     env:
 
-  - id: site_lint_build
-    depends: [publish_draft]
-    working_dir: ./workspace/publish
-    run: |
-      set -euo pipefail
-      cd "${WORKDIR}/blog"
-      npm ci
-      npm run lint
-      npm run build
 
   - id: diff_gate_count
-    depends: [site_lint_build]
+    depends: [publish_draft]
     working_dir: ./workspace/publish
     run: |
       set -euo pipefail
@@ -147,34 +134,67 @@ steps:
       git -C "${WORKDIR}" diff --cached --name-only -- 'blog/src/content/blog/*.md' | tr -d '\n'
     output: DIFF_PATH
 
-  - id: commit
+  - id: push_and_mark
     depends: [diff_gate_publish_path]
     working_dir: ./workspace/publish
     run: |
       set -euo pipefail
-      git -C "${WORKDIR}" config user.email "alpha-lab-bot@users.noreply.github.com"
-      git -C "${WORKDIR}" config user.name "alpha-lab-bot"
-      git -C "${WORKDIR}" commit -m "feat(blog): publish stored research (${DAG_RUN_ID})"
+      : "${GH_PR_TOKEN:?GH_PR_TOKEN 必须配置在 /etc/alpha-lab/secrets/dagu.env}"
+      BRANCH="publish/${DAG_RUN_ID}"
 
-  - id: push_and_mark
-    depends: [commit]
-    working_dir: ./workspace/publish
-    run: |
-      set -euo pipefail
+      if git -C "${WORKDIR}" show-ref --verify --quiet "refs/heads/${BRANCH}"; then
+        git -C "${WORKDIR}" switch "${BRANCH}"
+      else
+        git -C "${WORKDIR}" switch -c "${BRANCH}"
+      fi
+
+      # 重试时保留已经完成的 commit,首次运行才提交暂存内容。
+      if git -C "${WORKDIR}" diff --cached --quiet; then
+        COMMIT_SUBJECT="$(git -C "${WORKDIR}" log -1 --format=%s)"
+        case "$COMMIT_SUBJECT" in
+          *"(${DAG_RUN_ID})") ;;
+          *)
+            echo "没有找到当前发布的已暂存 Markdown" >&2
+            exit 1
+            ;;
+        esac
+      else
+        git -C "${WORKDIR}" config user.email "alpha-lab-bot@users.noreply.github.com"
+        git -C "${WORKDIR}" config user.name "alpha-lab-bot"
+        git -C "${WORKDIR}" commit -m "feat(blog): publish ${DIFF_PATH} (${DAG_RUN_ID})"
+      fi
+
       export GIT_SSH_COMMAND="ssh -i /var/lib/alpha-lab/dagu/.ssh/id_ed25519 -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new"
-      # Persist pushed before touching the remote. If this fails, the remote
-      # is unchanged and the failure handler safely releases claimed.
+      # 先记录 pushed,推送失败时恢复 claimed,避免失败 handler 丢失状态。
       bun /opt/alpha-lab/automation/scripts/publish-next-research.ts --mark-pushed "${params.research_run_id}" --owner "${params.claim_owner}"
-      if ! git -C "${WORKDIR}" push "git@github.com:TaiwanTA/alpha-lab.git" HEAD:main; then
+      if ! git -C "${WORKDIR}" push "git@github.com:TaiwanTA/alpha-lab.git" "HEAD:${BRANCH}"; then
         bun /opt/alpha-lab/automation/scripts/publish-next-research.ts --revert-pushed "${params.research_run_id}" --owner "${params.claim_owner}"
         exit 128
       fi
-      echo pushed
+
+      # PR 创建失败时恢复状态,让失败 handler 释放 claim,下一轮可以重试。
+      PR_BODY='## 发布内容
+      - 研究 run: '"${params.research_run_id}"'
+      - Markdown: '"${DIFF_PATH}"'
+
+      请在合并前确认 Blog PR CI 已通过。'
+      if ! PR_URL="$(gh pr create \
+        --repo TaiwanTA/alpha-lab \
+        --base main \
+        --head "${BRANCH}" \
+        --title "发布文章: ${DIFF_PATH##*/}" \
+        --body "${PR_BODY}")"; then
+        bun /opt/alpha-lab/automation/scripts/publish-next-research.ts --revert-pushed "${params.research_run_id}" --owner "${params.claim_owner}"
+        exit 1
+      fi
+      printf '%s\n' "${PR_URL}"
     env:
       - DATABASE_URL=${env.DATABASE_URL}
+      - GH_PR_TOKEN=${env.GH_PR_TOKEN}
+      - GH_TOKEN=${env.GH_PR_TOKEN}
     retry_policy:
       limit: 1
       interval_sec: 30
-      exit_code: [128]
+      exit_code: [128, 1]
     stdout:
-      outputs: PUSHED_STATE
+      outputs: PR_URL
