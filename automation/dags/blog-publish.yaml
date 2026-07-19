@@ -141,8 +141,12 @@ steps:
       set -euo pipefail
       : "${GH_PR_TOKEN:?GH_PR_TOKEN 必须配置在 /etc/alpha-lab/secrets/dagu.env}"
       BRANCH="publish/${DAG_RUN_ID}"
+      export GIT_SSH_COMMAND="ssh -i /var/lib/alpha-lab/dagu/.ssh/id_ed25519 -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new"
+      REMOTE="git@github.com:TaiwanTA/alpha-lab.git"
+      git -C "${WORKDIR}" remote set-url origin "${REMOTE}"
 
-      if git -C "${WORKDIR}" show-ref --verify --quiet "refs/heads/${BRANCH}"; then
+      # 先拉取远程分支,避免重试时用 -c 创建同名本地分支失败。
+      if git -C "${WORKDIR}" fetch --depth 1 origin "${BRANCH}:${BRANCH}"; then
         git -C "${WORKDIR}" switch "${BRANCH}"
       else
         git -C "${WORKDIR}" switch -c "${BRANCH}"
@@ -164,9 +168,6 @@ steps:
         git -C "${WORKDIR}" commit -m "feat(blog): publish ${DIFF_PATH} (${DAG_RUN_ID})"
       fi
 
-      export GIT_SSH_COMMAND="ssh -i /var/lib/alpha-lab/dagu/.ssh/id_ed25519 -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new"
-      REMOTE="git@github.com:TaiwanTA/alpha-lab.git"
-      git -C "${WORKDIR}" remote set-url origin "${REMOTE}"
       # 先记录 pushed,推送失败时恢复 claimed,避免失败 handler 丢失状态。
       bun /opt/alpha-lab/automation/scripts/publish-next-research.ts --mark-pushed "${params.research_run_id}" --owner "${params.claim_owner}"
 
@@ -194,24 +195,24 @@ steps:
       fi
 
       # PR 创建失败时恢复状态,让失败 handler 释放 claim,下一轮可以重试。
-      PR_BODY='## 发布内容
-      - 研究 run: '"${params.research_run_id}"'
-      - Markdown: '"${DIFF_PATH}"'
-
-      请在合并前确认 Blog PR CI 已通过。'
-      PR_URL="$(gh pr list \
+      PR_BODY="$(printf '## 发布内容\n- 研究 run: %s\n- Markdown: %s\n\n请在合并前确认 Blog PR CI 已通过。' \
+        "${params.research_run_id}" "${DIFF_PATH}")"
+      if ! PR_URL="$(gh pr list \
         --repo TaiwanTA/alpha-lab \
         --head "${BRANCH}" \
         --state open \
         --json url \
-        --jq '.[0].url' 2>/dev/null || true)"
+        --jq '.[0].url' 2> >(cat >&2))"; then
+        bun /opt/alpha-lab/automation/scripts/publish-next-research.ts --revert-pushed "${params.research_run_id}" --owner "${params.claim_owner}"
+        exit 1
+      fi
       if [ -z "$PR_URL" ]; then
         if ! PR_URL="$(gh pr create \
           --repo TaiwanTA/alpha-lab \
           --base main \
           --head "${BRANCH}" \
           --title "发布文章: ${DIFF_PATH##*/}" \
-          --body "${PR_BODY}")"; then
+          --body "${PR_BODY}" 2> >(cat >&2))"; then
           bun /opt/alpha-lab/automation/scripts/publish-next-research.ts --revert-pushed "${params.research_run_id}" --owner "${params.claim_owner}"
           exit 1
         fi

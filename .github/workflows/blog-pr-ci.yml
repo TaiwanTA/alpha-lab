@@ -12,6 +12,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: blog-pr-ci-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
 jobs:
   blog-pr-ci:
     # 只验证 publish/* 分支,避免普通 PR 重复运行发布检查。
@@ -23,6 +27,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: 设置 Node.js 22
         uses: actions/setup-node@v4
