@@ -194,7 +194,7 @@ steps:
         push_branch
       fi
 
-      # PR 创建失败时恢复状态,让失败 handler 释放 claim,下一轮可以重试。
+      # PR API 暂时失败时保留 pushed,让 retry 复用已经推送的分支。
       PR_BODY="$(printf '## 发布内容\n- 研究 run: %s\n- Markdown: %s\n\n请在合并前确认 Blog PR CI 已通过。' \
         "${params.research_run_id}" "${DIFF_PATH}")"
       if ! PR_URL="$(gh pr list \
@@ -203,7 +203,7 @@ steps:
         --state open \
         --json url \
         --jq '.[0].url' 2> >(cat >&2))"; then
-        bun /opt/alpha-lab/automation/scripts/publish-next-research.ts --revert-pushed "${params.research_run_id}" --owner "${params.claim_owner}"
+        echo "无法查询现有 PR,保留 pushed 状态等待重试" >&2
         exit 1
       fi
       if [ -z "$PR_URL" ]; then
@@ -213,7 +213,7 @@ steps:
           --head "${BRANCH}" \
           --title "发布文章: ${DIFF_PATH##*/}" \
           --body "${PR_BODY}" 2> >(cat >&2))"; then
-          bun /opt/alpha-lab/automation/scripts/publish-next-research.ts --revert-pushed "${params.research_run_id}" --owner "${params.claim_owner}"
+          echo "创建 PR 失败,保留 pushed 状态等待重试" >&2
           exit 1
         fi
       fi
