@@ -165,11 +165,32 @@ steps:
       fi
 
       export GIT_SSH_COMMAND="ssh -i /var/lib/alpha-lab/dagu/.ssh/id_ed25519 -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new"
+      REMOTE="git@github.com:TaiwanTA/alpha-lab.git"
+      git -C "${WORKDIR}" remote set-url origin "${REMOTE}"
       # 先记录 pushed,推送失败时恢复 claimed,避免失败 handler 丢失状态。
       bun /opt/alpha-lab/automation/scripts/publish-next-research.ts --mark-pushed "${params.research_run_id}" --owner "${params.claim_owner}"
-      if ! git -C "${WORKDIR}" push "git@github.com:TaiwanTA/alpha-lab.git" "HEAD:${BRANCH}"; then
-        bun /opt/alpha-lab/automation/scripts/publish-next-research.ts --revert-pushed "${params.research_run_id}" --owner "${params.claim_owner}"
-        exit 128
+
+      push_branch() {
+        if [ "$#" -eq 0 ]; then
+          if ! git -C "${WORKDIR}" push "git@github.com:TaiwanTA/alpha-lab.git" "HEAD:${BRANCH}"; then
+            bun /opt/alpha-lab/automation/scripts/publish-next-research.ts --revert-pushed "${params.research_run_id}" --owner "${params.claim_owner}"
+            exit 128
+          fi
+        elif ! git -C "${WORKDIR}" push "$1" "git@github.com:TaiwanTA/alpha-lab.git" "HEAD:${BRANCH}"; then
+          bun /opt/alpha-lab/automation/scripts/publish-next-research.ts --revert-pushed "${params.research_run_id}" --owner "${params.claim_owner}"
+          exit 128
+        fi
+      }
+
+      # 重试时先读取远程分支;相同 commit 不重复推送,不同 commit 使用 lease 覆盖。
+      if git -C "${WORKDIR}" fetch --depth 1 origin "${BRANCH}"; then
+        REMOTE_SHA="$(git -C "${WORKDIR}" rev-parse "origin/${BRANCH}")"
+        LOCAL_SHA="$(git -C "${WORKDIR}" rev-parse HEAD)"
+        if [ "$REMOTE_SHA" != "$LOCAL_SHA" ]; then
+          push_branch "--force-with-lease=refs/heads/${BRANCH}:${REMOTE_SHA}"
+        fi
+      else
+        push_branch
       fi
 
       # PR 创建失败时恢复状态,让失败 handler 释放 claim,下一轮可以重试。
@@ -178,16 +199,25 @@ steps:
       - Markdown: '"${DIFF_PATH}"'
 
       请在合并前确认 Blog PR CI 已通过。'
-      if ! PR_URL="$(gh pr create \
+      PR_URL="$(gh pr list \
         --repo TaiwanTA/alpha-lab \
-        --base main \
         --head "${BRANCH}" \
-        --title "发布文章: ${DIFF_PATH##*/}" \
-        --body "${PR_BODY}")"; then
-        bun /opt/alpha-lab/automation/scripts/publish-next-research.ts --revert-pushed "${params.research_run_id}" --owner "${params.claim_owner}"
-        exit 1
+        --state open \
+        --json url \
+        --jq '.[0].url' 2>/dev/null || true)"
+      if [ -z "$PR_URL" ]; then
+        if ! PR_URL="$(gh pr create \
+          --repo TaiwanTA/alpha-lab \
+          --base main \
+          --head "${BRANCH}" \
+          --title "发布文章: ${DIFF_PATH##*/}" \
+          --body "${PR_BODY}")"; then
+          bun /opt/alpha-lab/automation/scripts/publish-next-research.ts --revert-pushed "${params.research_run_id}" --owner "${params.claim_owner}"
+          exit 1
+        fi
       fi
       printf '%s\n' "${PR_URL}"
+
     env:
       - DATABASE_URL=${env.DATABASE_URL}
       - GH_PR_TOKEN=${env.GH_PR_TOKEN}
