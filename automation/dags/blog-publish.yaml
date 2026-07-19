@@ -10,6 +10,8 @@
 #   - `preconditions: [...]` 用 shell condition 或 value 比對
 #     gate step;這就是 diff-count gate 的實作方式。
 #   - `working_dir:` (不是 `dir:`);`DAG_RUN_ID` (不是 `DAGU_RUN_ID`)。
+#   - `${DAG_RUN_WORK_DIR}` is the v2.10.7 built-in absolute `work/` path
+#     (verified with a success/failure exit-handler fixture).
 #
 # 子 DAG 接收兩個參數:
 #   - `research_run_id` (已接受且被 publication worker claim 的 UUID)
@@ -64,6 +66,15 @@ handler_on:
       fi
     env:
       - DATABASE_URL=${env.DATABASE_URL}
+  exit:
+    run: |
+      set -euo pipefail
+      if [ -n "${DAG_RUN_WORK_DIR:-}" ] && [ -d "${DAG_RUN_WORK_DIR}/workspace/publish/blog" ]; then
+        rm -rf -- \
+          "${DAG_RUN_WORK_DIR}/workspace/publish/blog/node_modules" \
+          "${DAG_RUN_WORK_DIR}/workspace/publish/blog/dist" \
+          "${DAG_RUN_WORK_DIR}/workspace/publish/blog/.astro"
+      fi
 
 steps:
   - id: checkout

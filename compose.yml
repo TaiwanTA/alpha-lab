@@ -10,6 +10,11 @@ services:
     image: ghcr.io/taiwanta/alpha-lab-dagu:${ALPHA_LAB_IMAGE_TAG:-latest}
     container_name: alpha-lab-dagu
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     command: ["dagu", "start-all"]
     ports:
       - "127.0.0.1:8080:8080"
@@ -40,6 +45,11 @@ services:
     image: ghcr.io/taiwanta/alpha-lab-dags-sync:${ALPHA_LAB_IMAGE_TAG:-latest}
     container_name: alpha-lab-dags-sync
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     entrypoint: ["/usr/local/bin/dags-sync.sh"]
     environment:
       DAG_SYNC_REPO: git@github.com:TaiwanTA/alpha-lab.git
@@ -63,6 +73,11 @@ services:
     image: pgvector/pgvector:pg${HINDSIGHT_DB_VERSION:-18}
     container_name: hindsight-db
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     env_file:
       - /etc/alpha-lab/secrets/hindsight-db.env
     volumes:
@@ -80,6 +95,11 @@ services:
     image: ghcr.io/vectorize-io/hindsight:${HINDSIGHT_VERSION:-latest-slim}
     container_name: hindsight
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     entrypoint:
       - /bin/sh
       - -c
@@ -113,6 +133,11 @@ services:
     image: postgres:16-alpine
     container_name: alpha-lab-postgres
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     env_file:
       - /etc/alpha-lab/secrets/research-postgres.env
     volumes:
@@ -131,6 +156,11 @@ services:
     container_name: mastra-app
     user: "1001:1001"
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     ports:
       - "127.0.0.1:4111:4111"
     env_file:
