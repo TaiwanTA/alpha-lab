@@ -61,6 +61,8 @@ jobs:
             sudo systemctl daemon-reload
             sudo test -f /etc/alpha-lab/stack.env || { echo "ERROR: missing /etc/alpha-lab/stack.env"; exit 1; }
             sudo systemctl enable --now alpha-lab-dagu-cleanup.timer
+            sudo systemctl is-enabled --quiet alpha-lab-dagu-cleanup.timer || { echo "ERROR: cleanup timer is not enabled"; exit 1; }
+            sudo systemctl is-active --quiet alpha-lab-dagu-cleanup.timer || { echo "ERROR: cleanup timer is not active"; exit 1; }
             sudo systemctl restart systemd-journald
             compose_config=$(sudo /usr/bin/docker compose --env-file /etc/alpha-lab/stack.env \
               -f /opt/alpha-lab/compose.yml config)
@@ -119,8 +121,8 @@ jobs:
               sleep 2
             done
             sudo docker ps --format "table {{.Names}}\t{{.Status}}"
-            sudo systemctl is-enabled alpha-lab-dagu-cleanup.timer
-            sudo systemctl is-active alpha-lab-dagu-cleanup.timer
+            sudo systemctl is-enabled --quiet alpha-lab-dagu-cleanup.timer || { echo "ERROR: cleanup timer is not enabled"; exit 1; }
+            sudo systemctl is-active --quiet alpha-lab-dagu-cleanup.timer || { echo "ERROR: cleanup timer is not active"; exit 1; }
             if [ "${services_ready}" -ne 1 ]; then
               echo "ERROR: compose services not ready after 120 retries"
               exit 1

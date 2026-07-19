@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Remove build workspaces from completed Dagu runs after the retention window.
-# Run metadata (a_*/status.jsonl), artifacts, and Dagu logs are preserved.
+# Run metadata (status.jsonl), artifacts, and Dagu logs are preserved.
 set -euo pipefail
 
 readonly RUNS_ROOT=/var/lib/alpha-lab/dagu/data/dag-runs
@@ -26,7 +26,13 @@ while IFS= read -r -d '' work_dir; do
   [[ -d "$work_dir" && ! -L "$work_dir" ]] || continue
 
   run_dir=${work_dir%/work}
-  status_files=("$run_dir"/a_*/status.jsonl)
+  status_files=()
+  while IFS= read -r -d '' status_file; do
+    status_files+=("$status_file")
+  done < <(
+    find "$run_dir" -xdev -ignore_readdir_race \
+      -mindepth 2 -maxdepth 2 -type f -name status.jsonl -print0
+  )
   status_count=0
   active=0
 
