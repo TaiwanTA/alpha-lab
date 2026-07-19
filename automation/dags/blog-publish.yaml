@@ -64,6 +64,15 @@ handler_on:
       fi
     env:
       - DATABASE_URL=${env.DATABASE_URL}
+  exit:
+    run: |
+      set -euo pipefail
+      if [ -n "${WORKDIR:-}" ] && [ -d "${WORKDIR}/blog" ]; then
+        rm -rf -- \
+          "${WORKDIR}/blog/node_modules" \
+          "${WORKDIR}/blog/dist" \
+          "${WORKDIR}/blog/.astro"
+      fi
 
 steps:
   - id: checkout

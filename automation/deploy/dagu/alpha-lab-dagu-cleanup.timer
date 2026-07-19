@@ -1,0 +1,10 @@
+[Unit]
+Description=Daily cleanup of completed Dagu run workspaces
+
+[Timer]
+OnCalendar=*-*-* 04:00:00
+Persistent=true
+Unit=alpha-lab-dagu-cleanup.service
+
+[Install]
+WantedBy=timers.target

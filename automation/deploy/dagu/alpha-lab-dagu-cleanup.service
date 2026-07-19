@@ -1,0 +1,8 @@
+[Unit]
+Description=Remove completed Dagu run workspaces past retention
+Documentation=https://github.com/TaiwanTA/alpha-lab
+RequiresMountsFor=/var/lib/alpha-lab/dagu/data
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/cleanup-dagu-workdir.sh
