@@ -21,7 +21,7 @@ skipped_active=0
 skipped_unknown=0
 
 # The expected layout is:
-# <workflow>/dag-runs/<year>/<month>/<day>/<run-id>/work
+# $RUNS_ROOT/<workflow>/dag-runs/<year>/<month>/<day>/<run-id>/work
 while IFS= read -r -d '' work_dir; do
   [[ -d "$work_dir" && ! -L "$work_dir" ]] || continue
 
@@ -40,6 +40,8 @@ while IFS= read -r -d '' work_dir; do
       jq -r 'select(type == "object" and (.status? != null)) | .status' \
         "$status_file" 2>/dev/null | tail -n 1 || true
     )"
+    # Dagu 2.10.7 terminal root statuses include failed (2) and succeeded (4);
+    # all other unknown or missing values remain protected by the default case.
     case "$final_status" in
       2|3|4|5) ;;
       *) active=1 ;;

@@ -67,11 +67,11 @@ handler_on:
   exit:
     run: |
       set -euo pipefail
-      if [ -n "${WORKDIR:-}" ] && [ -d "${WORKDIR}/blog" ]; then
+      if [ -n "${DAG_RUN_WORK_DIR:-}" ] && [ -d "${DAG_RUN_WORK_DIR}/workspace/publish/blog" ]; then
         rm -rf -- \
-          "${WORKDIR}/blog/node_modules" \
-          "${WORKDIR}/blog/dist" \
-          "${WORKDIR}/blog/.astro"
+          "${DAG_RUN_WORK_DIR}/workspace/publish/blog/node_modules" \
+          "${DAG_RUN_WORK_DIR}/workspace/publish/blog/dist" \
+          "${DAG_RUN_WORK_DIR}/workspace/publish/blog/.astro"
       fi
 
 steps:
