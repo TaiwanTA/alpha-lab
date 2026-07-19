@@ -31,7 +31,7 @@ while IFS= read -r -d '' work_dir; do
     status_files+=("$status_file")
   done < <(
     find "$run_dir" -xdev -ignore_readdir_race \
-      -mindepth 2 -maxdepth 2 -type f -name status.jsonl -print0
+      -type f -name status.jsonl -print0
   )
   status_count=0
   active=0
