@@ -26,17 +26,12 @@ while IFS= read -r -d '' work_dir; do
   [[ -d "$work_dir" && ! -L "$work_dir" ]] || continue
 
   run_dir=${work_dir%/work}
-  status_files=()
-  while IFS= read -r -d '' status_file; do
-    status_files+=("$status_file")
-  done < <(
-    find "$run_dir" -xdev -ignore_readdir_race \
-      -type f -name status.jsonl -print0
-  )
   status_count=0
   active=0
 
-  for status_file in "${status_files[@]}"; do
+  # Attempt directories are direct children of the run; never recurse into work/.
+  while IFS= read -r -d '' attempt_dir; do
+    status_file="$attempt_dir/status.jsonl"
     [[ -f "$status_file" ]] || continue
     status_count=$((status_count + 1))
 
@@ -52,7 +47,10 @@ while IFS= read -r -d '' work_dir; do
       2|3|4|5) ;;
       *) active=1 ;;
     esac
-  done
+  done < <(
+    find "$run_dir" -xdev -ignore_readdir_race \
+      -mindepth 1 -maxdepth 1 -type d -print0
+  )
 
   if (( status_count == 0 )); then
     skipped_unknown=$((skipped_unknown + 1))
