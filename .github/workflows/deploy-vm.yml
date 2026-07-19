@@ -6,10 +6,6 @@ on:
     paths:
       - compose.yml
       - automation/deploy/dagu/alpha-lab-dagu.service
-      - automation/deploy/dagu/cleanup-dagu-workdir.sh
-      - automation/deploy/dagu/alpha-lab-dagu-cleanup.service
-      - automation/deploy/dagu/alpha-lab-dagu-cleanup.timer
-      - automation/deploy/dagu/journald.conf
   workflow_dispatch:
 
 permissions:
@@ -32,16 +28,12 @@ jobs:
 
       - uses: google-github-actions/setup-gcloud@v2
 
-      # scp Compose, systemd units, cleanup script, and journald policy to VM
+      # scp compose.yml + systemd unit 到 VM
       - name: Copy files to VM
         run: |
           gcloud compute scp --zone "asia-east1-b" \
             compose.yml \
             automation/deploy/dagu/alpha-lab-dagu.service \
-            automation/deploy/dagu/cleanup-dagu-workdir.sh \
-            automation/deploy/dagu/alpha-lab-dagu-cleanup.service \
-            automation/deploy/dagu/alpha-lab-dagu-cleanup.timer \
-            automation/deploy/dagu/journald.conf \
             alpha-lab:/tmp/ --project "g6online-352310"
 
       # install + pull + reload
@@ -51,19 +43,9 @@ jobs:
             set -e
             sudo install -m 0644 /tmp/compose.yml /opt/alpha-lab/compose.yml
             sudo install -m 0644 /tmp/alpha-lab-dagu.service /etc/systemd/system/alpha-lab-dagu.service
-            sudo install -m 0755 /tmp/cleanup-dagu-workdir.sh /usr/local/sbin/cleanup-dagu-workdir.sh
-            sudo install -m 0644 /tmp/alpha-lab-dagu-cleanup.service /etc/systemd/system/alpha-lab-dagu-cleanup.service
-            sudo install -m 0644 /tmp/alpha-lab-dagu-cleanup.timer /etc/systemd/system/alpha-lab-dagu-cleanup.timer
-            sudo install -m 0644 /tmp/journald.conf /etc/systemd/journald.conf
-            sudo rm -f /tmp/compose.yml /tmp/alpha-lab-dagu.service \
-              /tmp/cleanup-dagu-workdir.sh /tmp/alpha-lab-dagu-cleanup.service \
-              /tmp/alpha-lab-dagu-cleanup.timer /tmp/journald.conf
+            sudo rm -f /tmp/compose.yml /tmp/alpha-lab-dagu.service
             sudo systemctl daemon-reload
             sudo test -f /etc/alpha-lab/stack.env || { echo "ERROR: missing /etc/alpha-lab/stack.env"; exit 1; }
-            sudo systemctl enable --now alpha-lab-dagu-cleanup.timer
-            sudo systemctl is-enabled --quiet alpha-lab-dagu-cleanup.timer || { echo "ERROR: cleanup timer is not enabled"; exit 1; }
-            sudo systemctl is-active --quiet alpha-lab-dagu-cleanup.timer || { echo "ERROR: cleanup timer is not active"; exit 1; }
-            sudo systemctl restart systemd-journald
             compose_config=$(sudo /usr/bin/docker compose --env-file /etc/alpha-lab/stack.env \
               -f /opt/alpha-lab/compose.yml config)
             ghcr_services=""
@@ -121,8 +103,6 @@ jobs:
               sleep 2
             done
             sudo docker ps --format "table {{.Names}}\t{{.Status}}"
-            sudo systemctl is-enabled --quiet alpha-lab-dagu-cleanup.timer || { echo "ERROR: cleanup timer is not enabled"; exit 1; }
-            sudo systemctl is-active --quiet alpha-lab-dagu-cleanup.timer || { echo "ERROR: cleanup timer is not active"; exit 1; }
             if [ "${services_ready}" -ne 1 ]; then
               echo "ERROR: compose services not ready after 120 retries"
               exit 1
