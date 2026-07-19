@@ -40,8 +40,8 @@ while IFS= read -r -d '' work_dir; do
       jq -r 'select(type == "object" and (.status? != null)) | .status' \
         "$status_file" 2>/dev/null | tail -n 1 || true
     )"
-    # Dagu 2.10.7 terminal root statuses include failed (2) and succeeded (4);
-    # all other unknown or missing values remain protected by the default case.
+    # Dagu 2.10.7 terminal root statuses: 2=failed, 4=succeeded; 3 and 5 are
+    # other non-running terminal outcomes. Unknown or missing values stay protected.
     case "$final_status" in
       2|3|4|5) ;;
       *) active=1 ;;
