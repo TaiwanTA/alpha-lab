@@ -49,6 +49,21 @@ services:
   hindsight-db:
     <<: *default-service
     image: pgvector/pgvector:pg${HINDSIGHT_DB_VERSION:-18}
+    # POSTGRES_USER/DB/PGDATA 不敏感,寫死;POSTGRES_PASSWORD 走 secrets.env 的
+    # HINDSIGHT_DB_POSTGRES_PASSWORD interpolation (systemd unit 第二個 --env-file
+    # /etc/alpha-lab/secrets.env 注入;必須跟 stack.env 的 HINDSIGHT_API_DATABASE_URL
+    # 密碼一致)。
+    # 兩個 postgres 用不同 user: alpha-lab-postgres 從 env_file (secrets.env)
+    # 拿 POSTGRES_USER=alpha,hindsight-db 這裡硬寫 hindsight 因為 volume
+    # 已用 hindsight user 初始化 (PR #2/#3 設計共用,既有 VM 資料分離)。
+    # 注意:這 4 個 key 刻意覆寫 env_file (compose service-level environment 優先
+    # 於 env_file)。其他 env var 一律從 *default-service env_file (secrets.env) 來,
+    # 在這裡加 key 會旁路掉 secrets.env — 除非有明確理由,不要擴充這個 block。
+    environment:
+      POSTGRES_USER: hindsight
+      POSTGRES_DB: hindsight
+      POSTGRES_PASSWORD: ${HINDSIGHT_DB_POSTGRES_PASSWORD:?set hindsight-db postgres password in secrets.env}
+      PGDATA: /var/lib/postgresql/${HINDSIGHT_DB_VERSION:-18}/docker
     volumes:
       - hindsight_pgdata:/var/lib/postgresql/${HINDSIGHT_DB_VERSION:-18}/docker
     healthcheck:

@@ -10,9 +10,9 @@ ConditionPathExists=/opt/alpha-lab/compose.yml
 Type=oneshot
 RemainAfterExit=true
 WorkingDirectory=/opt/alpha-lab
-ExecStart=/usr/bin/docker compose --env-file /etc/alpha-lab/stack.env -f /opt/alpha-lab/compose.yml up -d --remove-orphans
-ExecStop=/usr/bin/docker compose --env-file /etc/alpha-lab/stack.env -f /opt/alpha-lab/compose.yml down
-ExecReload=/usr/bin/docker compose --env-file /etc/alpha-lab/stack.env -f /opt/alpha-lab/compose.yml up -d --force-recreate --remove-orphans
+ExecStart=/usr/bin/docker compose --env-file /etc/alpha-lab/stack.env --env-file /etc/alpha-lab/secrets.env -f /opt/alpha-lab/compose.yml up -d --remove-orphans
+ExecStop=/usr/bin/docker compose --env-file /etc/alpha-lab/stack.env --env-file /etc/alpha-lab/secrets.env -f /opt/alpha-lab/compose.yml down
+ExecReload=/usr/bin/docker compose --env-file /etc/alpha-lab/stack.env --env-file /etc/alpha-lab/secrets.env -f /opt/alpha-lab/compose.yml up -d --force-recreate --remove-orphans
 Restart=on-failure
 RestartSec=5
 

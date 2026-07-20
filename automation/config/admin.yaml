@@ -33,7 +33,13 @@
 #
 # 將來啟用 git_sync 需要:升 dagu 修 interval timer bug.
 
-host: "127.0.0.1"
+# host 0.0.0.0:讓 compose `127.0.0.1:8080:8080` port forward 能連進 container。
+# 暴露範圍由 compose port mapping 限制在 host loopback,不靠 dagu 綁定。
+# 舊版 (PR #63 前) dagu 讀 DAGU_HOME/base.yaml (無 host 設定,預設 0.0.0.0);
+# PR #63 改 -c /etc/dagu/admin.yaml 後若 host=127.0.0.1 會 break port forward。
+# ⚠ host 必須保持 0.0.0.0;安全靠 compose `127.0.0.1:8080:8080` port mapping,
+# 不要把 port mapping 改成 `8080:8080` 或 `0.0.0.0:8080:8080` (會暴露到公網)。
+host: "0.0.0.0"
 port: 8080
 paths:
   # DAGs bake 進 image（dags-sync sidecar 退役，PR 2）。
