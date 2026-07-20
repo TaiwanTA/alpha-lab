@@ -135,23 +135,31 @@ USER 999:982
 
 ## compose.yml
 
+充分利用 YAML anchors（`x-defaults`）把 `restart` / `logging` / `env_file` / `networks` 抽到共用 block，merge 進每個 service。省 `container_name`（用 compose 預設 `<project>-<service>-1`，service name 就是容器 DNS 名稱）、省 `name:`（目錄名即 project name）。
+
 ```yaml
-name: alpha-lab
+# alpha-lab canonical Compose：5 服務 + 單 network。
+# 所有秘密走 /etc/alpha-lab/secrets.env 一檔（PR 2 簡化）。
+# image tag 透過 ${ALPHA_LAB_IMAGE_TAG:-latest} interpolation，下方 services 直接複用。
+
+x-defaults: &defaults
+  restart: unless-stopped
+  logging:
+    driver: json-file
+    options: { max-size: "10m", max-file: "3" }
+  env_file:
+    - /etc/alpha-lab/secrets.env
+  networks:
+    - alpha_lab_net
 
 services:
   alpha-lab-dagu:
+    <<: *defaults
     image: ghcr.io/taiwanta/alpha-lab-dagu:${ALPHA_LAB_IMAGE_TAG:-latest}
-    container_name: alpha-lab-dagu
-    user: "999:982"                    # 直設，取代 PUID/PGID 動態降權
-    restart: unless-stopped
-    logging:
-      driver: json-file
-      options: { max-size: "10m", max-file: "3" }
+    user: "999:982"
     command: ["dagu", "start-all"]
     ports:
       - "127.0.0.1:8080:8080"
-    env_file:
-      - /etc/alpha-lab/secrets.env    # 6 檔 → 1 檔
     environment:
       DAGU_HOME: /var/lib/alpha-lab/dagu
       HINDSIGHT_BASE_URL: http://hindsight:8888
@@ -160,36 +168,100 @@ services:
     depends_on:
       hindsight: { condition: service_healthy }
       alpha-lab-postgres: { condition: service_healthy }
-    networks: [alpha_lab_net]
 
   # alpha-lab-dags-sync service 整條刪除（PR 2）
 
-  hindsight-db:                       # 設定不變，只改 env_file 路徑
-    ...
-    env_file:
-      - /etc/alpha-lab/secrets.env
+  hindsight-db:
+    <<: *defaults
+    image: pgvector/pgvector:pg${HINDSIGHT_DB_VERSION:-18}
+    volumes:
+      - hindsight_pgdata:/var/lib/postgresql/${HINDSIGHT_DB_VERSION:-18}/docker
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
 
   hindsight:
-    ...
-    env_file:
-      - /etc/alpha-lab/secrets.env
+    <<: *defaults
+    image: ghcr.io/vectorize-io/hindsight:${HINDSIGHT_VERSION:-latest-slim}
+    entrypoint:
+      - /bin/sh
+      - -c
+      - >-
+        uv pip install --python /app/api/.venv/bin/python --quiet
+        --link-mode=copy flashrank && exec /app/start-all.sh
+    environment:
+      HINDSIGHT_API_DATABASE_URL: ${HINDSIGHT_API_DATABASE_URL:?set URL with hindsight-db host}
+      HINDSIGHT_API_VECTOR_EXTENSION: pgvector
+    ports:
+      - "127.0.0.1:8888:8888"
+    depends_on:
+      hindsight-db: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8888/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 180s
 
   alpha-lab-postgres:
-    ...
-    env_file:
-      - /etc/alpha-lab/secrets.env
+    <<: *defaults
+    image: postgres:16-alpine
+    volumes:
+      - research_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
 
   mastra-app:
-    ...
-    env_file:
-      - /etc/alpha-lab/secrets.env
+    <<: *defaults
+    image: ${MASTRA_IMAGE:?set immutable mastra image or existing VM tag}
+    user: "1001:1001"
+    ports:
+      - "127.0.0.1:4111:4111"
+    environment:
+      PORT: "4111"
+      HOST: 0.0.0.0
+      LOG_LEVEL: info
+      DATABASE_URL: file:/data/mastra.db
+    volumes:
+      - mastra_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:4111/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    security_opt:
+      - no-new-privileges:true
 
 networks:
-  alpha_lab_net: ...
-volumes: ...
-# secrets: 區塊刪除
-# stack.env（image tag interpolation）改寫進 secrets.env 或 compose.yml 直設
+  alpha_lab_net:
+    name: alpha-lab-net
+
+volumes:
+  hindsight_pgdata:
+    name: alpha_lab_hindsight_pgdata
+  research_pgdata:
+    external: true
+    name: research_pgdata
+  mastra_data:
+    external: true
+    name: mastra-data
 ```
+
+### 精簡幅度
+
+原本 6 個服務各寫 `restart` / `logging` 兩行（3 行 block）+ `networks` 1 行 + `env_file` 3 行（分服務 6 檔）= 6 × 6 = 36 行重複配置。用 anchor 後：
+- 共用 block 一次定義 `restart` / `logging` / `env_file` / `networks`
+- 每個 service 只要寫自己獨有的 `image` + `volumes` + `healthcheck` 等，merge 進共用 block
+- `name:` 取消（目錄名即 compose project name）
+- `container_name:` 取消（compose 預設 `<project>-<service>-1` 就是容器 DNS 名）
+- 反而是 Hindsight service 的舊 alias `hindsight-hindsight-1` 退場（搬遷期間的相容 alias 已無 caller）
 
 ### 簡化清單
 
