@@ -65,7 +65,7 @@ jobs:
             # set -o pipefail 保護 config --services 失敗情境。顯式空檢查避免
             # pull ${PULL_SERVICES} 退化為 pull 全部 (kilo review PR #66)。
             if [ -z "${PULL_SERVICES}" ]; then
-              echo "ERROR: PULL_SERVICES empty after excluding mastra-app"; exit 1
+              echo "ERROR: PULL_SERVICES empty after excluding mastra-app" >&2; exit 1
             fi
             sudo /usr/bin/docker compose --env-file /etc/alpha-lab/stack.env \
               --env-file /etc/alpha-lab/secrets.env \
