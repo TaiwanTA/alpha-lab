@@ -12,3 +12,6 @@ export {
   type ReadEventDetails,
   type ResearchEventPayload,
 } from "./toolkit.ts";
+
+export type { HindsightClient } from "../lib/hindsight.ts";
+export type { TwelveDataClient } from "../lib/twelve-data.ts";
