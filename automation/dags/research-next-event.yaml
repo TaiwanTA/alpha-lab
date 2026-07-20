@@ -49,8 +49,7 @@ steps:
     working_dir: /opt/alpha-lab/automation
     run: |
       set -euo pipefail
-      export PATH="$HOME/.bun/bin:$PATH"
-      bun run scripts/research-next-event.ts
+      bun run commands/research-next-event.ts
     env:
       - DATABASE_URL=${env.DATABASE_URL}
       - MINIMAX_API_KEY=${env.MINIMAX_API_KEY}

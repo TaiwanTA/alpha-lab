@@ -34,9 +34,9 @@ import {
   parseInvestorSources,
   toPostUrl,
   type InvestorSource,
-} from "./phase4/x-client.ts";
+} from "../lib/x-client.ts";
 
-import { db, closeDb } from "./phase4/db.ts";
+import { db, closeDb } from "../lib/db.ts";
 
 // ---------------------------------------------------------------------------
 // Configuration.

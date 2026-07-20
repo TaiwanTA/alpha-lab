@@ -1,10 +1,10 @@
 #!/usr/bin/env bun
 
-import { LedgerDb } from "./phase4/db.ts";
+import { LedgerDb } from "../lib/db.ts";
 import {
   fetchAdjustedCloseSessions,
   loadTwelveDataConfig,
-} from "./phase4/twelve-data.ts";
+} from "../lib/twelve-data.ts";
 import {
   PRICE_SOURCE,
   settleOpenBets,

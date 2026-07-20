@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 
 import { writeFile } from "node:fs/promises";
-import { LedgerDb } from "./phase4/db.ts";
+import { LedgerDb } from "../lib/db.ts";
 
 function parseArgs(argv: string[]): { researchRunId: string; claimOwner: string; output: string } {
   const runIndex = argv.indexOf("--research-run-id");

@@ -10,8 +10,8 @@ import {
   settleOpenBets,
   type OpeningDependencies,
   type SettlementDependencies,
-} from "../scripts/open-next-paper-bet.ts";
-import type { PaperBetRow } from "../scripts/phase4/db.ts";
+} from "../commands/open-next-paper-bet.ts";
+import type { PaperBetRow } from "../lib/db.ts";
 
 const HERE = dirname(new URL(import.meta.url).pathname);
 const MIGRATION = readFileSync(
@@ -119,8 +119,8 @@ describe("paper-bet opening", () => {
   });
 
   test("opening claim is owner-scoped, lease-recoverable, and consumed with the bet", () => {
-    const worker = readFileSync(join(HERE, "..", "scripts", "open-next-paper-bet.ts"), "utf8");
-    const dbSource = readFileSync(join(HERE, "..", "scripts", "phase4", "db.ts"), "utf8");
+    const worker = readFileSync(join(HERE, "..", "commands", "open-next-paper-bet.ts"), "utf8");
+    const dbSource = readFileSync(join(HERE, "..", "lib", "db.ts"), "utf8");
     expect(MIGRATION).toMatch(/paper_bet_opening_claims[\s\S]*?claim_owner text NOT NULL/);
     expect(worker).toMatch(/claimed_at < now\(\) - interval '30 minutes'/);
     expect(worker).toMatch(/WHERE research_run_id = \$\{id\} AND claim_owner = \$\{owner\}/);

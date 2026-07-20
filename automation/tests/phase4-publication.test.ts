@@ -3,9 +3,9 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
 const HERE = dirname(new URL(import.meta.url).pathname);
-const SCRIPT = readFileSync(join(HERE, "..", "scripts", "publish-next-research.ts"), "utf8");
-const MATERIALIZER = readFileSync(join(HERE, "..", "scripts", "materialize-research-candidate.ts"), "utf8");
-const DB = readFileSync(join(HERE, "..", "scripts", "phase4", "db.ts"), "utf8");
+const SCRIPT = readFileSync(join(HERE, "..", "commands", "publish-next-research.ts"), "utf8");
+const MATERIALIZER = readFileSync(join(HERE, "..", "commands", "materialize-research-candidate.ts"), "utf8");
+const DB = readFileSync(join(HERE, "..", "lib", "db.ts"), "utf8");
 const MIGRATION = readFileSync(join(HERE, "..", "migrations", "001_phase4_event_ledger.sql"), "utf8");
 const PUBLISH_DAG = readFileSync(join(HERE, "..", "dags", "publish-next-research.yaml"), "utf8");
 const BLOG_DAG = readFileSync(join(HERE, "..", "dags", "blog-publish.yaml"), "utf8");

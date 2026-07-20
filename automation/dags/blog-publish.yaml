@@ -18,7 +18,7 @@
 #   1. 重新 checkout `main` 到一个新的 worktree
 #      (绝不是产出 candidate 的那个)
 #   2. 把 candidate 放到新 worktree
-#   3. 运行纯函数 draft publisher (CLI 入口见 scripts/publish-draft.ts)
+#   3. 运行纯函数 draft publisher (CLI 入口见 commands/publish-draft.ts)
 #   4. 用确定性的 diff-count gate 确认只有一个新增 Markdown 文件
 #   5. 创建 `publish/<DAG_RUN_ID>` 分支,提交 Markdown 并推送到远程
 #   6. 使用 `gh pr create` 创建指向 `main` 的 PR
@@ -54,11 +54,10 @@ handler_on:
   failure:
     run: |
       if [ -n "${params.research_run_id}" ]; then
-        export PATH="$HOME/.bun/bin:$PATH"
         # mark_pushed writes this DB-backed state after a successful push.
         # releasePublicationClaim only deletes status='claimed', so a pushed
         # row survives handler execution and is finalized by the next parent run.
-        bun run /opt/alpha-lab/automation/scripts/publish-next-research.ts --release-claim "${params.research_run_id}" --owner "${params.claim_owner}"
+        bun run /opt/alpha-lab/automation/commands/publish-next-research.ts --release-claim "${params.research_run_id}" --owner "${params.claim_owner}"
       fi
     env:
       - DATABASE_URL=${env.DATABASE_URL}
@@ -89,7 +88,7 @@ steps:
     working_dir: ./workspace/publish
     run: |
       set -euo pipefail
-      bun /opt/alpha-lab/automation/scripts/materialize-research-candidate.ts \
+      bun /opt/alpha-lab/automation/commands/materialize-research-candidate.ts \
         --research-run-id "${params.research_run_id}" \
         --owner "${params.claim_owner}" \
         --output "${WORKDIR}/candidate.md"
@@ -103,7 +102,7 @@ steps:
     run: |
       set -euo pipefail
       RUNTIME_SHA="$(git -C "${WORKDIR}" rev-parse HEAD)"
-      bun /opt/alpha-lab/automation/scripts/publish-draft.ts \
+      bun /opt/alpha-lab/automation/commands/publish-draft.ts \
         --candidate "${WORKDIR}/candidate.md" \
         --blog-dir "${WORKDIR}/blog" \
         --runtime-sha "$RUNTIME_SHA"
@@ -169,16 +168,16 @@ steps:
       fi
 
       # 先记录 pushed,推送失败时恢复 claimed,避免失败 handler 丢失状态。
-      bun /opt/alpha-lab/automation/scripts/publish-next-research.ts --mark-pushed "${params.research_run_id}" --owner "${params.claim_owner}"
+      bun /opt/alpha-lab/automation/commands/publish-next-research.ts --mark-pushed "${params.research_run_id}" --owner "${params.claim_owner}"
 
       push_branch() {
         if [ "$#" -eq 0 ]; then
           if ! git -C "${WORKDIR}" push "git@github.com:TaiwanTA/alpha-lab.git" "HEAD:${BRANCH}"; then
-            bun /opt/alpha-lab/automation/scripts/publish-next-research.ts --revert-pushed "${params.research_run_id}" --owner "${params.claim_owner}"
+            bun /opt/alpha-lab/automation/commands/publish-next-research.ts --revert-pushed "${params.research_run_id}" --owner "${params.claim_owner}"
             exit 128
           fi
         elif ! git -C "${WORKDIR}" push "$1" "git@github.com:TaiwanTA/alpha-lab.git" "HEAD:${BRANCH}"; then
-          bun /opt/alpha-lab/automation/scripts/publish-next-research.ts --revert-pushed "${params.research_run_id}" --owner "${params.claim_owner}"
+          bun /opt/alpha-lab/automation/commands/publish-next-research.ts --revert-pushed "${params.research_run_id}" --owner "${params.claim_owner}"
           exit 128
         fi
       }

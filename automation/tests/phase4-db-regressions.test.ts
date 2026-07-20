@@ -12,14 +12,14 @@ import {
   mapPaperBetRow,
   mapResearchRunRow,
   mapSignalEventRow,
-} from "../scripts/phase4/db.ts";
+} from "../lib/db.ts";
 
 // Resolve a path anchored to THIS test file's directory so the source
 // string assertions don't depend on process.cwd() (Bun tests can be
 // launched from anywhere).
 const HERE = dirname(new URL(import.meta.url).pathname);
-const DB_SOURCE = join(HERE, "..", "scripts", "phase4", "db.ts");
-const MIGRATE_SOURCE = join(HERE, "..", "scripts", "migrate-phase4.ts");
+const DB_SOURCE = join(HERE, "..", "lib", "db.ts");
+const MIGRATE_SOURCE = join(HERE, "..", "commands", "migrate-phase4.ts");
 const MIGRATION_SQL = join(
   HERE,
   "..",
@@ -329,7 +329,7 @@ describe("research_runs accepted-derived processing blocks reactivation", () => 
     // The CLI's release path is the only call site; this confirms
     // it tracks the rename and the broadened predicate.
     const cliSource = readFileSync(
-      join(HERE, "..", "scripts", "research-next-event.ts"),
+      join(HERE, "..", "commands", "research-next-event.ts"),
       "utf8",
     );
     expect(cliSource).toMatch(/hasActiveRunForEvent/);
@@ -367,7 +367,7 @@ describe("migrate-phase4 never calls process.exit before closeDb", () => {
       // but main isn't exported, so we verify by reading the
       // module's exported behavior contract: a missing DATABASE_URL
       // applied through the exported applyMigration() throws too.
-      const { applyMigration } = await import("../scripts/phase4/db.ts");
+      const { applyMigration } = await import("../lib/db.ts");
       await expect(applyMigration()).rejects.toThrow(/DATABASE_URL/);
     } finally {
       if (saved !== undefined) process.env.DATABASE_URL = saved;

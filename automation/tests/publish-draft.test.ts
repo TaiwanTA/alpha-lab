@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import matter from "gray-matter";
 
-import { publishDraft } from "../scripts/publish-draft.ts";
+import { publishDraft } from "../commands/publish-draft.ts";
 
 // Each test owns its own scratch directory and its own blogDir with the
 // required src/content/blog subtree, so no state leaks between tests.

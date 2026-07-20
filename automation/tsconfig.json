@@ -9,5 +9,5 @@
     "allowImportingTsExtensions": true,
     "types": ["bun-types"]
   },
-  "include": ["scripts/**/*.ts", "tests/**/*.ts"]
+  "include": ["commands/**/*.ts", "agents/**/*.ts", "tools/**/*.ts", "lib/**/*.ts", "tests/**/*.ts", "scripts/**/*.ts"]
 }
