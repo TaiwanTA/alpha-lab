@@ -53,7 +53,7 @@ if [ "${EUID:-$(id -u)}" -eq 0 ]; then
   exit 1
 fi
 
-REPO_ROOT="$(cd "$(dirname "$0")" && pwd)"
+REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 CANONICAL_COMPOSE_SRC="${REPO_ROOT}/compose.yml"
 if [ ! -f "${CANONICAL_COMPOSE_SRC}" ]; then
   echo "ERROR: 找不到 ${CANONICAL_COMPOSE_SRC}." >&2
@@ -207,9 +207,11 @@ printf '%s' "${GHCR_PAT}" | sudo docker login ghcr.io -u taiwanta --password-std
 unset GHCR_PAT
 
 # === 步驟 8: docker compose pull ===
-echo "[8/10] docker compose pull"
+echo "[8/10] docker compose pull (略過 mastra-app 本地 image)"
+# --ignore-pull-failures 讓 mastra-app (本地 image,不在 GHCR) 失敗不中止;
+# 生產環境 mastra-app image 來源由 user 處理。
 sudo docker compose --env-file "${STACK_ENV_TARGET}" \
-  -f "${CANONICAL_COMPOSE_TARGET}" pull
+  -f "${CANONICAL_COMPOSE_TARGET}" pull --ignore-pull-failures
 
 # === 步驟 9: 啟動 systemd 服務 ===
 echo "[9/10] systemctl start alpha-lab-dagu.service"
@@ -217,12 +219,23 @@ sudo systemctl start alpha-lab-dagu.service
 
 # === 步驟 10: verify ===
 echo "[10/10] verify"
-sleep 4
-if curl -fsS -o /dev/null -w "    dagu http: %{http_code}\n" http://127.0.0.1:8080/; then
+# hindsight start_period 是 180s,dagu depends_on hindsight healthy 才啟動,
+# 所以首次啟動可能要 3-4 分鐘。retry 60 次 × 5s = 300s 涵蓋範圍。
+dagu_ready=0
+for i in $(seq 1 60); do
+  if curl -fsS -o /dev/null http://127.0.0.1:8080/ 2>/dev/null; then
+    dagu_ready=1
+    break
+  fi
+  sleep 5
+done
+if [ "${dagu_ready}" -eq 1 ]; then
+  curl -fsS -o /dev/null -w "    dagu http: %{http_code}\n" http://127.0.0.1:8080/
   echo "    DONE — alpha-lab runtime 已就緒"
 else
-  echo "    ERROR: dagu http 不可達，看 journalctl 跟 docker logs" >&2
-  sudo journalctl -u alpha-lab-dagu.service --since "1m ago" --no-pager
-  sudo docker logs alpha-lab-dagu 2>&1 | tail -30
+  echo "    ERROR: dagu http 不可達 (300s 內未 ready),看 journalctl 跟 docker logs" >&2
+  sudo journalctl -u alpha-lab-dagu.service --since "5m ago" --no-pager | tail -30
+  sudo docker compose --env-file "${STACK_ENV_TARGET}" \
+    -f "${CANONICAL_COMPOSE_TARGET}" logs alpha-lab-dagu 2>&1 | tail -30
   exit 1
 fi
