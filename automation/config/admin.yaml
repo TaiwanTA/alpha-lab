@@ -41,9 +41,9 @@
 host: "127.0.0.1"
 port: 8080
 paths:
-  # dags 跟 dagu state 同 parent (bind mount 子目錄),
-  # 跟 native 模式路徑一致,不需要 path migration。
-  dags_dir: /var/lib/alpha-lab/dagu/dags
+  # DAGs bake 進 image（dags-sync sidecar 退役，PR 2）。
+  # DAG 變更透過 image rebuild + compose reload 生效。
+  dags_dir: /opt/alpha-lab/automation/dags
   data_dir: /var/lib/alpha-lab/dagu/data
   log_dir: /var/lib/alpha-lab/dagu/logs
 
