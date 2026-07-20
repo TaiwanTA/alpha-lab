@@ -10,6 +10,9 @@
 // 取代舊 automation/scripts/clone-publish.sh + git-askpass.sh 兩個 shell
 // wrapper。askpass 邏輯內聯：產生 PID-suffixed 臨時 askpass script，
 // chmod 0700，finally 必刪。kill -9 殘留檔名含 PID 不重名，下次不影響。
+//
+// 注意：catch 不直接 process.exit()，否則會繞過 finally 導致 askpass
+// 殘留（含 token）。用 exitCode 變數，最後统一 exit。
 
 import { parseArgs } from "node:util";
 
@@ -20,6 +23,9 @@ const args = parseArgs({
   },
 });
 
+const workspace = args.values.workspace;
+const branch = args.values.branch;
+
 const token = process.env.GIT_READ_TOKEN;
 if (!token || token.length === 0) {
   console.error("clone-publish: GIT_READ_TOKEN 必須設定在環境變數");
@@ -28,7 +34,7 @@ if (!token || token.length === 0) {
 
 const REMOTE = "https://x-access-token@github.com/TaiwanTA/alpha-lab.git";
 
-// askpass helper：寫入臨時檔（0700、PID-suffixed），執行完 finally 刪除。
+// askpass helper：寫入臨時檔（0700、PID-suffixed），finally 必刪。
 // 檔名含 PID 避免並發衝突；kill -9 殘留可手動清理。
 const tmpAskpass = `${process.env.HOME ?? "/tmp"}/.git-askpass-${process.pid}.sh`;
 const askpassBody = `#!/bin/sh
@@ -40,13 +46,13 @@ esac
 await Bun.write(tmpAskpass, askpassBody);
 await Bun.$`chmod 0700 ${tmpAskpass}`.quiet();
 
+let exitCode = 0;
 try {
-  await Bun.$`rm -rf ./workspace`.quiet();
-  await Bun.$`mkdir -p ./workspace`.quiet();
-  console.error(
-    `clone-publish: branch=${args.values.branch} → ${args.values.workspace}`,
-  );
-  await Bun.$`git clone --depth 1 -b ${args.values.branch} ${REMOTE} ${args.values.workspace}`
+  // rm -rf 用 --workspace 參數，避免硬編碼 ./workspace；mkdir -p 父目錄。
+  await Bun.$`rm -rf ${workspace}`.quiet();
+  await Bun.$`mkdir -p ${workspace}`.quiet();
+  console.error(`clone-publish: branch=${branch} → ${workspace}`);
+  await Bun.$`git clone --depth 1 -b ${branch} ${REMOTE} ${workspace}`
     .env({
       ...Bun.env,
       GIT_ASKPASS: tmpAskpass,
@@ -58,18 +64,25 @@ try {
 } catch (err) {
   // Bun.$ throws ShellError (Error subclass); narrow via `in` before access.
   let stderr = "";
-  let code = 1;
   if (err instanceof Error && "stderr" in err) {
     stderr = String(err.stderr);
   }
   if (err instanceof Error && "exitCode" in err) {
     const candidate = err.exitCode;
-    if (typeof candidate === "number") code = candidate;
+    if (typeof candidate === "number") exitCode = candidate;
   }
+  if (exitCode === 0) exitCode = 1;
   console.error("clone-publish: clone 失敗:", stderr.slice(0, 500));
-  process.exit(code);
 } finally {
-  await Bun.$`rm -f ${tmpAskpass}`.quiet();
+  // cleanup 失敗不可覆蓋原本的 exitCode；吞掉錯誤只 log warning。
+  try {
+    await Bun.$`rm -f ${tmpAskpass}`.quiet();
+  } catch (cleanupErr) {
+    console.error(
+      "clone-publish: 警告 — 清理 askpass 臨時檔失敗:",
+      cleanupErr instanceof Error ? cleanupErr.message : String(cleanupErr),
+    );
+  }
 }
 
-process.exit(0);
+process.exit(exitCode);

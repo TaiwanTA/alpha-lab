@@ -1,4 +1,4 @@
-# alpha-lab canonical Compose：六服務 + 一網路 + 一份 secrets env_file。
+# alpha-lab canonical Compose：五服務 + 一網路 + 一份 secrets env_file。
 # PR 2 簡化：YAML anchor 共用 restart/logging/env_file/networks，dags-sync
 # sidecar 退役（DAGs bake 進 image，DAG 變更走 image rebuild + reload）。
 # 所有 secrets 集中在 /etc/alpha-lab/secrets.env，所有服務可見（試驗專案
