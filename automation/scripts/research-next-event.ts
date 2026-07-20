@@ -215,6 +215,10 @@ function buildPrompt(event: SignalEventRow): string {
     "   The CLI forwards your arguments verbatim — thesis, ticker,",
     "   direction, confidence, rationale, and sourceCitations must be",
     "   the values you intend, not reconstructed later.",
+"6. Write the ENTIRE candidateMarkdown — title, summary, and body — in",
+"   Traditional Chinese (繁體中文). Keep investor names, tickers, source",
+"   URLs, code, and the verbatim text of quoted X posts in their original",
+"   form. The `## 來源` heading stays in Traditional Chinese.",
   ].join("\n");
 }
 
