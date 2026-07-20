@@ -5,7 +5,7 @@ import {
   fetchAdjustedCloseSessions,
   loadTwelveDataConfig,
   type TwelveDataConfig,
-} from "../scripts/phase4/twelve-data.ts";
+} from "../lib/twelve-data.ts";
 
 // ---------------------------------------------------------------------------
 // Twelve Data client tests — at-or-before semantics + weekend/holiday

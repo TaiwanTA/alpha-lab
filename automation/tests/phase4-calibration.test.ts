@@ -4,7 +4,7 @@ import {
   buildCalibration,
   serializeCalibration,
   type CalibrationOutcome,
-} from "../scripts/calibrate-signals.ts";
+} from "../commands/calibrate-signals.ts";
 
 const unresolvedOutcome: CalibrationOutcome = {
   investor: "Alice",

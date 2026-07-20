@@ -14,7 +14,7 @@ import {
   type HindsightClient,
   type TwelveDataClient,
   type ResearchEventPayload,
-} from "../scripts/phase4/pi-research.ts";
+} from "../agents/research.ts";
 
 // ---------------------------------------------------------------------------
 // Stubs — protocol-correct per Hindsight v0.8.4 (success / bank_id /

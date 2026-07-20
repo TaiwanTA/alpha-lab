@@ -4,7 +4,7 @@ import {
   createHindsightClient,
   loadHindsightConfig,
   type HindsightConfig,
-} from "../scripts/phase4/hindsight.ts";
+} from "../lib/hindsight.ts";
 
 // ---------------------------------------------------------------------------
 // Hindsight v0.8.4 wire-protocol tests.

@@ -10,8 +10,8 @@ import {
   type InvestorSource,
   type XApiClient,
   type XTweet,
-} from "../scripts/phase4/x-client.ts";
-import { commitSourceBatch } from "../scripts/ingest-events.ts";
+} from "../lib/x-client.ts";
+import { commitSourceBatch } from "../commands/ingest-events.ts";
 
 // ---------------------------------------------------------------------------
 // parseInvestorSources — strict X-only YAML registry parser.

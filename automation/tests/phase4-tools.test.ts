@@ -7,7 +7,7 @@ import {
   type HindsightClient,
   type TwelveDataClient,
   type RecordResearchInput,
-} from "../scripts/phase4/tools.ts";
+} from "../tools/index.ts";
 // ---------------------------------------------------------------------------
 // These tests prove the constraint contract:
 //   - Exactly five tools are exposed to the agent

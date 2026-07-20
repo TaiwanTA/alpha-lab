@@ -4,7 +4,7 @@ import {
   parseSourceRegistry,
   qualifiesForBet,
   selectSettlementSession,
-} from "../scripts/phase4/contracts.ts";
+} from "../lib/contracts.ts";
 
 // ---------------------------------------------------------------------------
 // parseSourceRegistry — registry contract for source citations.
