@@ -1,13 +1,13 @@
 #!/usr/bin/env bun
 
 import { SQL } from "bun";
-import { LedgerDb, type PaperBetRow, type ResearchRunRow } from "./phase4/db.ts";
-import { qualifiesForBet, type MarketSession, type ResearchDirection } from "./phase4/contracts.ts";
+import { LedgerDb, type PaperBetRow, type ResearchRunRow } from "../lib/db.ts";
+import { qualifiesForBet, type MarketSession, type ResearchDirection } from "../lib/contracts.ts";
 import {
   fetchAdjustedCloseSessions,
   loadTwelveDataConfig,
   type AdjustedCloseSession,
-} from "./phase4/twelve-data.ts";
+} from "../lib/twelve-data.ts";
 
 export const PRICE_SOURCE = "twelve-data:1day:adjust=all";
 

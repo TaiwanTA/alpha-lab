@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 
-import { LedgerDb } from "./phase4/db.ts";
+import { LedgerDb } from "../lib/db.ts";
 
 function requiredValue(argv: string[], flag: string): string {
   const index = argv.indexOf(flag);

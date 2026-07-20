@@ -32,24 +32,24 @@ import {
   subscribeToolEvents,
   type PiResearchRunResult,
   type ResearchEventPayload,
-} from "./phase4/pi-research.ts";
+} from "../agents/research.ts";
 import { buildPrompt } from "../agents/research.ts";
 import {
   type HindsightClient,
   loadHindsightConfig,
   createHindsightClient,
-} from "./phase4/hindsight.ts";
+} from "../lib/hindsight.ts";
 import {
   type TwelveDataClient,
   loadTwelveDataConfig,
   createTwelveDataClient,
-} from "./phase4/twelve-data.ts";
+} from "../lib/twelve-data.ts";
 import {
   LedgerDb,
   closeDb,
   type SignalEventRow,
-} from "./phase4/db.ts";
-import type { RecordResearchInput } from "./phase4/tools.ts";
+} from "../lib/db.ts";
+import type { RecordResearchInput } from "../tools/index.ts";
 
 // ---------------------------------------------------------------------------
 // Helpers

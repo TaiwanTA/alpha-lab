@@ -14,7 +14,7 @@
 // propagates as a non-zero exit, and the `finally` block awaits
 // closeDb() so the connection pool is flushed before the process dies.
 
-import { applyMigration, closeDb } from "./phase4/db.ts";
+import { applyMigration, closeDb } from "../lib/db.ts";
 
 async function main(): Promise<void> {
   if (!process.env.DATABASE_URL) {

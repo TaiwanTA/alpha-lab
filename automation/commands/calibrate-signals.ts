@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 
 import { writeFile } from "node:fs/promises";
-import { LedgerDb } from "./phase4/db.ts";
+import { LedgerDb } from "../lib/db.ts";
 
 export type CalibrationOutcome = {
   investor: string;
