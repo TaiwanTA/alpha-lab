@@ -5,8 +5,12 @@ on:
     branches: [main]
     paths:
       - compose.yml
+      - automation/deploy/dagu/Dockerfile.dagu
+      - automation/config/admin.yaml
       - automation/deploy/dagu/alpha-lab-dagu.service
-  workflow_dispatch:
+      - automation/dags/**
+    # DAG 變更同時觸發 build-images.yml (automation/**) + deploy-vm.yml；
+    # deploy 時 pull 才能拉到含新 DAG 的 image。
 
 permissions:
   contents: read
