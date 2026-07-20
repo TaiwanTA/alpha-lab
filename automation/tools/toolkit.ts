@@ -31,14 +31,6 @@ import { createLookupAdjustedCloseTool } from "./lookup-adjusted-close.ts";
 import { createRecordResearchTool } from "./record-research.ts";
 
 // ---------------------------------------------------------------------------
-// External client re-exports (kept here for backwards import compatibility
-// so callers importing from tools barrel see the same surfaces).
-// ---------------------------------------------------------------------------
-
-export type { HindsightClient } from "../lib/hindsight.ts";
-export type { TwelveDataClient } from "../lib/twelve-data.ts";
-
-// ---------------------------------------------------------------------------
 // Event payload the read_event tool returns. Matches the columns of
 // `signal_events` minus the bookkeeping fields.
 // ---------------------------------------------------------------------------

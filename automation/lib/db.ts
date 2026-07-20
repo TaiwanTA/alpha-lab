@@ -51,7 +51,7 @@ export async function applyMigration(): Promise<void> {
     throw new Error("DATABASE_URL is required to run migrations");
   }
   const path = new URL(
-    "../../migrations/001_phase4_event_ledger.sql",
+    "../migrations/001_phase4_event_ledger.sql",
     import.meta.url,
   ).pathname;
   await db.file(path);
