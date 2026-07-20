@@ -216,8 +216,16 @@ echo "[8/10] docker compose pull (排除 mastra-app 本地 image)"
 # 動態列舉需要 pull 的服務,排除 mastra-app 本地 image (不在 registry)。
 # 跟 deploy-vm.yml Install and reload step 對齊,避免硬編碼 service list 漂移。
 # 不用 --ignore-pull-failures:GHCR / docker hub pull 失敗應中止(kilo review)。
+# ⚠ 若未來 compose.yml 把 mastra-app 改名或新增其他本地 image 服務,
+# 必須同步更新這個 grep 的 exclusion pattern,否則會 pull 到本地 image。
 PULL_SERVICES=$(sudo docker compose --env-file "${STACK_ENV_TARGET}" --env-file "${SECRETS_ENV_TARGET}" \
   -f "${CANONICAL_COMPOSE_TARGET}" config --services | grep -v '^mastra-app$')
+# set -euo pipefail (行 50) 保護 config --services 失敗情境。顯式空檢查避免
+# pull ${PULL_SERVICES} 退化為 pull 全部 (kilo review PR #66)。
+if [ -z "${PULL_SERVICES}" ]; then
+  echo "ERROR: PULL_SERVICES empty after excluding mastra-app" >&2
+  exit 1
+fi
 sudo docker compose --env-file "${STACK_ENV_TARGET}" --env-file "${SECRETS_ENV_TARGET}" \
   -f "${CANONICAL_COMPOSE_TARGET}" pull ${PULL_SERVICES}
 
