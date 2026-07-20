@@ -45,18 +45,31 @@ jobs:
       - name: Install and reload
         run: |
           gcloud compute ssh --zone "asia-east1-b" alpha-lab --project "g6online-352310" --command '
-            set -e
+            set -eo pipefail
             sudo install -m 0644 /tmp/compose.yml /opt/alpha-lab/compose.yml
             sudo install -m 0644 /tmp/alpha-lab-dagu.service /etc/systemd/system/alpha-lab-dagu.service
             sudo rm -f /tmp/compose.yml /tmp/alpha-lab-dagu.service
             sudo systemctl daemon-reload
             sudo test -f /etc/alpha-lab/stack.env || { echo "ERROR: missing /etc/alpha-lab/stack.env"; exit 1; }
             sudo test -f /etc/alpha-lab/secrets.env || { echo "ERROR: missing /etc/alpha-lab/secrets.env"; exit 1; }
-            # 拉所有 service image (避免 service-name vs image-name 錯配,
-            # 並讓非 GHCR image 也保持最新 tag).
+            # 動態列舉需要 pull 的服務,排除 mastra-app 本地 image (不在 registry,
+            # pull 會 fail)。避免硬編碼 service list 跟 setup-vm.sh step 8 漂移
+            # (kilo review PR #66)。不用 --ignore-pull-failures:GHCR / docker hub
+            # pull 失敗應中止。
+            # ⚠ 若未來 compose.yml 把 mastra-app 改名 (例如 mastra-selfhost) 或新增
+            # 其他本地 image 服務,必須同步更新這個 grep 的 exclusion pattern,
+            # 否則會 pull 到本地 image 而重現 PR #65 root cause (fail-open)。
+            PULL_SERVICES=$(sudo /usr/bin/docker compose --env-file /etc/alpha-lab/stack.env \
+              --env-file /etc/alpha-lab/secrets.env \
+              -f /opt/alpha-lab/compose.yml config --services | grep -v '^mastra-app$')
+            # set -o pipefail 保護 config --services 失敗情境。顯式空檢查避免
+            # pull ${PULL_SERVICES} 退化為 pull 全部 (kilo review PR #66)。
+            if [ -z "${PULL_SERVICES}" ]; then
+              echo "ERROR: PULL_SERVICES empty after excluding mastra-app" >&2; exit 1
+            fi
             sudo /usr/bin/docker compose --env-file /etc/alpha-lab/stack.env \
               --env-file /etc/alpha-lab/secrets.env \
-              -f /opt/alpha-lab/compose.yml pull
+              -f /opt/alpha-lab/compose.yml pull ${PULL_SERVICES}
             # alpha-lab-dagu.service ExecReload uses --force-recreate.
             sudo systemctl reload alpha-lab-dagu.service
           '
