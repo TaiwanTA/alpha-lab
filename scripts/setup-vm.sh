@@ -207,11 +207,11 @@ printf '%s' "${GHCR_PAT}" | sudo docker login ghcr.io -u taiwanta --password-std
 unset GHCR_PAT
 
 # === 步驟 8: docker compose pull ===
-echo "[8/10] docker compose pull (略過 mastra-app 本地 image)"
-# --ignore-pull-failures 讓 mastra-app (本地 image,不在 GHCR) 失敗不中止;
-# 生產環境 mastra-app image 來源由 user 處理。
+echo "[8/10] docker compose pull (排除 mastra-app 本地 image)"
+# 顯式列舉需要 pull 的服務,mastra-app 是 VM local image 不在 registry。
+# 不用 --ignore-pull-failures:GHCR / docker hub pull 失敗應中止(kilo review)。
 sudo docker compose --env-file "${STACK_ENV_TARGET}" \
-  -f "${CANONICAL_COMPOSE_TARGET}" pull --ignore-pull-failures
+  -f "${CANONICAL_COMPOSE_TARGET}" pull alpha-lab-dagu hindsight hindsight-db alpha-lab-postgres
 
 # === 步驟 9: 啟動 systemd 服務 ===
 echo "[9/10] systemctl start alpha-lab-dagu.service"
