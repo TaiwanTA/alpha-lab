@@ -9,8 +9,9 @@ on:
       - automation/config/admin.yaml
       - automation/deploy/dagu/alpha-lab-dagu.service
       - automation/dags/**
-    # DAG 變更同時觸發 build-images.yml (automation/**) + deploy-vm.yml；
+    # DAG 變更同時觸發 build-images.yml（push 不分 path）+ deploy-vm.yml；
     # deploy 時 pull 才能拉到含新 DAG 的 image。
+  workflow_dispatch:
 
 permissions:
   contents: read
