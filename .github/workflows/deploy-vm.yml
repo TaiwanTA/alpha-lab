@@ -50,27 +50,16 @@ jobs:
             sudo rm -f /tmp/compose.yml /tmp/alpha-lab-dagu.service
             sudo systemctl daemon-reload
             sudo test -f /etc/alpha-lab/stack.env || { echo "ERROR: missing /etc/alpha-lab/stack.env"; exit 1; }
-            compose_config=$(sudo /usr/bin/docker compose --env-file /etc/alpha-lab/stack.env \
-              -f /opt/alpha-lab/compose.yml config)
-            ghcr_services=""
-            current_service=""
-            while IFS= read -r line; do
-              case "${line}" in
-                "  "[![:space:]]*:)
-                  current_service="${line#  }"
-                  current_service="${current_service%:}"
-                  ;;
-                "    image: ghcr.io/"*)
-                  ghcr_services="${ghcr_services} ${current_service}"
-                  ;;
-              esac
-            done < <(printf '%s\n' "${compose_config}")
-            if [ -z "${ghcr_services}" ]; then
-              echo "ERROR: no GHCR services found in compose configuration"
+            sudo test -f /etc/alpha-lab/secrets.env || { echo "ERROR: missing /etc/alpha-lab/secrets.env"; exit 1; }
+            # 用 docker compose config --images 取代手寫 regex parsing。
+            ghcr_images=$(sudo /usr/bin/docker compose --env-file /etc/alpha-lab/stack.env \
+              -f /opt/alpha-lab/compose.yml config --images | grep "^ghcr.io/" || true)
+            if [ -z "${ghcr_images}" ]; then
+              echo "ERROR: no GHCR images found in compose configuration"
               exit 1
             fi
             sudo /usr/bin/docker compose --env-file /etc/alpha-lab/stack.env \
-              -f /opt/alpha-lab/compose.yml pull ${ghcr_services}
+              -f /opt/alpha-lab/compose.yml pull ${ghcr_images}
             # alpha-lab-dagu.service ExecReload uses --force-recreate.
             sudo systemctl reload alpha-lab-dagu.service
           '
@@ -83,7 +72,7 @@ jobs:
             expected_services=$(sudo /usr/bin/docker compose --env-file /etc/alpha-lab/stack.env \
               -f /opt/alpha-lab/compose.yml config --services)
             services_ready=0
-            for i in $(seq 1 120); do
+            for i in $(seq 1 60); do
               services_ready=1
               for service in ${expected_services}; do
                 container=$(sudo /usr/bin/docker compose --env-file /etc/alpha-lab/stack.env \
@@ -108,7 +97,7 @@ jobs:
             done
             sudo docker ps --format "table {{.Names}}\t{{.Status}}"
             if [ "${services_ready}" -ne 1 ]; then
-              echo "ERROR: compose services not ready after 120 retries"
+              echo "ERROR: compose services not ready after 60 retries"
               exit 1
             fi
             dagu_ready=0
