@@ -47,11 +47,8 @@ alpha-lab/
     │   ├── clone-publish.ts          ← PR 2 取代 clone-publish.sh + git-askpass.sh
     │   ├── materialize-research-candidate.ts
     │   └── migrate-phase4.ts
-    ├── agents/
-    │   └── research/
-    │       ├── pi-research.ts        ← 從 phase4/pi-research.ts 搬
-    │       ├── prompt.ts             ← 從 research-next-event.ts 抽 buildPrompt
-    │       └── index.ts              ← barrel re-export
+    ├── agents/                       ← 一 agent 一檔（對稱 tools/ 一 tool 一檔）
+    │   └── research.ts               ← pi-research.ts + buildPrompt 合併，從 phase4/pi-research.ts 搬並併入 research-next-event.ts 的 buildPrompt
     ├── tools/                       ← 一 tool 一檔 + barrel
     │   ├── read-event.ts
     │   ├── recall-memory.ts
@@ -75,7 +72,7 @@ alpha-lab/
 ### 目錄命名依據
 
 - **`commands/`**：DAG step 直接 `bun run` 的 CLI 入口。每個檔是 `#!/usr/bin/env bun` + `if (import.meta.main)` 結構，唯一職責是接 CLI args / env、呼叫 lib + agents + tools、output run ID 到 stdout、exit code 反映成敗
-- **`agents/research/`**：pi-agent-core 的 agent runtime 構造。`pi-research.ts` 提供 `buildPiResearchRuntime` / `subscribeMaxStepsGuard` / `assertRunPersisted`；`prompt.ts` 提供 `buildPrompt(event)`；`index.ts` barrel。目前只有 1 個 agent，未來加新 agent 有地方放
+- **`agents/`**：pi-agent-core 的 agent runtime 構造，一 agent 一檔。`research.ts` 包含 `buildPiResearchRuntime` / `subscribeMaxStepsGuard` / `assertRunPersisted` + `buildPrompt(event)`（從原 `research-next-event.ts` 抽併入）。未來加新 agent 就加 `agents/<name>.ts`，對稱於 `tools/` 的「一 tool 一檔」
 - **`tools/`**：agent tool 實作 + TypeBox parameter schema。每個 tool 一個檔，包含 schema type 常數 + executor function。`toolkit.ts` 放 factory `createResearchToolkit`、`ResearchToolContext`、共用 helpers（`requireObject/requireString/...`）。`index.ts` barrel
 - **`lib/`**：跨 commands / agents / tests 共用的 infra。`db.ts` (Bun SQL)、`hindsight.ts` (Hindsight HTTP client)、`twelve-data.ts` (Twelve Data client)、`x-client.ts` (X API client)、`contracts.ts` (pure 純函數契約)
 - **`scripts/`（root 層）**：VM 維運工具。`setup-vm.sh` 做的是系統操作（`useradd`、`install`、`docker compose up`），用 bun 跑無好處；它跟 runtime 關注點分離，搬到 root `scripts/`
@@ -86,7 +83,7 @@ alpha-lab/
 - `*.ts` CLI 入口 → `automation/commands/` (PR 1)
 - `phase4/db.ts` 等 5 個 lib → `automation/lib/` (PR 1)
 - `phase4/tools.ts` 拆 6 檔 → `automation/tools/` (PR 1)
-- `phase4/pi-research.ts` → `automation/agents/research/` (PR 1)
+- `phase4/pi-research.ts` → `automation/agents/research.ts` (PR 1)
 - `clone-publish.sh` + `git-askpass.sh` → `commands/clone-publish.ts` 用 bun 重寫 (PR 2)
 - `setup-vm.sh` → `scripts/setup-vm.sh` (PR 3，root 層)
 - `clone-fixture.sh` + `verify-compose.sh` → 刪除，無引用 (PR 1)
@@ -273,9 +270,9 @@ await $`git clone --depth 1 -b main \
 
 註：token 從 env 讀，但實際 git clone 的 token 傳遞方式需要再驗證——單純 `https://x-access-token@` URL 不含 token 的話 git 會 prompt；用 askpass shim 或 `git credential approve` 才能完全避免 token 進 argv。**PR 2 實作時確定具體機制**，spec 不鎖死。
 
-## `agents/research/prompt.ts`
+## `agents/research.ts`
 
-從 `commands/research-next-event.ts`（原 `scripts/research-next-event.ts:176-223`）抽出 `buildPrompt(event: SignalEventRow): string`。簽名不變，純搬家。
+把 `buildPrompt(event: SignalEventRow): string`（從原 `scripts/research-next-event.ts:176-223`）併入 `agents/research.ts`。這個檔同時包含 `buildPiResearchRuntime` / `subscribeMaxStepsGuard` / `assertRunPersisted` + `buildPrompt`——都是 research agent 的內部組裝。簽名不變，純搬家 + 合併。
 
 ## 測試 import 路徑更新
 
@@ -289,7 +286,7 @@ await $`git clone --depth 1 -b main \
 | `../scripts/phase4/twelve-data.ts` | `../lib/twelve-data.ts` |
 | `../scripts/phase4/x-client.ts` | `../lib/x-client.ts` |
 | `../scripts/phase4/tools.ts` | `../tools/index.ts` |
-| `../scripts/phase4/pi-research.ts` | `../agents/research/index.ts` |
+| `../scripts/phase4/pi-research.ts` | `../agents/research.ts` |
 
 ## PR 拆分
 
@@ -299,8 +296,8 @@ await $`git clone --depth 1 -b main \
 - `automation/scripts/*.ts` → `automation/commands/`
 - `automation/scripts/phase4/{db,contracts,hindsight,twelve-data,x-client}.ts` → `automation/lib/`
 - `automation/scripts/phase4/tools.ts` 拆成 `automation/tools/{read-event,recall-memory,retain-event-memory,lookup-adjusted-close,record-research,toolkit,index}.ts`
-- `automation/scripts/phase4/pi-research.ts` → `automation/agents/research/pi-research.ts`
-- 從 `commands/research-next-event.ts` 抽 `buildPrompt` → `automation/agents/research/prompt.ts`，command 改 import
+- `automation/scripts/phase4/pi-research.ts` → `automation/agents/research.ts`
+- 從 `commands/research-next-event.ts` 抽 `buildPrompt` 併入 `automation/agents/research.ts`，command 改 import
 - 11 個測試 import 路徑同步
 - 7 個 DAG YAML `scripts/X.ts` → `commands/X.ts`，拿掉 `export PATH="$HOME/.bun/bin:$PATH"`
 - 刪 `automation/scripts/clone-fixture.sh` + `automation/scripts/verify-compose.sh`（孤兒）
