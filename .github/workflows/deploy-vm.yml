@@ -55,6 +55,7 @@ jobs:
             # 拉所有 service image (避免 service-name vs image-name 錯配,
             # 並讓非 GHCR image 也保持最新 tag).
             sudo /usr/bin/docker compose --env-file /etc/alpha-lab/stack.env \
+              --env-file /etc/alpha-lab/secrets.env \
               -f /opt/alpha-lab/compose.yml pull
             # alpha-lab-dagu.service ExecReload uses --force-recreate.
             sudo systemctl reload alpha-lab-dagu.service
@@ -66,12 +67,14 @@ jobs:
           gcloud compute ssh --zone "asia-east1-b" alpha-lab --project "g6online-352310" --command '
             set -e
             expected_services=$(sudo /usr/bin/docker compose --env-file /etc/alpha-lab/stack.env \
+              --env-file /etc/alpha-lab/secrets.env \
               -f /opt/alpha-lab/compose.yml config --services)
             services_ready=0
             for i in $(seq 1 120); do
               services_ready=1
               for service in ${expected_services}; do
                 container=$(sudo /usr/bin/docker compose --env-file /etc/alpha-lab/stack.env \
+                  --env-file /etc/alpha-lab/secrets.env \
                   -f /opt/alpha-lab/compose.yml ps -q "${service}" 2>/dev/null || true)
                 if [ -z "${container}" ]; then
                   services_ready=0
