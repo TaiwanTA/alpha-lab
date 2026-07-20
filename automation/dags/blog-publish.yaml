@@ -26,10 +26,10 @@
 # 不运行父 worktree 的任何 script;这里的 checkout 跟父的
 # `workspace/app` 完全独立。
 #
-# checkout 委托给 `clone-publish.sh`,因为 Dagu 2.10.7 的
-# `git.checkout` 使用 go-git,对 fine-grained PAT 会失败。wrapper
-# 使用跟 clone-fixture.sh 一样的 x-access-token 技巧
-# (GIT_ASKPASS,不通过 argv)。
+# checkout 委托给 `commands/clone-publish.ts` (bun),因为 Dagu 2.10.7 的
+# `git.checkout` 使用 go-git,对 fine-grained PAT 会失败。token 走
+# GIT_ASKPASS 协定 (临時檔 + 0700),不入 argv / URL。
+# 取代旧 scripts/clone-publish.sh + git-askpass.sh (PR 2)。
 
 params:
   research_run_id: ""
@@ -73,7 +73,7 @@ handler_on:
 
 steps:
   - id: checkout
-    run: bash /opt/alpha-lab/automation/scripts/clone-publish.sh
+    run: bun /opt/alpha-lab/automation/commands/clone-publish.ts
     env:
       - GIT_READ_TOKEN=${env.GIT_READ_TOKEN}
 
@@ -138,7 +138,7 @@ steps:
     working_dir: ./workspace/publish
     run: |
       set -euo pipefail
-      : "${GH_PR_TOKEN:?GH_PR_TOKEN 必须配置在 /etc/alpha-lab/secrets/dagu.env}"
+      : "${GH_PR_TOKEN:?GH_PR_TOKEN 必须配置在 /etc/alpha-lab/secrets.env}"
       BRANCH="publish/${DAG_RUN_ID}"
       export GIT_SSH_COMMAND="ssh -i /var/lib/alpha-lab/dagu/.ssh/id_ed25519 -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new"
       REMOTE="git@github.com:TaiwanTA/alpha-lab.git"

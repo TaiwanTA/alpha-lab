@@ -34,9 +34,6 @@ jobs:
           - image: alpha-lab-dagu
             dockerfile: automation/deploy/dagu/Dockerfile.dagu
             context: .
-          - image: alpha-lab-dags-sync
-            dockerfile: automation/deploy/dagu/Dockerfile.dags-sync
-            context: automation/deploy/dagu
 
     steps:
       - name: Checkout

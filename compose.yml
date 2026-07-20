@@ -1,86 +1,54 @@
-# alpha-lab canonical Compose：將六個服務及其網路與持久化資料集中管理。
+# alpha-lab canonical Compose：五服務 + 一網路 + 一份 secrets env_file。
+# PR 2 簡化：YAML anchor 共用 restart/logging/env_file/networks，dags-sync
+# sidecar 退役（DAGs bake 進 image，DAG 變更走 image rebuild + reload）。
+# 所有 secrets 集中在 /etc/alpha-lab/secrets.env，所有服務可見（試驗專案
+# 接受橫向暴露）。
 #
 # 正式部署時由 VM-only 的 /etc/alpha-lab/stack.env 提供 image tag、
 # Hindsight 內部資料庫 URL 等 interpolation 變數；所有秘密值都留在
-# /etc/alpha-lab/secrets/ 下的 env 檔，不進入 repository。
-name: alpha-lab
+# /etc/alpha-lab/secrets.env，不進入 repository。
+
+x-defaults: &default-service
+  restart: unless-stopped
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "3"
+  env_file:
+    - /etc/alpha-lab/secrets.env
+  networks:
+    - alpha_lab_net
 
 services:
   alpha-lab-dagu:
+    <<: *default-service
     image: ghcr.io/taiwanta/alpha-lab-dagu:${ALPHA_LAB_IMAGE_TAG:-latest}
-    container_name: alpha-lab-dagu
-    restart: unless-stopped
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
-    command: ["dagu", "start-all"]
+    # dagu 預設讀 DAGU_HOME/base.yaml,不讀 /etc/dagu/admin.yaml;
+    # 顯式 -c 讓 image-baked admin.yaml 生效（PR 2 Task 1 驗證）。
+    command: ["dagu", "start-all", "-c", "/etc/dagu/admin.yaml"]
     ports:
       - "127.0.0.1:8080:8080"
-    env_file:
-      - /etc/alpha-lab/secrets/dagu.env
     environment:
       PUID: "999"
       PGID: "982"
       HOME: /var/lib/alpha-lab/dagu
       DAGU_HOME: /var/lib/alpha-lab/dagu
       # 以 Compose DNS 連線，不能在 container 內使用 127.0.0.1。
-      # GH_PR_TOKEN 由上面的 /etc/alpha-lab/secrets/dagu.env env_file 注入。
+      # GH_PR_TOKEN / GIT_READ_TOKEN 由 secrets.env 注入。
       HINDSIGHT_BASE_URL: http://hindsight:8888
     volumes:
-      # 目前 systemd、Dagu 與 dags-sync 都依賴這個既有 state 路徑。
+      # state 路徑跟 host bind mount 共享，PUID 999 對齊 volume owner。
       - /var/lib/alpha-lab/dagu:/var/lib/alpha-lab/dagu
-    secrets:
-      - source: dagu_env
-        target: /etc/alpha-lab/dagu.env
     depends_on:
       hindsight:
         condition: service_healthy
       alpha-lab-postgres:
         condition: service_healthy
-    networks:
-      - alpha_lab_net
-
-  alpha-lab-dags-sync:
-    image: ghcr.io/taiwanta/alpha-lab-dags-sync:${ALPHA_LAB_IMAGE_TAG:-latest}
-    container_name: alpha-lab-dags-sync
-    restart: unless-stopped
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
-    entrypoint: ["/usr/local/bin/dags-sync.sh"]
-    environment:
-      DAG_SYNC_REPO: git@github.com:TaiwanTA/alpha-lab.git
-      DAG_SYNC_BRANCH: main
-      DAG_SYNC_PATH: automation/dags
-      DAG_SYNC_INTERVAL: "300"
-      DAG_SYNC_TARGET: /var/lib/alpha-lab/dagu/dags
-      HOME: /var/lib/alpha-lab/dagu
-      GIT_SSH_COMMAND: >-
-        ssh -i /var/lib/alpha-lab/dagu/.ssh/id_ed25519
-        -o IdentitiesOnly=yes
-        -o UserKnownHostsFile=/var/lib/alpha-lab/dagu/.ssh/known_hosts
-        -o StrictHostKeyChecking=yes
-    volumes:
-      # sidecar 與 Dagu 必須共享同一個 state 及 SSH deploy key。
-      - /var/lib/alpha-lab/dagu:/var/lib/alpha-lab/dagu
-    networks:
-      - alpha_lab_net
 
   hindsight-db:
+    <<: *default-service
     image: pgvector/pgvector:pg${HINDSIGHT_DB_VERSION:-18}
-    container_name: hindsight-db
-    restart: unless-stopped
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
-    env_file:
-      - /etc/alpha-lab/secrets/hindsight-db.env
     volumes:
       - hindsight_pgdata:/var/lib/postgresql/${HINDSIGHT_DB_VERSION:-18}/docker
     healthcheck:
@@ -89,28 +57,18 @@ services:
       timeout: 5s
       retries: 5
       start_period: 20s
-    networks:
-      - alpha_lab_net
 
   hindsight:
+    <<: *default-service
     image: ghcr.io/vectorize-io/hindsight:${HINDSIGHT_VERSION:-latest-slim}
-    container_name: hindsight
-    restart: unless-stopped
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
     entrypoint:
       - /bin/sh
       - -c
       - >-
         uv pip install --python /app/api/.venv/bin/python --quiet
         --link-mode=copy flashrank && exec /app/start-all.sh
-    env_file:
-      - /etc/alpha-lab/secrets/hindsight.env
     environment:
-      # stack.env 中的 URL 由遷移腳本產生，host 必須是 hindsight-db。
+      # stack.env 提供 HINDSIGHT_API_DATABASE_URL（host 必須是 hindsight-db）。
       HINDSIGHT_API_DATABASE_URL: ${HINDSIGHT_API_DATABASE_URL:?set URL with hindsight-db host}
       HINDSIGHT_API_VECTOR_EXTENSION: pgvector
     ports:
@@ -124,23 +82,10 @@ services:
       timeout: 5s
       retries: 5
       start_period: 180s
-    networks:
-      alpha_lab_net:
-        aliases:
-          # 切換期間保留舊 container DNS 名稱，完成驗證後可移除。
-          - hindsight-hindsight-1
 
   alpha-lab-postgres:
+    <<: *default-service
     image: postgres:16-alpine
-    container_name: alpha-lab-postgres
-    restart: unless-stopped
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
-    env_file:
-      - /etc/alpha-lab/secrets/research-postgres.env
     volumes:
       - research_pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -148,24 +93,13 @@ services:
       interval: 10s
       timeout: 5s
       retries: 12
-    networks:
-      - alpha_lab_net
 
   mastra-app:
-    # 此 tag 是 VM 現有 local image；搬遷至其他 VM 前須先推送並 pin digest。
+    <<: *default-service
     image: ${MASTRA_IMAGE:?set immutable mastra image or existing VM tag}
-    container_name: mastra-app
     user: "1001:1001"
-    restart: unless-stopped
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
     ports:
       - "127.0.0.1:4111:4111"
-    env_file:
-      - /etc/alpha-lab/secrets/mastra.env
     environment:
       PORT: "4111"
       HOST: 0.0.0.0
@@ -181,8 +115,6 @@ services:
       start_period: 15s
     security_opt:
       - no-new-privileges:true
-    networks:
-      - alpha_lab_net
 
 networks:
   alpha_lab_net:
@@ -199,7 +131,3 @@ volumes:
   mastra_data:
     external: true
     name: mastra-data
-
-secrets:
-  dagu_env:
-    file: /etc/alpha-lab/secrets/dagu.env
