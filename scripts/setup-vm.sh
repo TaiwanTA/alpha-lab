@@ -170,7 +170,7 @@ else
   read_secret TWELVE_DATA_API_KEY "Twelve Data API key"
   read_secret GIT_READ_TOKEN "GitHub fine-grained PAT (Contents: Read)"
   read_secret POSTGRES_USER "Postgres user (給 alpha-lab-postgres;hindsight-db 硬寫 hindsight)"
-  read_secret POSTGRES_PASSWORD "Postgres password (給 alpha-lab-postgres;hindsight-db 硬寫 stack.env HINDSIGHT_API_DATABASE_URL 密碼)"
+  read_secret POSTGRES_PASSWORD "Postgres password (給 alpha-lab-postgres;hindsight-db 用 secrets.env HINDSIGHT_DB_POSTGRES_PASSWORD,跟 stack.env HINDSIGHT_API_DATABASE_URL 密碼獨立)"
   read_secret POSTGRES_DB "Postgres database name (給 alpha-lab-postgres;hindsight-db 硬寫 hindsight)"
   read_secret HINDSIGHT_DB_POSTGRES_PASSWORD "hindsight-db postgres password (必須跟 stack.env 的 HINDSIGHT_API_DATABASE_URL 密碼一致;由 systemd unit 第二個 --env-file /etc/alpha-lab/secrets.env 注入 compose interpolation)"
 
