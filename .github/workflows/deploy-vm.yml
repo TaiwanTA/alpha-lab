@@ -52,12 +52,16 @@ jobs:
             sudo systemctl daemon-reload
             sudo test -f /etc/alpha-lab/stack.env || { echo "ERROR: missing /etc/alpha-lab/stack.env"; exit 1; }
             sudo test -f /etc/alpha-lab/secrets.env || { echo "ERROR: missing /etc/alpha-lab/secrets.env"; exit 1; }
-            # 顯式列舉需要 pull 的服務 (同 setup-vm.sh step 8),排除 mastra-app
-            # 本地 image (不在 registry,pull 會 fail)。
-            # 不用 --ignore-pull-failures:GHCR / docker hub pull 失敗應中止。
+            # 動態列舉需要 pull 的服務,排除 mastra-app 本地 image (不在 registry,
+            # pull 會 fail)。避免硬編碼 service list 跟 setup-vm.sh step 8 漂移
+            # (kilo review PR #66)。不用 --ignore-pull-failures:GHCR / docker hub
+            # pull 失敗應中止。
+            PULL_SERVICES=$(sudo /usr/bin/docker compose --env-file /etc/alpha-lab/stack.env \
+              --env-file /etc/alpha-lab/secrets.env \
+              -f /opt/alpha-lab/compose.yml config --services | grep -v '^mastra-app$')
             sudo /usr/bin/docker compose --env-file /etc/alpha-lab/stack.env \
               --env-file /etc/alpha-lab/secrets.env \
-              -f /opt/alpha-lab/compose.yml pull alpha-lab-dagu hindsight hindsight-db alpha-lab-postgres
+              -f /opt/alpha-lab/compose.yml pull ${PULL_SERVICES}
             # alpha-lab-dagu.service ExecReload uses --force-recreate.
             sudo systemctl reload alpha-lab-dagu.service
           '

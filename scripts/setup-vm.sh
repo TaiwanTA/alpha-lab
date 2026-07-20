@@ -213,10 +213,13 @@ unset GHCR_PAT
 
 # === 步驟 8: docker compose pull ===
 echo "[8/10] docker compose pull (排除 mastra-app 本地 image)"
-# 顯式列舉需要 pull 的服務,mastra-app 是 VM local image 不在 registry。
+# 動態列舉需要 pull 的服務,排除 mastra-app 本地 image (不在 registry)。
+# 跟 deploy-vm.yml Install and reload step 對齊,避免硬編碼 service list 漂移。
 # 不用 --ignore-pull-failures:GHCR / docker hub pull 失敗應中止(kilo review)。
+PULL_SERVICES=$(sudo docker compose --env-file "${STACK_ENV_TARGET}" --env-file "${SECRETS_ENV_TARGET}" \
+  -f "${CANONICAL_COMPOSE_TARGET}" config --services | grep -v '^mastra-app$')
 sudo docker compose --env-file "${STACK_ENV_TARGET}" --env-file "${SECRETS_ENV_TARGET}" \
-  -f "${CANONICAL_COMPOSE_TARGET}" pull alpha-lab-dagu hindsight hindsight-db alpha-lab-postgres
+  -f "${CANONICAL_COMPOSE_TARGET}" pull ${PULL_SERVICES}
 
 # === 步驟 9: 啟動 systemd 服務 ===
 echo "[9/10] systemctl start alpha-lab-dagu.service"
