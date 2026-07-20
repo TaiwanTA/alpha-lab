@@ -18,12 +18,13 @@
 
 FROM ghcr.io/dagucloud/dagu:2.10.7@sha256:5e715705e0c96e462417303f3e2fbbadc7f9cd15d153764c89fd1442e80a1d66
 
-# 安裝 DAG step 需要的 git、SSH、rsync、unzip 與 Node.js 22。
+# 安装 DAG step 需要的 git、GitHub CLI、SSH、rsync、unzip 与 Node.js 22。
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
       ca-certificates \
       curl \
       git \
+      gh \
       openssh-client \
       rsync \
       unzip && \

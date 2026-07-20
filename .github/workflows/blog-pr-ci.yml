@@ -1,0 +1,54 @@
+name: 验证 Blog 发布 PR
+
+on:
+  pull_request:
+    branches:
+      - main
+    types:
+      - opened
+      - synchronize
+      - reopened
+
+permissions:
+  contents: read
+
+concurrency:
+  group: blog-pr-ci-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  blog-pr-ci:
+    # 只验证 publish/* 分支,避免普通 PR 重复运行发布检查。
+    if: startsWith(github.head_ref, 'publish/')
+    name: Blog lint build typecheck
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: 设置 Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.12.0'
+          cache: npm
+          cache-dependency-path: blog/package-lock.json
+
+      - name: 安装 Blog 依赖
+        working-directory: blog
+        run: npm ci
+
+      - name: 运行 lint
+        working-directory: blog
+        run: npm run lint
+
+      - name: 运行 build
+        working-directory: blog
+        run: npm run build
+
+      - name: 运行 typecheck
+        working-directory: blog
+        run: npm run typecheck
