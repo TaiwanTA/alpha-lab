@@ -18,7 +18,7 @@
 #   1. 重新 checkout `main` 到一个新的 worktree
 #      (绝不是产出 candidate 的那个)
 #   2. 把 candidate 放到新 worktree
-#   3. 运行纯函数 draft publisher (CLI 入口见 scripts/publish-draft.ts)
+#   3. 运行纯函数 draft publisher (CLI 入口见 commands/publish-draft.ts)
 #   4. 用确定性的 diff-count gate 确认只有一个新增 Markdown 文件
 #   5. 创建 `publish/<DAG_RUN_ID>` 分支,提交 Markdown 并推送到远程
 #   6. 使用 `gh pr create` 创建指向 `main` 的 PR
