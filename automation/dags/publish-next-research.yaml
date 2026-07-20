@@ -11,9 +11,8 @@ steps:
   - id: claim
     run: |
       set -euo pipefail
-      export PATH="$HOME/.bun/bin:$PATH"
       CLAIM_OWNER="${DAG_RUN_ID}"
-      CLAIM_JSON="$(bun run /opt/alpha-lab/automation/scripts/publish-next-research.ts --owner "$CLAIM_OWNER")"
+      CLAIM_JSON="$(bun run /opt/alpha-lab/automation/commands/publish-next-research.ts --owner "$CLAIM_OWNER")"
       printf '%s\n' "$CLAIM_JSON"
       printf 'CLAIM_JSON=%s\n' "$CLAIM_JSON" >> "$DAGU_OUTPUT_FILE"
     env:
@@ -27,7 +26,6 @@ steps:
     depends: [claim]
     run: |
       set -euo pipefail
-      export PATH="$HOME/.bun/bin:$PATH"
       CLAIM_OWNER="${DAG_RUN_ID}"
       CLAIM_JSON="${CLAIM_JSON:-}"
       if [ -z "$CLAIM_JSON" ]; then
@@ -57,7 +55,7 @@ steps:
       ' "$RESEARCH_RUN_ID")"
       echo "research_publications.status=${PUBLICATION_STATUS}"
       if [ "$ACTION" = finalize ]; then
-        bun run /opt/alpha-lab/automation/scripts/publish-next-research.ts --mark-published "$RESEARCH_RUN_ID" --owner "$CLAIM_OWNER"
+        bun run /opt/alpha-lab/automation/commands/publish-next-research.ts --mark-published "$RESEARCH_RUN_ID" --owner "$CLAIM_OWNER"
         exit 0
       fi
       if [ "$PUBLICATION_STATUS" != "pushed" ] && [ "$PUBLICATION_STATUS" != "published" ]; then
@@ -66,7 +64,7 @@ steps:
           "claim_owner=$CLAIM_OWNER" \
           "runtime_sha="
       fi
-      bun run /opt/alpha-lab/automation/scripts/publish-next-research.ts --mark-published "$RESEARCH_RUN_ID" --owner "$CLAIM_OWNER"
+      bun run /opt/alpha-lab/automation/commands/publish-next-research.ts --mark-published "$RESEARCH_RUN_ID" --owner "$CLAIM_OWNER"
     env:
       - DATABASE_URL=${env.DATABASE_URL}
       - CLAIM_JSON=${steps.claim.outputs.CLAIM_JSON}

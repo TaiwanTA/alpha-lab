@@ -41,8 +41,7 @@ steps:
     working_dir: /opt/alpha-lab/automation
     run: |
       set -euo pipefail
-      export PATH="$HOME/.bun/bin:$PATH"
-      bun run scripts/ingest-events.ts
+      bun run commands/ingest-events.ts
     env:
       - DATABASE_URL=${env.DATABASE_URL}
       - X_BEARER_TOKEN=${env.X_BEARER_TOKEN}

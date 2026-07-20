@@ -13,8 +13,7 @@ steps:
     working_dir: /opt/alpha-lab/automation
     run: |
       set -euo pipefail
-      export PATH="$HOME/.bun/bin:$PATH"
-      bun run scripts/calibrate-signals.ts
+      bun run commands/calibrate-signals.ts
     env:
       - DATABASE_URL=${env.DATABASE_URL}
     stdout:

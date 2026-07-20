@@ -14,8 +14,7 @@ steps:
     working_dir: /opt/alpha-lab/automation
     run: |
       set -euo pipefail
-      export PATH="$HOME/.bun/bin:$PATH"
-      bun run scripts/settle-paper-bets.ts
+      bun run commands/settle-paper-bets.ts
     env:
       - DATABASE_URL=${env.DATABASE_URL}
       - TWELVE_DATA_API_KEY=${env.TWELVE_DATA_API_KEY}
