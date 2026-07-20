@@ -49,6 +49,16 @@ services:
   hindsight-db:
     <<: *default-service
     image: pgvector/pgvector:pg${HINDSIGHT_DB_VERSION:-18}
+    # POSTGRES_USER/DB/PGDATA 不敏感,寫死;POSTGRES_PASSWORD 走 stack.env
+    # interpolation (stack.env 本就含 HINDSIGHT_API_DATABASE_URL 密碼)。
+    # 兩個 postgres 用不同 user: alpha-lab-postgres 從 env_file (secrets.env)
+    # 拿 POSTGRES_USER=alpha,hindsight-db 這裡硬寫 hindsight 因為 volume
+    # 已用 hindsight user 初始化 (PR #2/#3 設計共用,既有 VM 資料分離)。
+    environment:
+      POSTGRES_USER: hindsight
+      POSTGRES_DB: hindsight
+      POSTGRES_PASSWORD: ${HINDSIGHT_DB_POSTGRES_PASSWORD:?set hindsight-db postgres password in stack.env}
+      PGDATA: /var/lib/postgresql/${HINDSIGHT_DB_VERSION:-18}/docker
     volumes:
       - hindsight_pgdata:/var/lib/postgresql/${HINDSIGHT_DB_VERSION:-18}/docker
     healthcheck:

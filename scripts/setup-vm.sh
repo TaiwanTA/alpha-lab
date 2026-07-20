@@ -39,9 +39,11 @@
 #     hindsight-db.env / research-postgres.env / mastra.env）合併為
 #     單一 /etc/alpha-lab/secrets.env（所有服務可見，試驗專案接受
 #     橫向暴露 — blast radius 1→5 可接受）
-#   - 兩個 postgres（hindsight-db / alpha-lab-postgres）共用同一組
-#     POSTGRES_USER / POSTGRES_PASSWORD / POSTGRES_DB 變數
-#     （兩個 pgdata volume 物理隔離，user 共用不影響資料）
+#   - 兩個 postgres 用不同 user/password/DB:alpha-lab-postgres 從
+#     secrets.env 拿 POSTGRES_USER/PASSWORD/DB,hindsight-db 在 compose.yml
+#     硬寫 hindsight/hindsight,POSTGRES_PASSWORD 走 stack.env 的
+#     HINDSIGHT_DB_POSTGRES_PASSWORD (必須跟 HINDSIGHT_API_DATABASE_URL
+#     密碼一致)。既有 VM volume 已用各自的 user 初始化,共用一組會 break。
 #   - 從 `automation/scripts/` 搬到 root `scripts/`（ops 跟 runtime 分離）
 
 set -euo pipefail
@@ -137,10 +139,9 @@ else
   # /var/log/audit/audit.log 的 EXECVE 記錄）。secret 只走 file content，
   # argv 只有 install 跟 temp file 路徑。
   TMP_ENV=$(mktemp)
-  trap 'rm -f "${TMP_ENV}"' EXIT
-
-  # secrets.env 用的所有 key 列表（按 service 分組註解）
-  # alpha-lab-dagu 容器：
+  # secrets.env 用的所有 key 列表（按用途分組）:
+  # alpha-lab-dagu 容器 (env_file 全部可見) + alpha-lab-postgres 容器
+  # (POSTGRES_*) + hindsight-db interpolation 用 HINDSIGHT_DB_POSTGRES_PASSWORD。
   read_secret() {
     local key="$1" prompt_msg="$2" default_val="${3:-}"
     local value=""
@@ -164,10 +165,10 @@ else
   read_secret X_BEARER_TOKEN "X (Twitter) bearer token"
   read_secret TWELVE_DATA_API_KEY "Twelve Data API key"
   read_secret GIT_READ_TOKEN "GitHub fine-grained PAT (Contents: Read)"
-  read_secret GH_PR_TOKEN "GitHub fine-grained PAT (Contents: Read + Pull requests: Write)"
-  read_secret POSTGRES_USER "Postgres user (共用於 hindsight-db + alpha-lab-postgres)"
-  read_secret POSTGRES_PASSWORD "Postgres password (共用於兩個 postgres)"
-  read_secret POSTGRES_DB "Postgres database name (共用於兩個 postgres)"
+  read_secret POSTGRES_USER "Postgres user (給 alpha-lab-postgres;hindsight-db 硬寫 hindsight)"
+  read_secret POSTGRES_PASSWORD "Postgres password (給 alpha-lab-postgres)"
+  read_secret POSTGRES_DB "Postgres database name (給 alpha-lab-postgres)"
+  read_secret HINDSIGHT_DB_POSTGRES_PASSWORD "hindsight-db postgres password (必須跟 stack.env 的 HINDSIGHT_API_DATABASE_URL 密碼一致)"
 
   sudo install -m 0640 -o root -g alpha-lab-dagu "${TMP_ENV}" "${SECRETS_ENV_TARGET}"
   rm -f "${TMP_ENV}"
@@ -235,7 +236,7 @@ if [ "${dagu_ready}" -eq 1 ]; then
 else
   echo "    ERROR: dagu http 不可達 (300s 內未 ready),看 journalctl 跟 docker logs" >&2
   sudo journalctl -u alpha-lab-dagu.service --since "5m ago" --no-pager | tail -30
-  sudo docker compose --env-file "${STACK_ENV_TARGET}" \
+  sudo docker compose --env-file "${STACK_ENV_TARGET}" --env-file "${SECRETS_ENV_TARGET}" \
     -f "${CANONICAL_COMPOSE_TARGET}" logs alpha-lab-dagu 2>&1 | tail -30
   exit 1
 fi
