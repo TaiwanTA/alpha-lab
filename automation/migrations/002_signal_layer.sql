@@ -16,6 +16,19 @@
 -- to create legacy 1:1 signals for existing items and remap FKs.
 
 -- 1. Rename signal_events → items
+--    如果 public.items 已存在(Mastra 擷取表),先 rename 到 mastra_items
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.tables
+    WHERE table_schema = 'public' AND table_name = 'items'
+  ) THEN
+    ALTER TABLE items RENAME TO mastra_items;
+    ALTER INDEX IF EXISTS items_pkey RENAME TO mastra_items_pkey;
+  END IF;
+END $$;
+
+-- Now signal_events can safely be renamed to items
 ALTER TABLE signal_events RENAME TO items;
 
 -- Rename constraints/indexes to match new table name
@@ -25,7 +38,23 @@ ALTER INDEX IF EXISTS signal_events_investor_source_url_published_at_content_has
   RENAME TO items_investor_source_url_published_at_content_hash_key;
 
 -- 2. Create signals table
-CREATE TABLE IF NOT EXISTS signals (
+--    如果已存在(Mastra 等),先 DROP(只在空表時才安全)
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.tables
+    WHERE table_schema = 'public' AND table_name = 'signals'
+  ) THEN
+    -- 檢查是否有資料;有資料則中止
+    IF EXISTS (SELECT 1 FROM signals LIMIT 1) THEN
+      RAISE EXCEPTION 'signals table exists and has data; manual migration required';
+    END IF;
+    DROP TABLE IF EXISTS signal_items;
+    DROP TABLE signals CASCADE;
+  END IF;
+END $$;
+
+CREATE TABLE signals (
   id uuid PRIMARY KEY,
   title text NOT NULL,
   description text NOT NULL,
