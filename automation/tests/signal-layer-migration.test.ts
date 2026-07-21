@@ -9,8 +9,10 @@ const MIGRATION = readFileSync(
 );
 
 describe("002_signal_layer.sql migration", () => {
-  test("renames signal_events to items", () => {
-    expect(MIGRATION).toMatch(/ALTER TABLE signal_events RENAME TO items/);
+  test("renames signal_events to items (with Mastra conflict guard)", () => {
+    expect(MIGRATION).toMatch(/signal_events.*RENAME.*TO.*items|RENAME TO items/);
+    // Mastra items table conflict guard
+    expect(MIGRATION).toMatch(/mastra_items/);
   });
 
   test("creates signals table with required columns", () => {

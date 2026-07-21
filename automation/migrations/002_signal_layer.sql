@@ -16,7 +16,18 @@
 -- to create legacy 1:1 signals for existing items and remap FKs.
 
 -- 1. Rename signal_events → items
-ALTER TABLE signal_events RENAME TO items;
+--    如果 public.items 已存在(Mastra 擷取表),先 rename 到 mastra_items
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.tables
+    WHERE table_schema = 'public' AND table_name = 'items'
+      AND table_name <> 'signal_events'
+  ) THEN
+    ALTER TABLE items RENAME TO mastra_items;
+    ALTER INDEX IF EXISTS items_pkey RENAME TO mastra_items_pkey;
+  END IF;
+END $$;
 
 -- Rename constraints/indexes to match new table name
 ALTER TABLE items RENAME CONSTRAINT signal_events_pkey TO items_pkey;
