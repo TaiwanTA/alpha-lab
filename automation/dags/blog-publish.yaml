@@ -10,10 +10,12 @@
 #   - `working_dir:` (不是 `dir:`);`DAG_RUN_ID` (不是 `DAGU_RUN_ID`)。
 #   - `${DAG_RUN_WORK_DIR}` 是 v2.10.7 内置的绝对 `work/` 路径。
 #
-# 子 DAG 接收两个参数:
+# 子 DAG 接收三個參數:
 #   - `research_run_id` (已接受且被 publication worker claim 的 UUID)
 #   - `claim_owner` (publication worker 的 DAG_RUN_ID,用于 release claim)
-#   - `runtime_sha` (保留接口;目前未使用 — 见下方说明)
+#   - `runtime_sha` (runtime commit SHA,由 github-publish.ts 寫入文末
+#     `## 來源` 之後的 HTML 註解 `<!-- alpha-lab runtime: <sha> -->`,作為
+#     「這篇文章是在哪個 repo 版本下被產出」的溯源標記)
 #
 # 流程:
 #   1. materialize_candidate:从 DB 拉 candidate_markdown 写到工作目录
@@ -35,7 +37,7 @@ params:
 
 artifacts:
   enabled: true
-timeout_sec: 600
+timeout_sec: 900
 type: graph
 
 # 容器模式下 /bin/sh → dash,不支援 pipefail。用 bash 執行
