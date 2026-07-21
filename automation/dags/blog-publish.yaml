@@ -67,8 +67,6 @@ handler_on:
         # row survives handler execution and is finalized by the next parent run.
         bun run /opt/alpha-lab/automation/commands/publish-next-research.ts --release-claim "${params.research_run_id}" --owner "${params.claim_owner}"
       fi
-    env:
-      - DATABASE_URL=${DATABASE_URL}
   exit:
     run: |
       set -euo pipefail
@@ -82,9 +80,6 @@ handler_on:
 steps:
   - id: checkout
     run: bun /opt/alpha-lab/automation/commands/clone-publish.ts
-    env:
-      - GIT_READ_TOKEN=${GIT_READ_TOKEN}
-
   - id: record_workdir
     depends: [checkout]
     working_dir: ./workspace/publish
@@ -101,8 +96,6 @@ steps:
         --owner "${params.claim_owner}" \
         --output "${WORKDIR}/candidate.md"
       test -s "${WORKDIR}/candidate.md"
-    env:
-      - DATABASE_URL=${DATABASE_URL}
 
   - id: publish_draft
     depends: [materialize_candidate]
@@ -114,8 +107,6 @@ steps:
         --candidate "${WORKDIR}/candidate.md" \
         --blog-dir "${WORKDIR}/blog" \
         --runtime-sha "$RUNTIME_SHA"
-    env:
-
 
   - id: diff_gate_count
     depends: [publish_draft]
@@ -230,9 +221,6 @@ steps:
       fi
       printf '%s\n' "${PR_URL}"
 
-    env:
-      - DATABASE_URL=${DATABASE_URL}
-      - GH_PR_TOKEN=${GH_PR_TOKEN}
     retry_policy:
       limit: 1
       interval_sec: 30
