@@ -1,4 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 
 import {
   parseInvestorSources,
@@ -12,6 +14,13 @@ import {
   type XTweet,
 } from "../lib/x-client.ts";
 import { commitSourceBatch } from "../commands/ingest-events.ts";
+
+const HERE = dirname(new URL(import.meta.url).pathname);
+
+const INGEST_SOURCE = readFileSync(
+  join(HERE, "..", "commands", "ingest-events.ts"),
+  "utf8",
+);
 
 // ---------------------------------------------------------------------------
 // parseInvestorSources — strict X-only YAML registry parser.
@@ -494,14 +503,14 @@ describe("commitSourceBatch", () => {
       { id: "2", text: "new", createdAt: new Date("2026-07-02T00:00:00.000Z") },
       { id: "1", text: "duplicate", createdAt: new Date("2026-07-01T00:00:00.000Z") },
     ];
-    let signalInsert = 0;
+    let insertCount = 0;
     const tx = async (
       stringsOrValues: TemplateStringsArray | Record<string, unknown>,
     ) => {
       if (!Array.isArray(stringsOrValues)) return "values";
-      if (stringsOrValues.join("").includes("INSERT INTO signal_events")) {
-        signalInsert += 1;
-        return signalInsert === 1 ? [{ id: "inserted" }] : [];
+      if (stringsOrValues.join("").includes("INSERT INTO items")) {
+        insertCount += 1;
+        return insertCount === 1 ? [{ id: "inserted" }] : [];
       }
       return [];
     };
@@ -515,5 +524,32 @@ describe("commitSourceBatch", () => {
     );
 
     expect(result).toEqual({ inserted: 1, cursor: "2" });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Task 7 — signal layer: ingest-events must insert into the renamed `items`
+// table, dropping the dropped `status` / `supersedes_event_id` columns.
+// ---------------------------------------------------------------------------
+
+describe("ingest-events signal layer", () => {
+  test("inserts into the items table (not signal_events)", () => {
+    expect(INGEST_SOURCE).toMatch(/INSERT INTO items/);
+    expect(INGEST_SOURCE).not.toMatch(/INSERT INTO signal_events/);
+  });
+
+  test("does not insert a status field", () => {
+    expect(INGEST_SOURCE).not.toMatch(/status\s*:/);
+    expect(INGEST_SOURCE).not.toMatch(/X_SIGNAL_TYPE.*status/);
+  });
+
+  test("does not reference supersedes_event_id", () => {
+    expect(INGEST_SOURCE).not.toMatch(/supersedes_event_id/);
+  });
+
+  test("does not set classified_at to a non-null value", () => {
+    // classified_at defaults to NULL in the DB; ingest must not assign it.
+    expect(INGEST_SOURCE).not.toMatch(/classified_at:\s*now/);
+    expect(INGEST_SOURCE).not.toMatch(/classified_at:\s*[^n]/);
   });
 });
