@@ -1,38 +1,32 @@
 # 子 DAG,由 `publish-next-research` 以 stored research run 调用。
-# 发布只推送 `publish/<DAG_RUN_ID>` 分支并创建 PR,不直接推送 `main`。
+# 通过 GitHub Contents API 直接把候选 Markdown commit 到 main,
+# 不开 PR、不开分支、不需要本地 git workstation。
 #
 # 已验证 Dagu v2.10.7 语法:
 #   - DAG-level `env:` 是唯一能展開 ${NAME} (從 dagu server process env
 #     讀值) 的位置。step `env:` 區塊的 ${env.NAME} / ${NAME} 都不會展開
-#     (會被當字串字面值傳給子進程,造成 gh 401 Bad credentials,
-#     PR #69 修)。所以 step env 廢棄,只用 DAG-level env。
+#     (會被當字串字面值傳給子進程)。所以 step env 廢棄,只用 DAG-level env。
 #   - `output: VARNAME` 把 step 的 stdout 收成字符串变量。
-#   - `preconditions: [...]` 使用 shell condition 或值比对作为
-#     gate step;这是 diff-count gate 的实现方式。
 #   - `working_dir:` (不是 `dir:`);`DAG_RUN_ID` (不是 `DAGU_RUN_ID`)。
-#   - `${DAG_RUN_WORK_DIR}` 是 v2.10.7 内置的绝对 `work/` 路径
-#     (已用 success/failure exit-handler fixture 验证)。
+#   - `${DAG_RUN_WORK_DIR}` 是 v2.10.7 内置的绝对 `work/` 路径。
 #
 # 子 DAG 接收两个参数:
 #   - `research_run_id` (已接受且被 publication worker claim 的 UUID)
-#   - `runtime_sha` (发布 checkout 的 commit SHA)
+#   - `claim_owner` (publication worker 的 DAG_RUN_ID,用于 release claim)
+#   - `runtime_sha` (保留接口;目前未使用 — 见下方说明)
 #
 # 流程:
-#   1. 重新 checkout `main` 到一个新的 worktree
-#      (绝不是产出 candidate 的那个)
-#   2. 把 candidate 放到新 worktree
-#   3. 运行纯函数 draft publisher (CLI 入口见 commands/publish-draft.ts)
-#   4. 用确定性的 diff-count gate 确认只有一个新增 Markdown 文件
-#   5. 创建 `publish/<DAG_RUN_ID>` 分支,提交 Markdown 并推送到远程
-#   6. 使用 `gh pr create` 创建指向 `main` 的 PR
+#   1. materialize_candidate:从 DB 拉 candidate_markdown 写到工作目录
+#   2. publish_via_api:跑 github-publish.ts
+#      - renderPublishContent 验证 frontmatter / body / sources
+#      - GET /contents/{path}?ref=main 检查是否已存在 (idempotent)
+#      - PUT /contents/{path} branch=main → 一次 call = commit + push
+# 不運行 git clone / git push / gh CLI (走 REST API 取代)。
+# 本地 lint (renderPublishContent 的三道验证) 取代 reviewer bot 把关格式。
 #
-# 不运行父 worktree 的任何 script;这里的 checkout 跟父的
-# `workspace/app` 完全独立。
-#
-# checkout 委托给 `commands/clone-publish.ts` (bun),因为 Dagu 2.10.7 的
-# `git.checkout` 使用 go-git,对 fine-grained PAT 会失败。token 走
-# GIT_ASKPASS 协定 (临時檔 + 0700),不入 argv / URL。
-# 取代旧 scripts/clone-publish.sh + git-askpass.sh (PR 2)。
+# ruleset:
+#   repo-level ruleset 18699827 已放鬆 pull_request rule,
+#   PAT (GH_PR_TOKEN) 可直推 main。deletion / non_fast_forward 仍保護。
 
 params:
   research_run_id: ""
@@ -41,189 +35,57 @@ params:
 
 artifacts:
   enabled: true
-timeout_sec: 900
+timeout_sec: 600
 type: graph
 
 # 容器模式下 /bin/sh → dash,不支援 pipefail。用 bash 執行
-# 所有 step commands,跟 native 模式 (Fedora /bin/sh → bash)
+# 所有 step commands,跟 native 模式 (Fedora / bin/sh → bash)
 # 行為一致。
 
 shell: ["bash", "-e"]
 env:
   - DATABASE_URL=${DATABASE_URL}
-  - GIT_READ_TOKEN=${GIT_READ_TOKEN}
+  # github-publish.ts 只需要 GH_PR_TOKEN 走 Bearer 認證 GitHub REST API。
+  # 不再需要 GIT_READ_TOKEN (沒有 git clone)、GH_TOKEN (沒有 gh CLI)、
+  # GIT_SSH_COMMAND / SSH key (沒有 git push)。
   - GH_PR_TOKEN=${GH_PR_TOKEN}
-  # gh CLI 優先讀 GH_TOKEN 做認證。DAG-level env 是唯一能展開 ${NAME}
-  # 的位置 (step env 區塊的 ${env.NAME} 在 dagu 2.10.7 不會展開,
-  # 只會被當字串字面值傳給子進程,造成 gh 401 Bad credentials,
-  # 詳見 PR #69 修復)。
-  - GH_TOKEN=${GH_PR_TOKEN}
 handler_on:
   failure:
     run: |
       if [ -n "${params.research_run_id}" ]; then
-        # mark_pushed writes this DB-backed state after a successful push.
-        # releasePublicationClaim only deletes status='claimed', so a pushed
-        # row survives handler execution and is finalized by the next parent run.
+        # publish 失敗時釋放 claim,讓下次 publish-next-research retry
+        # 可以重新 claim 同一篇研究。releasePublicationClaim 只刪
+        # status='claimed' 的 row,pushed/published 不受影響。
         bun run /opt/alpha-lab/automation/commands/publish-next-research.ts --release-claim "${params.research_run_id}" --owner "${params.claim_owner}"
-      fi
-  exit:
-    run: |
-      set -euo pipefail
-      if [ -n "${DAG_RUN_WORK_DIR:-}" ] && [ -d "${DAG_RUN_WORK_DIR}/workspace/publish/blog" ]; then
-        rm -rf -- \
-          "${DAG_RUN_WORK_DIR}/workspace/publish/blog/node_modules" \
-          "${DAG_RUN_WORK_DIR}/workspace/publish/blog/dist" \
-          "${DAG_RUN_WORK_DIR}/workspace/publish/blog/.astro"
       fi
 
 steps:
-  - id: checkout
-    run: bun /opt/alpha-lab/automation/commands/clone-publish.ts
-  - id: record_workdir
-    depends: [checkout]
-    working_dir: ./workspace/publish
-    run: pwd
-    output: WORKDIR
-
   - id: materialize_candidate
-    depends: [record_workdir]
-    working_dir: ./workspace/publish
     run: |
       set -euo pipefail
       bun /opt/alpha-lab/automation/commands/materialize-research-candidate.ts \
         --research-run-id "${params.research_run_id}" \
         --owner "${params.claim_owner}" \
-        --output "${WORKDIR}/candidate.md"
-      test -s "${WORKDIR}/candidate.md"
+        --output "${DAG_RUN_WORK_DIR}/candidate.md"
+      test -s "${DAG_RUN_WORK_DIR}/candidate.md"
 
-  - id: publish_draft
+  - id: publish_via_api
     depends: [materialize_candidate]
-    working_dir: ./workspace/publish
-    run: |
-      set -euo pipefail
-      RUNTIME_SHA="$(git -C "${WORKDIR}" rev-parse HEAD)"
-      bun /opt/alpha-lab/automation/commands/publish-draft.ts \
-        --candidate "${WORKDIR}/candidate.md" \
-        --blog-dir "${WORKDIR}/blog" \
-        --runtime-sha "$RUNTIME_SHA"
-
-  - id: diff_gate_count
-    depends: [publish_draft]
-    working_dir: ./workspace/publish
-    run: |
-      set -euo pipefail
-      # `git add` 在 path 沒變化時回 0,在真的有錯時 (index
-      # lock、權限、路徑不存在) 回非零。讓錯浮上來,不要
-      # 用 || true 吞掉。
-      # 嚴格 scope `git add` 只到 *.md:只 stage Markdown,不
-      # 把 build 之後的 package-lock / dist / .astro 一併 commit。
-      git -C "${WORKDIR}" add -- 'blog/src/content/blog/*.md'
-      git -C "${WORKDIR}" diff --cached --name-only -- 'blog/src/content/blog/*.md' | wc -l
-    output: DIFF_COUNT
-
-  - id: diff_gate_publish_path
-    depends: [diff_gate_count]
-    preconditions:
-      - condition: "[ ${DIFF_COUNT:-0} -eq 1 ]"
-    working_dir: ./workspace/publish
-    run: |
-      set -euo pipefail
-      git -C "${WORKDIR}" diff --cached --name-only -- 'blog/src/content/blog/*.md' | tr -d '\n'
-    output: DIFF_PATH
-
-  - id: push_and_mark
-    depends: [diff_gate_publish_path]
-    working_dir: ./workspace/publish
     run: |
       set -euo pipefail
       : "${GH_PR_TOKEN:?GH_PR_TOKEN 必须配置在 /etc/alpha-lab/secrets.env}"
-      # DAG-level env 已加 GH_TOKEN=${GH_PR_TOKEN},讓 gh CLI 能讀到 token。
-      # step env 區塊的 ${env.NAME} 在 dagu 2.10.7 不會展開 (會當字串字面值)。
-      BRANCH="publish/${DAG_RUN_ID}"
-      export GIT_SSH_COMMAND="ssh -i /var/lib/alpha-lab/dagu/.ssh/id_ed25519 -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new"
-      REMOTE="git@github.com:TaiwanTA/alpha-lab.git"
-      git -C "${WORKDIR}" remote set-url origin "${REMOTE}"
-
-      # 先試切換到本地既存 BRANCH (retry 時存在),否則建新的。
-      # 原本用 git fetch ${BRANCH}:${BRANCH} 在 retry 時 fetch 已 checkout 的 branch
-      # 會 "refusing to fetch into branch checked out at" fatal,改為本地 switch。
-      if git -C "${WORKDIR}" switch "${BRANCH}" 2>/dev/null; then
-        :
-      else
-        git -C "${WORKDIR}" switch -c "${BRANCH}"
-      fi
-
-      # 重试时保留已经完成的 commit,首次运行才提交暂存内容。
-      if git -C "${WORKDIR}" diff --cached --quiet; then
-        COMMIT_SUBJECT="$(git -C "${WORKDIR}" log -1 --format=%s)"
-        case "$COMMIT_SUBJECT" in
-          *"(${DAG_RUN_ID})") ;;
-          *)
-            echo "没有找到当前发布的已暂存 Markdown" >&2
-            exit 1
-            ;;
-        esac
-      else
-        git -C "${WORKDIR}" config user.email "alpha-lab-bot@users.noreply.github.com"
-        git -C "${WORKDIR}" config user.name "alpha-lab-bot"
-        git -C "${WORKDIR}" commit -m "feat(blog): publish ${DIFF_PATH} (${DAG_RUN_ID})"
-      fi
-
-      # 先记录 pushed,推送失败时恢复 claimed,避免失败 handler 丢失状态。
-      bun /opt/alpha-lab/automation/commands/publish-next-research.ts --mark-pushed "${params.research_run_id}" --owner "${params.claim_owner}"
-
-      push_branch() {
-        if [ "$#" -eq 0 ]; then
-          if ! git -C "${WORKDIR}" push "git@github.com:TaiwanTA/alpha-lab.git" "HEAD:${BRANCH}"; then
-            bun /opt/alpha-lab/automation/commands/publish-next-research.ts --revert-pushed "${params.research_run_id}" --owner "${params.claim_owner}"
-            exit 128
-          fi
-        elif ! git -C "${WORKDIR}" push "$1" "git@github.com:TaiwanTA/alpha-lab.git" "HEAD:${BRANCH}"; then
-          bun /opt/alpha-lab/automation/commands/publish-next-research.ts --revert-pushed "${params.research_run_id}" --owner "${params.claim_owner}"
-          exit 128
-        fi
-      }
-
-      # 重试时先读取远程分支;相同 commit 不重复推送,不同 commit 使用 lease 覆盖。
-      if git -C "${WORKDIR}" fetch --depth 1 origin "${BRANCH}"; then
-        REMOTE_SHA="$(git -C "${WORKDIR}" rev-parse "origin/${BRANCH}")"
-        LOCAL_SHA="$(git -C "${WORKDIR}" rev-parse HEAD)"
-        if [ "$REMOTE_SHA" != "$LOCAL_SHA" ]; then
-          push_branch "--force-with-lease=refs/heads/${BRANCH}:${REMOTE_SHA}"
-        fi
-      else
-        push_branch
-      fi
-
-      # PR API 暂时失败时保留 pushed,让 retry 复用已经推送的分支。
-      PR_BODY="$(printf '## 发布内容\n- 研究 run: %s\n- Markdown: %s\n\n请在合并前确认 Blog PR CI 已通过。' \
-        "${params.research_run_id}" "${DIFF_PATH}")"
-      if ! PR_URL="$(gh pr list \
-        --repo TaiwanTA/alpha-lab \
-        --head "${BRANCH}" \
-        --state open \
-        --json url \
-        --jq '.[0].url' 2> >(cat >&2))"; then
-        echo "无法查询现有 PR,保留 pushed 状态等待重试" >&2
-        exit 1
-      fi
-      if [ -z "$PR_URL" ]; then
-        if ! PR_URL="$(gh pr create \
-          --repo TaiwanTA/alpha-lab \
-          --base main \
-          --head "${BRANCH}" \
-          --title "发布文章: ${DIFF_PATH##*/}" \
-          --body "${PR_BODY}" 2> >(cat >&2))"; then
-          echo "创建 PR 失败,保留 pushed 状态等待重试" >&2
-          exit 1
-        fi
-      fi
-      printf '%s\n' "${PR_URL}"
-
+      # github-publish.ts 內部:先 GET /contents 確認沒有已存在檔 (idempotent),
+      # 再 PUT commit 到 main。一次 call = commit + push,沒有中間態。
+      # 新版不需要 DB 的 pushed 中間狀態:PUT 成功即發布完成,失敗即什麼都沒做。
+      # 失敗時 failure handler 會 release claim,下次重新 claim 跑 GET+PUT,
+      # 若檔案已存在會 detected-as-unchanged 成功 (kill -9 後恢復路徑)。
+      bun /opt/alpha-lab/automation/commands/github-publish.ts \
+        --candidate "${DAG_RUN_WORK_DIR}/candidate.md" \
+        --runtime-sha "${params.runtime_sha}" \
+        --run-id "${DAG_RUN_ID}"
     retry_policy:
       limit: 1
       interval_sec: 30
       exit_code: [128, 1]
     stdout:
-      outputs: PR_URL
+      outputs: PUBLISH_RESULT

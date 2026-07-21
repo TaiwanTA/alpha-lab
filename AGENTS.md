@@ -75,8 +75,8 @@
 - `MINIMAX_API_KEY` — pi-ai MiniMax provider
 - `X_BEARER_TOKEN` — X API v2 event ingestion
 - `TWELVE_DATA_API_KEY` — 30 交易日 adjusted-close
-- `GIT_READ_TOKEN` — `commands/clone-publish.ts` 走 GIT_ASKPASS
-- `GH_PR_TOKEN` — `blog-publish` DAG 的 `gh pr create`
+- `GIT_READ_TOKEN` — dagu admin.yaml `git_sync` (目前 disabled) 預留
+- `GH_PR_TOKEN` — `blog-publish` DAG 走 GitHub Contents API 直推 main
 - `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` — hindsight-db + alpha-lab-postgres 共用（pgdata 物理隔離，user 共用不影響資料）
 
 `/etc/alpha-lab/stack.env`（interpolation 變數，非敏感）：

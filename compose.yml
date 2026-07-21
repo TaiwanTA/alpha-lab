@@ -35,7 +35,8 @@ services:
       HOME: /var/lib/alpha-lab/dagu
       DAGU_HOME: /var/lib/alpha-lab/dagu
       # 以 Compose DNS 連線，不能在 container 內使用 127.0.0.1。
-      # GH_PR_TOKEN / GIT_READ_TOKEN 由 secrets.env 注入。
+      # GH_PR_TOKEN (github-publish.ts 走 REST API) / GIT_READ_TOKEN
+      # (dagu admin.yaml git_sync 未來用) 由 secrets.env 注入。
       HINDSIGHT_BASE_URL: http://hindsight:8888
     volumes:
       # state 路徑跟 host bind mount 共享，PUID 999 對齊 volume owner。

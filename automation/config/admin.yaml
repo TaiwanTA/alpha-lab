@@ -3,12 +3,8 @@
 # Non-secret configuration only. The bootstrap admin credential is
 # supplied through Dagu's first-run loopback UI and is stored in
 # the VM secret store, never in this file. `GIT_READ_TOKEN` 是
-# git-pull automation/dags/ 用的 fine-grained PAT,放在
-# /etc/alpha-lab/secrets.env (mode 0440 root:alpha-lab-dagu)。
-# 注意:dagu 內部 `${env.NAME}` 解析在 dagu 2.10.7 已實測可用,
-# 跟舊註解講的「token 經 env_file 注入」不同。token 不被 dagu 自己
-# 使用,而是給 blog-publish 的 `commands/clone-publish.ts` 走
-# GIT_ASKPASS 協定用。
+# dagu git_sync 用的 fine-grained PAT,放在 /etc/alpha-lab/secrets.env
+# (mode 0440 root:alpha-lab-dagu)。
 #
 # Verified Dagu v2.10.7 contract:
 #   - `${env.NAME}` is the only form that resolves to the process

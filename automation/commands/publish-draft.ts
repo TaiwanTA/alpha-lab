@@ -1,16 +1,22 @@
 /**
  * 純粹的草稿發布器。
  *
- * 接收 Hermes 產出的候選 Markdown,經過嚴格驗證後原子地
- * 寫入 blog 內容目錄。本實作刻意只做檔案系統操作:
- * 沒有 Git、Dagu、網路、子行程。
-  *
+ * 接收 Hermes 產出的候選 Markdown,經過嚴格驗證後算出固定的
+ * 目標路徑與內容。本實作刻意只做純函數轉換:沒有 Git、Dagu、
+ * 網路、子行程、檔案系統寫入。
+ *
  *
  * 對外介面:
- *   - publishDraft(input):驗證 frontmatter、算出固定的目標路徑、
- *     寫入一個檔案,並回報目標檔是否已存在相同內容。
-  *
- *   - PublishDraftInput / PublishDraftResult:伴隨的型別。
+ *   - renderPublishContent(candidatePath, runtimeSha):驗證
+ *     frontmatter、算出目標檔相對路徑與最終 bytes。純函數,
+ *     不碰磁碟。給 github-publish.ts (走 Contents API) 與
+ *     publishDraft (寫本地檔) 共用。
+ *
+ *   - publishDraft(input):renderPublishContent + 把 bytes
+ *     寫到 blogDir 下,並回報目標檔是否已存在相同內容。
+ *
+ *   - PublishDraftInput / PublishDraftResult / RenderedContent:
+ *     伴隨的型別。
  */
 
 import { readFileSync } from "node:fs";
@@ -26,6 +32,13 @@ export type PublishDraftInput = {
 export type PublishDraftResult = {
   action: "created" | "unchanged";
   targetPath: string;
+};
+
+export type RenderedContent = {
+  /** Relative to repo root: `blog/src/content/blog/${date}-${slug}.md` */
+  repoRelPath: string;
+  /** Final Markdown bytes (frontmatter forced to `status: unverified` + runtime SHA comment) */
+  content: string;
 };
 
 const ALLOWED_KEY: Record<string, true> = {
@@ -149,18 +162,15 @@ function slugifyTitle(title: string): string {
   return cleaned;
 }
 
-function deriveTargetPath(blogDir: string, date: string, title: string): string {
+function deriveRepoRelPath(date: string, title: string): string {
   const slug = slugifyTitle(title);
   if (slug.includes("..") || slug.includes("/") || slug.includes("\\")) {
     throw new PublishError(`title slug contains path-traversal characters: ${slug}`);
   }
-  const target = resolve(blogDir, "src", "content", "blog", `${date}-${slug}.md`);
-  const allowedRoot = resolve(blogDir, "src", "content", "blog");
-  const withSep = allowedRoot.endsWith(sep) ? allowedRoot : allowedRoot + sep;
-  if (!(target === allowedRoot || target.startsWith(withSep))) {
-    throw new PublishError(`target path escapes blog/src/content/blog/: ${target}`);
-  }
-  return target;
+  // repo-relative: blog/src/content/blog/${date}-${slug}.md
+  // 呼叫者 (publishDraft 寫本地檔 / github-publish.ts 走 Contents API)
+  // 各自再拼絕對路徑或直接當內容路徑使用。
+  return `${date}-${slug}.md`;
 }
 
 function appendRuntimeSha(body: string, runtimeSha: string): string {
@@ -174,8 +184,17 @@ function appendRuntimeSha(body: string, runtimeSha: string): string {
   return lines.join("\n");
 }
 
-export async function publishDraft(input: PublishDraftInput): Promise<PublishDraftResult> {
-  const { candidatePath, blogDir, runtimeSha } = input;
+/**
+ * 純函數:讀 candidate、驗證、產出目標檔的 repo-relative 路徑與
+ * 最終 Markdown bytes (frontmatter 強制 `status: unverified` +
+ * runtime SHA 註解插入 ## 來源 之後)。
+ *
+ * 不碰磁碟、不碰網路,給 publishDraft 與 github-publish.ts 共用。
+ */
+export function renderPublishContent(
+  candidatePath: string,
+  runtimeSha: string,
+): RenderedContent {
   const parsed = matter(readFileSync(candidatePath, "utf8"));
 
   validateFrontmatter(parsed.data);
@@ -184,13 +203,29 @@ export async function publishDraft(input: PublishDraftInput): Promise<PublishDra
 
   const date = parsed.data.date as string;
   const title = parsed.data.title as string;
-  const targetPath = deriveTargetPath(blogDir, date, title);
+  const fileName = deriveRepoRelPath(date, title);
 
   const forced = { ...parsed.data, status: "unverified" as const };
   const bodyWithSha = appendRuntimeSha(parsed.content, runtimeSha);
   const content = matter.stringify(bodyWithSha, forced as never);
 
-  const contentBytes = Buffer.from(content, "utf8");
+  return { repoRelPath: `blog/src/content/blog/${fileName}`, content };
+}
+
+export async function publishDraft(input: PublishDraftInput): Promise<PublishDraftResult> {
+  const { candidatePath, blogDir, runtimeSha } = input;
+  const rendered = renderPublishContent(candidatePath, runtimeSha);
+
+  // renderPublishContent 只回 repo-relative 路徑;本地寫檔要把
+  // blogDir 前綴拼上,並用 resolve 防 path-traversal 脫逃。
+  const targetPath = resolve(blogDir, rendered.repoRelPath.slice("blog/".length));
+  const allowedRoot = resolve(blogDir);
+  const withSep = allowedRoot.endsWith(sep) ? allowedRoot : allowedRoot + sep;
+  if (!(targetPath === allowedRoot || targetPath.startsWith(withSep))) {
+    throw new PublishError(`target path escapes blogDir: ${targetPath}`);
+  }
+
+  const contentBytes = Buffer.from(rendered.content, "utf8");
   const targetFile = Bun.file(targetPath);
   if (await targetFile.exists()) {
     const existingBytes = Buffer.from(await targetFile.arrayBuffer());
