@@ -63,3 +63,44 @@ describe("002_signal_layer.sql migration", () => {
     expect(MIGRATION).toMatch(/CREATE INDEX.*items_unclassified/);
   });
 });
+
+const MIGRATE_SCRIPT = readFileSync(
+  join(HERE, "..", "commands", "migrate-signal-layer.ts"),
+  "utf8",
+);
+
+describe("migrate-signal-layer.ts script", () => {
+  test("queries orphan items via LEFT JOIN signal_items", () => {
+    expect(MIGRATE_SCRIPT).toMatch(/LEFT JOIN signal_items.*IS NULL/);
+  });
+
+  test("creates 1:1 low-priority signals for orphans", () => {
+    expect(MIGRATE_SCRIPT).toMatch(/INSERT INTO signals/);
+    expect(MIGRATE_SCRIPT).toMatch(/'low'/);
+  });
+
+  test("links via signal_items with primary relation", () => {
+    expect(MIGRATE_SCRIPT).toMatch(/INSERT INTO signal_items/);
+    expect(MIGRATE_SCRIPT).toMatch(/'primary'/);
+  });
+
+  test("remaps research_runs and paper_bets FK through signal_items", () => {
+    expect(MIGRATE_SCRIPT).toMatch(/UPDATE research_runs.*SET signal_id = si\.signal_id/);
+    expect(MIGRATE_SCRIPT).toMatch(/UPDATE paper_bets.*SET signal_id = si\.signal_id/);
+  });
+
+  test("marks all items as classified (legacy)", () => {
+    expect(MIGRATE_SCRIPT).toMatch(/SET classified_at = now\(\)/);
+    expect(MIGRATE_SCRIPT).toMatch(/legacy/);
+  });
+
+  test("never calls process.exit before closeDb", () => {
+    expect(MIGRATE_SCRIPT).not.toMatch(/process\.exit\(/);
+    expect(MIGRATE_SCRIPT).toMatch(/await closeDb\(\)/);
+  });
+
+  test("exit discipline: process.exitCode in catch, closeDb in finally", () => {
+    expect(MIGRATE_SCRIPT).toMatch(/process\.exitCode = 1/);
+    expect(MIGRATE_SCRIPT).toMatch(/finally[\s\S]*closeDb/);
+  });
+});
