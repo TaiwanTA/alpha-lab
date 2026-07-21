@@ -1,0 +1,14 @@
+version: 1
+priorities:
+  high:
+    soft_limit: 5
+    research_schedule: "0 7 * * *"
+    research_model: "MiniMax-M3"
+    research_per_signal: true
+  low:
+    soft_limit: 20
+    research_schedule: "0 8 * * */2"
+    research_model: "MiniMax-M3"
+    research_per_signal: false
+description:
+  max_chars: 500
