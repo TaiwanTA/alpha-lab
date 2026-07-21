@@ -16,7 +16,7 @@ describe("002_signal_layer.sql migration", () => {
   });
 
   test("creates signals table with required columns", () => {
-    expect(MIGRATION).toMatch(/CREATE TABLE IF NOT EXISTS signals/);
+    expect(MIGRATION).toMatch(/CREATE TABLE signals/);
     expect(MIGRATION).toMatch(/title text NOT NULL/);
     expect(MIGRATION).toMatch(/description text NOT NULL/);
     expect(MIGRATION).toMatch(/priority text NOT NULL CHECK\(priority IN \('high','low'\)\)/);
