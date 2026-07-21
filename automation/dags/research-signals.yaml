@@ -1,8 +1,9 @@
 # research-signals DAG — 以 signal 為單位的研究,取代 research-next-event
 # High-priority signals:每天 07:00 UTC (signal-manage 06:00 跑完後)
-# Low-priority signals:每 2 天 08:00 UTC (由獨立的 DAG 或排程處理)
+# Low-priority signals:一併在本 DAG 跑,排在 high 之後
 #
-# preconditions 確保 signal-manage (06:00) 先於 research (07:00)。
+# 排程順序:signal-manage 06:00 → research-signals 07:00
+# 不需要 Dagu precondition — schedule 時間差已保證順序。
 
 schedule: "0 7 * * *"
 timeout_sec: 1800
@@ -23,6 +24,24 @@ steps:
     run: |
       set -euo pipefail
       bun run commands/research-signals.ts --priority high
+    env:
+      - DATABASE_URL=${env.DATABASE_URL}
+      - MINIMAX_API_KEY=${env.MINIMAX_API_KEY}
+      - HINDSIGHT_BASE_URL=${env.HINDSIGHT_BASE_URL}
+      - HINDSIGHT_API_KEY=${env.HINDSIGHT_API_KEY}
+      - HINDSIGHT_BANK_ID=${env.HINDSIGHT_BANK_ID}
+      - TWELVE_DATA_API_KEY=${env.TWELVE_DATA_API_KEY}
+    retry_policy:
+      limit: 2
+      interval_sec: 120
+      exit_code: [1]
+
+  - id: research_low
+    depends: [research_high]
+    working_dir: /opt/alpha-lab/automation
+    run: |
+      set -euo pipefail
+      bun run commands/research-signals.ts --priority low
     env:
       - DATABASE_URL=${env.DATABASE_URL}
       - MINIMAX_API_KEY=${env.MINIMAX_API_KEY}

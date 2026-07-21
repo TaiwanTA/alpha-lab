@@ -14,7 +14,7 @@
 // call via pi-ai's minimaxProvider().streamSimple(), then applies the
 // structured JSON result to the database.
 //
-// Exit discipline: stdout = JSON summary, stderr = logs, exitCode in catch.
+// Exit discipline: stdout = JSON summary (批次 CLI,無單一 run ID),stderr = logs,exitCode in catch.
 // Uses process.exitCode (not hard exit) so closeDb() runs in finally.
 
 import { readFile } from "node:fs/promises";

@@ -7,8 +7,7 @@
 // Exports:
 //   - db              shared `SQL` instance from DATABASE_URL
 //   - closeDb         flushes the connection pool — call from CLI `finally`
-//   - applyMigration  runs 001_phase4_event_ledger.sql + records it in
-//                      schema_migrations; safe to re-run (idempotent)
+//   - applyMigration  runs 001 + 002 SQL migrations, records each in
 //   - repositories    ItemRecord / SignalRecord / ResearchRun / PaperBet / BetOutcome
 //                     for client-side ID generation and parameterized tagged
 //                     SQL for every value.
@@ -43,23 +42,33 @@ export async function closeDb(): Promise<void> {
 // Migration
 // ---------------------------------------------------------------------------
 
-const MIGRATION_VERSION = "001_phase4_event_ledger";
+const MIGRATION_001 = "001_phase4_event_ledger";
+const MIGRATION_002 = "002_signal_layer";
 
 export async function applyMigration(): Promise<void> {
   if (!process.env.DATABASE_URL) {
     throw new Error("DATABASE_URL is required to run migrations");
   }
-  const path = new URL(
+
+  // 001: base schema
+  const path001 = new URL(
     "../migrations/001_phase4_event_ledger.sql",
     import.meta.url,
   ).pathname;
-  await db.file(path);
-  // Use parameterized values — Bun's `db(obj)` interpolation inside a
-  // tagged template is unsafe on bun 1.3.14 (verified empirically: the
-  // unquoted string spills into SQL text, and Postgres rejected the
-  // non-integer literal against `version text`/numeric columns).
+  await db.file(path001);
   await db`
-    INSERT INTO schema_migrations (version) VALUES (${MIGRATION_VERSION})
+    INSERT INTO schema_migrations (version) VALUES (${MIGRATION_001})
+    ON CONFLICT (version) DO NOTHING
+  `;
+
+  // 002: signal layer (rename signal_events→items, add signals + signal_items)
+  const path002 = new URL(
+    "../migrations/002_signal_layer.sql",
+    import.meta.url,
+  ).pathname;
+  await db.file(path002);
+  await db`
+    INSERT INTO schema_migrations (version) VALUES (${MIGRATION_002})
     ON CONFLICT (version) DO NOTHING
   `;
 }

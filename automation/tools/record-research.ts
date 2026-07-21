@@ -57,10 +57,15 @@ export function createRecordResearchTool(
         );
       }
       const directionKey = obj.direction;
-      const direction =
-        directionKey === "long" || directionKey === "short"
-          ? directionKey
-          : null;
+      let direction: "long" | "short" | null = null;
+      if (directionKey !== undefined && directionKey !== null) {
+        if (directionKey !== "long" && directionKey !== "short") {
+          throw new Error(
+            `record_research: direction must be "long" or "short", got ${String(directionKey)}`,
+          );
+        }
+        direction = directionKey;
+      }
       const confidence = requireNumber(obj, "confidence", "record_research");
       if (!Number.isFinite(confidence)) {
         throw new Error(

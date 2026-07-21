@@ -45,7 +45,7 @@ description:
     const yaml = `
 version: 1
 priorities:
-  high:
+  medium:
     soft_limit: 5
     research_schedule: "0 7 * * *"
     research_model: "MiniMax-M3"
@@ -58,11 +58,7 @@ priorities:
 description:
   max_chars: 500
 `;
-    // valid — test a separate invalid one
-    const invalid = yaml.replace("'high'", "'medium'");
-    // just verify valid passes
-    const config = parseSignalConfig(yaml);
-    expect(config.priorities.high.soft_limit).toBe(5);
+    expect(() => parseSignalConfig(yaml)).toThrow(/high/);
   });
 
   test("rejects malformed YAML", () => {
