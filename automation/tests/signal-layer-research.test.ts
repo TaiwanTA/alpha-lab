@@ -182,3 +182,44 @@ describe("research.ts buildPrompt signal layer", () => {
     expect(RESEARCH_AGENT).not.toMatch(/researching one signal_event/);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Task 11: research-signals.ts CLI
+// ---------------------------------------------------------------------------
+
+const RESEARCH_CLI = readFileSync(
+  join(HERE, "..", "commands", "research-signals.ts"),
+  "utf8",
+);
+
+describe("research-signals.ts CLI", () => {
+  test("claims a signal (not an event)", () => {
+    expect(RESEARCH_CLI).toMatch(/claim.*signal|SignalRecord/);
+  });
+
+  test("reads signal items + timeline for prompt context", () => {
+    expect(RESEARCH_CLI).toMatch(/getItems|getTimeline/);
+  });
+
+  test("passes signal + items + timeline to buildPrompt", () => {
+    expect(RESEARCH_CLI).toMatch(/buildPrompt\(/);
+  });
+
+  test("updates signal description after research", () => {
+    expect(RESEARCH_CLI).toMatch(/updateDescription|update_signal/);
+  });
+
+  test("stdout outputs run ID, logs to stderr", () => {
+    expect(RESEARCH_CLI).toMatch(/process\.stdout/);
+    expect(RESEARCH_CLI).toMatch(/console\.error/);
+  });
+
+  test("exit 0 no-claim when no pending signals", () => {
+    expect(RESEARCH_CLI).toMatch(/no-claim|nothing to do/);
+  });
+
+  test("never calls process.exit before closeDb", () => {
+    expect(RESEARCH_CLI).not.toMatch(/process\.exit\(/);
+    expect(RESEARCH_CLI).toMatch(/closeDb/);
+  });
+});
