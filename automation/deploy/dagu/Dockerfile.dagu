@@ -40,13 +40,17 @@ RUN apt-get update && \
 
 # 從 stage 1 COPY dagu binary（statically linked, 197MB）。
 COPY --from=dagu-donor /usr/local/bin/dagu /usr/local/bin/dagu
-# 建立 uid 999 / gid 982 user 對齊 host bind mount volume owner。
+# 建立 uid 999 / gid 982 user (alpha-lab-dagu) 對齊 host bind mount volume owner。
+# USER 999:982 (下方) 決定 container 的執行身分 (不是 compose user: 欄位)。
 # git/ssh 命令啟動時要 resolve uid -> username (給 user@host 格式),
 # 若 container 內 /etc/passwd 沒 entry 會 "No user exists for uid 999"
 # 導致 git push 失敗 (PR #63 重寫成 oven/bun base 後遺失,PR #67 修)。
+# -m 建立 home dir /var/lib/alpha-lab/dagu:production 用 bind mount 覆蓋,
+# 但 image 單獨跑 (CI / 本地測試) 時 ssh 要寫 $HOME/.ssh/known_hosts,
+# 沒 -m 會因 home dir 不存在 fail (gemini + kilo review PR #67)。
 RUN mkdir -p /etc/dagu && \
     groupadd -g 982 alpha-lab-dagu && \
-    useradd -u 999 -g 982 -d /var/lib/alpha-lab/dagu -s /bin/bash alpha-lab-dagu
+    useradd -u 999 -g 982 -m -d /var/lib/alpha-lab/dagu -s /bin/bash alpha-lab-dagu
 
 # Build context 是 repo root；先 COPY package manifest 再 bun install。
 # 單獨一層讓 tsconfig/source 修改不會使 production dependency layer 失效。
