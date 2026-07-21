@@ -162,14 +162,20 @@ function slugifyTitle(title: string): string {
   return cleaned;
 }
 
-function deriveRepoRelPath(date: string, title: string): string {
+/** Repo-relative prefix for published blog markdown. Shared between
+ *  publishDraft (本地寫檔,用 blogDir 前綴取代 `blog/`) 與
+ *  github-publish.ts (走 Contents API,直接用 repo-relative)。
+ *  不要在呼叫端再寫死這個字串。 */
+export const BLOG_CONTENT_DIR = "blog/src/content/blog";
+
+function deriveFileName(date: string, title: string): string {
   const slug = slugifyTitle(title);
   if (slug.includes("..") || slug.includes("/") || slug.includes("\\")) {
     throw new PublishError(`title slug contains path-traversal characters: ${slug}`);
   }
-  // repo-relative: blog/src/content/blog/${date}-${slug}.md
-  // 呼叫者 (publishDraft 寫本地檔 / github-publish.ts 走 Contents API)
-  // 各自再拼絕對路徑或直接當內容路徑使用。
+  // 只回檔名 (${date}-${slug}.md);repo-relative 前綴由呼叫者用
+  // BLOG_CONTENT_DIR 拼。避免本地模式 (publishDraft 在 blogDir 下)
+  // 與 API 模式 (github-publish.ts 用 repo-relative) 各自硬編常數。
   return `${date}-${slug}.md`;
 }
 
@@ -203,22 +209,27 @@ export function renderPublishContent(
 
   const date = parsed.data.date as string;
   const title = parsed.data.title as string;
-  const fileName = deriveRepoRelPath(date, title);
+  const fileName = deriveFileName(date, title);
 
   const forced = { ...parsed.data, status: "unverified" as const };
   const bodyWithSha = appendRuntimeSha(parsed.content, runtimeSha);
   const content = matter.stringify(bodyWithSha, forced as never);
 
-  return { repoRelPath: `blog/src/content/blog/${fileName}`, content };
+  return { repoRelPath: `${BLOG_CONTENT_DIR}/${fileName}`, content };
 }
 
 export async function publishDraft(input: PublishDraftInput): Promise<PublishDraftResult> {
   const { candidatePath, blogDir, runtimeSha } = input;
   const rendered = renderPublishContent(candidatePath, runtimeSha);
 
-  // renderPublishContent 只回 repo-relative 路徑;本地寫檔要把
-  // blogDir 前綴拼上,並用 resolve 防 path-traversal 脫逃。
-  const targetPath = resolve(blogDir, rendered.repoRelPath.slice("blog/".length));
+  // renderPublishContent 回 repo-relative (開頭是 "blog/...");本地寫檔
+  // 要剝掉前綴 "blog/" ( blogDir 已指到 repo 內的 blog 子目錄)。用常數
+  // 長度而非魔術 5,避免前綴未來變動時 silently 切錯。
+  const prefix = "blog/";
+  if (!rendered.repoRelPath.startsWith(prefix)) {
+    throw new PublishError(`internal: repoRelPath missing expected prefix: ${rendered.repoRelPath}`);
+  }
+  const targetPath = resolve(blogDir, rendered.repoRelPath.slice(prefix.length));
   const allowedRoot = resolve(blogDir);
   const withSep = allowedRoot.endsWith(sep) ? allowedRoot : allowedRoot + sep;
   if (!(targetPath === allowedRoot || targetPath.startsWith(withSep))) {

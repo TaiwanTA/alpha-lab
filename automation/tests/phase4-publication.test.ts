@@ -53,8 +53,12 @@ describe("publication claim state machine", () => {
     // PUT 只到 main,不開分支不開 PR
     expect(GHPUB).toMatch(/branch: "main"/);
     expect(GHPUB).not.toMatch(/\/pulls/);
+    // PUT 帶 expectedStatus 包含 422,作為 race condition idempotent retry signal
+    expect(GHPUB).toMatch(/expectedStatus: \[200, 201, 422\]/);
+    // 每個 GitHub API request 都有 AbortController hard timeout,不靠 DAG 兜底
+    expect(GHPUB).toMatch(/AbortController/);
+    expect(GHPUB).toMatch(/REQUEST_TIMEOUT_MS/);
   });
-
   test("post-publish failure releases claim, not leaves it in transient state", () => {
     // publish_via_api 失敗時 failure handler 必須 --release-claim,
     // 否則下次 claimNextUnpublished 拿不到這個 claimed row (因為已 insert 過)
