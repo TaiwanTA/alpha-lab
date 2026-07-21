@@ -1,0 +1,26 @@
+# signal-classify DAG — 批次 LLM 分類:未分類 items → signals
+# 每 2 小時執行。查未分類 items,餵給 MiniMax-M3,
+# 建立/關聯 signals。無未分類 items 時 exit 0 (no-op)。
+
+schedule: "0 */2 * * *"
+timeout_sec: 900
+type: graph
+
+shell: ["bash", "-e"]
+env:
+  - DATABASE_URL=${DATABASE_URL}
+  - MINIMAX_API_KEY=${MINIMAX_API_KEY}
+
+steps:
+  - id: classify
+    working_dir: /opt/alpha-lab/automation
+    run: |
+      set -euo pipefail
+      bun run commands/signal-classify.ts
+    env:
+      - DATABASE_URL=${env.DATABASE_URL}
+      - MINIMAX_API_KEY=${env.MINIMAX_API_KEY}
+    retry_policy:
+      limit: 2
+      interval_sec: 120
+      exit_code: [1]
