@@ -7,15 +7,15 @@
 // resolves each enabled X handle to a numeric user id, walks the
 // timeline from `source_checkpoints.newest_post_id` (if any) until
 // X's opaque `meta.next_token` is exhausted, and persists every
-// tweet into `signal_events` together with the X post URL.
+// tweet into `items` together with the X post URL.
 //
 // Each source is committed inside its own Postgres transaction:
-// every `INSERT INTO signal_events` and the
+// every `INSERT INTO items` and the
 // `UPDATE source_checkpoints SET newest_post_id = …` happen in
 // one statement group, so a crash mid-source can never advance
 // the checkpoint past un-inserted rows. Duplicates are absorbed
 // by the UNIQUE(investor, source_url, published_at, content_hash)
-// constraint — Task 1's EventRecord.insert path silently ignores
+// constraint — Task 1's ItemRecord.insert path silently ignores
 // the conflict by relying on the SQL to no-op on a re-run.
 //
 // Exit discipline mirrors `migrate-phase4.ts`: throw on any
@@ -128,7 +128,7 @@ export async function commitSourceBatch(
   for (const tweet of events) {
     const contentHash = await sha256Utf8(tweet.text);
     const rows = await tx<{ id: string }[]>`
-      INSERT INTO signal_events ${tx({
+      INSERT INTO items ${tx({
         id: crypto.randomUUID(),
         source_key: source.key,
         investor: source.investor,

@@ -1,0 +1,26 @@
+# signal-manage DAG — 每日優先權 + 封存管理
+# 06:00 UTC 執行,在 research (07:00) 之前。
+# 檢視 signal 活動,變更優先權,封存已結束的 signals。
+
+schedule: "0 6 * * *"
+timeout_sec: 600
+type: graph
+
+shell: ["bash", "-e"]
+env:
+  - DATABASE_URL=${DATABASE_URL}
+  - MINIMAX_API_KEY=${MINIMAX_API_KEY}
+
+steps:
+  - id: manage
+    working_dir: /opt/alpha-lab/automation
+    run: |
+      set -euo pipefail
+      bun run commands/signal-manage.ts
+    env:
+      - DATABASE_URL=${env.DATABASE_URL}
+      - MINIMAX_API_KEY=${env.MINIMAX_API_KEY}
+    retry_policy:
+      limit: 2
+      interval_sec: 120
+      exit_code: [1]

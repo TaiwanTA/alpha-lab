@@ -13,7 +13,6 @@ import type {
 } from "./toolkit.ts";
 import {
   normalizeCandidateMarkdown,
-  requireDirection,
   requireNumber,
   requireObject,
   requireString,
@@ -22,12 +21,12 @@ import {
 
 const RecordResearchParameters = Type.Object({
   thesis: Type.String({ minLength: 1 }),
-  ticker: Type.String({ minLength: 1 }),
-  direction: Type.Union([Type.Literal("long"), Type.Literal("short")]),
+  ticker: Type.Optional(Type.String({ minLength: 1 })),
+  direction: Type.Optional(Type.Union([Type.Literal("long"), Type.Literal("short")])),
   confidence: Type.Number(),
   rationale: Type.String({ minLength: 1 }),
   sourceCitations: Type.Array(Type.String({ minLength: 1 }), { minItems: 1 }),
-  candidateMarkdown: Type.String({ minLength: 1 }),
+  candidateMarkdown: Type.Optional(Type.String({ minLength: 1 })),
 });
 
 export function createRecordResearchTool(
@@ -51,13 +50,22 @@ export function createRecordResearchTool(
       }
       const obj = requireObject(params, "record_research");
       const thesis = requireString(obj, "thesis", "record_research");
-      const ticker = requireString(obj, "ticker", "record_research");
-      if (!/^[A-Z0-9.\-]{1,16}$/.test(ticker)) {
+      const ticker = typeof obj.ticker === "string" ? obj.ticker : null;
+      if (ticker !== null && !/^[A-Z0-9.\-]{1,16}$/.test(ticker)) {
         throw new Error(
           `record_research: ticker must match /^[A-Z0-9.\\-]{1,16}$/ (uppercase letters, digits, dot, dash)`,
         );
       }
-      const direction = requireDirection(obj, "direction", "record_research");
+      const directionKey = obj.direction;
+      let direction: "long" | "short" | null = null;
+      if (directionKey !== undefined && directionKey !== null) {
+        if (directionKey !== "long" && directionKey !== "short") {
+          throw new Error(
+            `record_research: direction must be "long" or "short", got ${String(directionKey)}`,
+          );
+        }
+        direction = directionKey;
+      }
       const confidence = requireNumber(obj, "confidence", "record_research");
       if (!Number.isFinite(confidence)) {
         throw new Error(
@@ -87,10 +95,9 @@ export function createRecordResearchTool(
           );
         }
       }
-      const candidateMarkdown = normalizeCandidateMarkdown(
-        requireString(obj, "candidateMarkdown", "record_research"),
-        sourceCitations[0]!,
-      );
+      const candidateMarkdown = typeof obj.candidateMarkdown === "string"
+        ? normalizeCandidateMarkdown(obj.candidateMarkdown, sourceCitations[0]!)
+        : null;
       const input: RecordResearchInput = {
         eventId: ctx.eventId,
         thesis,

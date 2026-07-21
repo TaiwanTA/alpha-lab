@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
 import {
-  EventRecord,
+  ItemRecord,
   LedgerDb,
   PaperBet,
   ResearchRun,
@@ -11,7 +11,7 @@ import {
   mapBetOutcomeRow,
   mapPaperBetRow,
   mapResearchRunRow,
-  mapSignalEventRow,
+  mapItemRow,
 } from "../lib/db.ts";
 
 // Resolve a path anchored to THIS test file's directory so the source
@@ -44,7 +44,7 @@ describe("LedgerDb aggregate", () => {
     expect(LedgerDb.db).toBeDefined();
     expect(typeof LedgerDb.closeDb).toBe("function");
     expect(typeof LedgerDb.applyMigration).toBe("function");
-    expect(LedgerDb.EventRecord).toBe(EventRecord);
+    expect(LedgerDb.ItemRecord).toBe(ItemRecord);
     expect(LedgerDb.ResearchRun).toBe(ResearchRun);
     expect(LedgerDb.PaperBet).toBe(PaperBet);
     expect(LedgerDb.BetOutcome).toBe(BetOutcome);
@@ -87,24 +87,25 @@ describe("atomic claim SQL", () => {
     );
   });
 
-  test("EventRecord.claimNextActive uses UPDATE ... RETURNING with CTE + SKIP LOCKED", () => {
-    // The CTE sits before the UPDATE — the regex anchors on the method
-    // opener and the three required clauses, regardless of their order.
+  test("SignalRecord.claimNextUnclassifiedItems selects items pending classification", () => {
+    // signal-layer 將 signal_events 改名為 items 並移除 status 欄位；
+    // 改以 classified_at IS NULL 作為「待分類」佇列。此正規表示式
+    // 錨定方法簽名與 WHERE classified_at IS NULL 子句。
     expect(source).toMatch(
-      /async\s+claimNextActive\s*\(\s*\)\s*:\s*Promise<SignalEventRow\s*\|\s*null>\s*\{[\s\S]*?FOR\s+UPDATE\s+SKIP\s+LOCKED[\s\S]*?UPDATE\s+signal_events\s+SET\s+status\s*=\s*'processing'[\s\S]*?RETURNING/,
+      /async\s+claimNextUnclassifiedItems\s*\([^)]*\)\s*:\s*Promise<ItemRow\[\]>\s*\{[\s\S]*?FROM\s+items[\s\S]*?WHERE\s+classified_at\s+IS\s+NULL/,
     );
   });
 
-  test("EventRecord.claimNextActive excludes events with an active (accepted or processing) research_runs row", () => {
-    // The CTE must filter out events that already have a research_runs
-    // row in `accepted` OR `processing` — accepting only `accepted`
-    // would let a worker re-claim an event whose research is in flight
-    // (accepted-derived `processing` state owned by the next-stage
-    // claimNextPending worker). The regex anchors on the NOT EXISTS
-    // subquery and the IN-list covering both statuses.
-    expect(source).toMatch(
-      /NOT\s+EXISTS\s*\(\s*SELECT\s+1\s*FROM\s+research_runs\s+rr[\s\S]*?rr\.event_id\s*=\s*signal_events\.id[\s\S]*?rr\.status\s+IN\s*\(\s*'accepted',\s*'processing'\s*\)/,
+  test("research-signals CLI atomically claims via tryClaimForResearch (ON CONFLICT)", () => {
+    // 舊的 research-next-event.ts 已被 research-signals.ts 取代；active-run
+    // 守備由 tryClaimForResearch 的 ON CONFLICT DO NOTHING 原子性保護,
+    // 不再逐訊號呼叫 getTimeline 判斷。
+    const cliSource = readFileSync(
+      join(HERE, "..", "commands", "research-signals.ts"),
+      "utf8",
     );
+    expect(cliSource).toMatch(/tryClaimForResearch/);
+    expect(cliSource).toMatch(/releaseFailedClaim/);
   });
 
   test("ResearchRun.claimNextPending uses UPDATE ... RETURNING with CTE + SKIP LOCKED", () => {
@@ -113,10 +114,10 @@ describe("atomic claim SQL", () => {
     );
   });
 
-  test("release methods restore 'active' / 'accepted' from 'processing'", () => {
-    expect(source).toMatch(
-      /async\s+releaseToActive[\s\S]*?SET\s+status\s*=\s*'active'[\s\S]*?status\s*=\s*'processing'/,
-    );
+  test("releaseToAccepted restores 'accepted' from 'processing'", () => {
+    // items 已無 status 欄位，故 releaseToActive 不再存在；僅保留
+    // ResearchRun.releaseToAccepted 將 processing 還原為 accepted。
+    expect(source).not.toMatch(/releaseToActive/);
     expect(source).toMatch(
       /async\s+releaseToAccepted[\s\S]*?SET\s+status\s*=\s*'accepted'[\s\S]*?status\s*=\s*'processing'/,
     );
@@ -136,7 +137,7 @@ describe("atomic claim SQL", () => {
 // ---------------------------------------------------------------------------
 
 describe("row mappers cast numeric strings to JS numbers", () => {
-  test("mapSignalEventRow preserves numeric-free fields and defaults payload", () => {
+  test("mapItemRow preserves fields and defaults payload/classification", () => {
     const raw = {
       id: "11111111-1111-1111-1111-111111111111",
       source_key: "x_profile:alice",
@@ -148,14 +149,15 @@ describe("row mappers cast numeric strings to JS numbers", () => {
       content_hash: "h",
       raw_content: "r",
       payload: { foo: 1 },
-      status: "processing",
-      supersedes_event_id: null,
+      classified_at: null,
+      classification_result: null,
     };
-    const mapped = mapSignalEventRow(raw);
+    const mapped = mapItemRow(raw);
     expect(mapped.id).toBe(raw.id);
     expect(mapped.payload).toEqual({ foo: 1 });
-    expect(mapped.status).toBe("processing");
-    expect(mapped.supersedes_event_id).toBeNull();
+    expect(mapped.signal_type).toBe("public_event");
+    expect(mapped.classified_at).toBeNull();
+    expect(mapped.classification_result).toBeNull();
   });
 
   test("mapResearchRunRow casts confidence from string to number", () => {
@@ -314,35 +316,37 @@ describe("research_runs accepted-derived processing blocks reactivation", () => 
     );
   });
 
-  test("ResearchRun.hasActiveRunForEvent predicate covers both accepted and processing", () => {
-    // Renamed from `hasAcceptedRunForEvent`; the SQL must filter on
-    // `status IN ('accepted', 'processing')` so a processing run
-    // counts as an active run during the claim/release guard.
+  test("ResearchRun.hasActiveRunForSignal predicate covers both accepted and processing", () => {
+    // signal-layer 將 event_id 改名為 signal_id，方法隨之改名為
+    // hasActiveRunForSignal；SQL 必須以 signal_id 篩選且涵蓋
+    // accepted 與 processing，processing 期間的 run 才算活躍。
     expect(source).toMatch(
-      /async\s+hasActiveRunForEvent\s*\(\s*eventId:\s*string\s*\)\s*:\s*Promise<boolean>\s*\{[\s\S]*?WHERE\s+event_id\s*=\s*\$\{eventId\}[\s\S]*?status\s+IN\s*\(\s*'accepted',\s*'processing'\s*\)/,
+      /async\s+hasActiveRunForSignal\s*\(\s*signalId:\s*string\s*\)\s*:\s*Promise<boolean>\s*\{[\s\S]*?WHERE\s+signal_id\s*=\s*\$\{signalId\}[\s\S]*?status\s+IN\s*\(\s*'accepted',\s*'processing'\s*\)/,
     );
-    // The old accepted-only name is gone — no alias left behind.
+    // 舊名不得殘留。
     expect(source).not.toMatch(/hasAcceptedRunForEvent/);
+    expect(source).not.toMatch(/hasActiveRunForEvent/);
   });
 
-  test("research-next-event calls hasActiveRunForEvent (not the old name)", () => {
-    // The CLI's release path is the only call site; this confirms
-    // it tracks the rename and the broadened predicate.
+  test("research-signals CLI atomically claims signals via tryClaimForResearch", () => {
+    // research-next-event.ts 已被 research-signals.ts 取代；active-run
+    // 守備改由 tryClaimForResearch 的 ON CONFLICT DO NOTHING 原子性保護。
     const cliSource = readFileSync(
-      join(HERE, "..", "commands", "research-next-event.ts"),
+      join(HERE, "..", "commands", "research-signals.ts"),
       "utf8",
     );
-    expect(cliSource).toMatch(/hasActiveRunForEvent/);
+    expect(cliSource).toMatch(/tryClaimForResearch/);
+    expect(cliSource).toMatch(/releaseFailedClaim/);
     expect(cliSource).not.toMatch(/hasAcceptedRunForEvent/);
+    expect(cliSource).not.toMatch(/hasActiveRunForEvent/);
   });
 
-  test("claimNextActive CTE NOT EXISTS covers both accepted and processing", () => {
-    // Defence in depth: the CTE must skip events whose run is
-    // already accepted OR in the accepted-derived processing
-    // state, so a parallel claimNextActive cannot reactivate an
-    // event whose research is in flight.
+  test("claimNextUnpublished CTE filters out runs with an existing publication claim", () => {
+    // signal-layer 將活躍-run 守備從 claimNextActive 的 NOT EXISTS 移至
+    // claimNextUnpublished 的 CTE：跳過已有 research_publications 記錄的
+    // run，避免重複發佈；recoverable 子句處理租約逾時回收。
     expect(source).toMatch(
-      /NOT\s+EXISTS\s*\(\s*SELECT\s+1\s*FROM\s+research_runs\s+rr[\s\S]*?rr\.status\s+IN\s*\(\s*'accepted',\s*'processing'\s*\)/,
+      /async\s+claimNextUnpublished[\s\S]*?NOT\s+EXISTS\s*\(\s*SELECT\s+1\s+FROM\s+research_publications\s+rp[\s\S]*?WHERE\s+rp\.research_run_id\s*=\s*rr\.id[\s\S]*?FOR\s+UPDATE\s+OF\s+rr\s+SKIP\s+LOCKED/,
     );
   });
 });

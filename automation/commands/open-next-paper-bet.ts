@@ -13,7 +13,7 @@ export const PRICE_SOURCE = "twelve-data:1day:adjust=all";
 
 export type ClaimedQualifyingRun = Pick<
   ResearchRunRow,
-  "id" | "event_id" | "ticker" | "direction" | "confidence" | "source_citations"
+  "id" | "signal_id" | "ticker" | "direction" | "confidence" | "source_citations"
 > & { published_at: Date };
 
 export type PaperBetInsert = Omit<PaperBetRow, "id" | "opened_at" | "status">;
@@ -114,7 +114,7 @@ export async function openPaperBet(
     if (!entry) throw new Error(`no required returned session for ${ticker}`);
     const paperBetId = await deps.insertBetAndAcceptRun({
       research_run_id: run.id,
-      event_id: run.event_id,
+      signal_id: run.signal_id,
       ticker,
       direction,
       confidence,
@@ -229,19 +229,19 @@ async function claimNextQualifying(owner: string): Promise<ClaimedQualifyingRun 
       UNION ALL
       SELECT research_run_id FROM inserted_claim
     )
-    SELECT rr.id, rr.event_id, rr.ticker, rr.direction,
+    SELECT rr.id, rr.signal_id, rr.ticker, rr.direction,
            rr.confidence::text AS confidence, rr.source_citations,
            se.published_at
     FROM research_runs rr
     JOIN claimed claim ON claim.research_run_id = rr.id
-    JOIN signal_events se ON se.id = rr.event_id
+    JOIN signals se ON se.id = rr.signal_id
     LIMIT 1
   `;
   const row = rows[0] as Record<string, unknown> | undefined;
   if (!row) return null;
   return {
     id: row.id as string,
-    event_id: row.event_id as string,
+    signal_id: row.signal_id as string,
     ticker: row.ticker as string,
     direction: row.direction as ResearchDirection,
     confidence: Number(row.confidence),

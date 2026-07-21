@@ -53,12 +53,12 @@ export type RecordResearchDirection = "long" | "short";
 export interface RecordResearchInput {
   eventId: string;
   thesis: string;
-  ticker: string;
-  direction: RecordResearchDirection;
+  ticker: string | null;
+  direction: RecordResearchDirection | null;
   confidence: number;
   rationale: string;
   sourceCitations: string[];
-  candidateMarkdown: string;
+  candidateMarkdown: string | null;
 }
 
 export interface ReadEventDetails {
