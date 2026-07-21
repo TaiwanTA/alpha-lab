@@ -22,8 +22,7 @@ tags:
   - 航空與國防 ETF
 investors:
   - Bill Ackman
-tickers:
-  - ANDURIL
+tickers: []
 investmentClaim: false
 ---
 
