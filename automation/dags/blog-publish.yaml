@@ -2,7 +2,10 @@
 # 发布只推送 `publish/<DAG_RUN_ID>` 分支并创建 PR,不直接推送 `main`。
 #
 # 已验证 Dagu v2.10.7 语法:
-#   - `${env.NAME}` 是唯一能解析 process env 变量的 namespace。
+#   - DAG-level `env:` 是唯一能展開 ${NAME} (從 dagu server process env
+#     讀值) 的位置。step `env:` 區塊的 ${env.NAME} / ${NAME} 都不會展開
+#     (會被當字串字面值傳給子進程,造成 gh 401 Bad credentials,
+#     PR #69 修)。所以 step env 廢棄,只用 DAG-level env。
 #   - `output: VARNAME` 把 step 的 stdout 收成字符串变量。
 #   - `preconditions: [...]` 使用 shell condition 或值比对作为
 #     gate step;这是 diff-count gate 的实现方式。
@@ -50,6 +53,11 @@ env:
   - DATABASE_URL=${DATABASE_URL}
   - GIT_READ_TOKEN=${GIT_READ_TOKEN}
   - GH_PR_TOKEN=${GH_PR_TOKEN}
+  # gh CLI 優先讀 GH_TOKEN 做認證。DAG-level env 是唯一能展開 ${NAME}
+  # 的位置 (step env 區塊的 ${env.NAME} 在 dagu 2.10.7 不會展開,
+  # 只會被當字串字面值傳給子進程,造成 gh 401 Bad credentials,
+  # 詳見 PR #69 修復)。
+  - GH_TOKEN=${GH_PR_TOKEN}
 handler_on:
   failure:
     run: |
@@ -59,8 +67,6 @@ handler_on:
         # row survives handler execution and is finalized by the next parent run.
         bun run /opt/alpha-lab/automation/commands/publish-next-research.ts --release-claim "${params.research_run_id}" --owner "${params.claim_owner}"
       fi
-    env:
-      - DATABASE_URL=${env.DATABASE_URL}
   exit:
     run: |
       set -euo pipefail
@@ -74,9 +80,6 @@ handler_on:
 steps:
   - id: checkout
     run: bun /opt/alpha-lab/automation/commands/clone-publish.ts
-    env:
-      - GIT_READ_TOKEN=${env.GIT_READ_TOKEN}
-
   - id: record_workdir
     depends: [checkout]
     working_dir: ./workspace/publish
@@ -93,8 +96,6 @@ steps:
         --owner "${params.claim_owner}" \
         --output "${WORKDIR}/candidate.md"
       test -s "${WORKDIR}/candidate.md"
-    env:
-      - DATABASE_URL=${env.DATABASE_URL}
 
   - id: publish_draft
     depends: [materialize_candidate]
@@ -106,8 +107,6 @@ steps:
         --candidate "${WORKDIR}/candidate.md" \
         --blog-dir "${WORKDIR}/blog" \
         --runtime-sha "$RUNTIME_SHA"
-    env:
-
 
   - id: diff_gate_count
     depends: [publish_draft]
@@ -139,14 +138,18 @@ steps:
     run: |
       set -euo pipefail
       : "${GH_PR_TOKEN:?GH_PR_TOKEN 必须配置在 /etc/alpha-lab/secrets.env}"
+      # DAG-level env 已加 GH_TOKEN=${GH_PR_TOKEN},讓 gh CLI 能讀到 token。
+      # step env 區塊的 ${env.NAME} 在 dagu 2.10.7 不會展開 (會當字串字面值)。
       BRANCH="publish/${DAG_RUN_ID}"
       export GIT_SSH_COMMAND="ssh -i /var/lib/alpha-lab/dagu/.ssh/id_ed25519 -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new"
       REMOTE="git@github.com:TaiwanTA/alpha-lab.git"
       git -C "${WORKDIR}" remote set-url origin "${REMOTE}"
 
-      # 先拉取远程分支,避免重试时用 -c 创建同名本地分支失败。
-      if git -C "${WORKDIR}" fetch --depth 1 origin "${BRANCH}:${BRANCH}"; then
-        git -C "${WORKDIR}" switch "${BRANCH}"
+      # 先試切換到本地既存 BRANCH (retry 時存在),否則建新的。
+      # 原本用 git fetch ${BRANCH}:${BRANCH} 在 retry 時 fetch 已 checkout 的 branch
+      # 會 "refusing to fetch into branch checked out at" fatal,改為本地 switch。
+      if git -C "${WORKDIR}" switch "${BRANCH}" 2>/dev/null; then
+        :
       else
         git -C "${WORKDIR}" switch -c "${BRANCH}"
       fi
@@ -218,10 +221,6 @@ steps:
       fi
       printf '%s\n' "${PR_URL}"
 
-    env:
-      - DATABASE_URL=${env.DATABASE_URL}
-      - GH_PR_TOKEN=${env.GH_PR_TOKEN}
-      - GH_TOKEN=${env.GH_PR_TOKEN}
     retry_policy:
       limit: 1
       interval_sec: 30
