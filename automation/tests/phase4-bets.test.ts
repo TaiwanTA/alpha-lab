@@ -59,7 +59,7 @@ describe("paper-bet opening", () => {
     const deps: OpeningDependencies = {
       claimNextQualifying: async () => ({
         id: "run-1",
-        event_id: "event-1",
+        signal_id: "signal-1",
         ticker: "abc",
         direction: "long",
         confidence: 0.8,
@@ -80,7 +80,7 @@ describe("paper-bet opening", () => {
     expect(inserted).toEqual([
       {
         research_run_id: "run-1",
-        event_id: "event-1",
+        signal_id: "signal-1",
         ticker: "ABC",
         direction: "long",
         confidence: 0.8,
@@ -97,7 +97,7 @@ describe("paper-bet opening", () => {
     const deps: OpeningDependencies = {
       claimNextQualifying: async () => ({
         id: "run-1",
-        event_id: "event-1",
+        signal_id: "signal-1",
         ticker: "ABC",
         direction: "short",
         confidence: 0.6,
@@ -135,7 +135,7 @@ describe("paper-bet settlement", () => {
       listOpen: async () => [{
         id: "bet-1",
         research_run_id: "run-1",
-        event_id: "event-1",
+        signal_id: "signal-1",
         ticker: "ABC",
         direction: "long",
         confidence: 0.8,
@@ -161,7 +161,7 @@ describe("paper-bet settlement", () => {
       listOpen: async () => [{
         id: "bet-1",
         research_run_id: "run-1",
-        event_id: "event-1",
+        signal_id: "signal-1",
         ticker: "ABC",
         direction: "short",
         confidence: 0.8,
@@ -187,7 +187,7 @@ describe("paper-bet settlement", () => {
       listOpen: async () => [{
         id: "bet-1",
         research_run_id: "run-1",
-        event_id: "event-1",
+        signal_id: "signal-1",
         ticker: "DELISTED",
         direction: "long",
         confidence: 0.5,
@@ -215,7 +215,7 @@ describe("paper-bet settlement", () => {
       listOpen: async () => [{
         id: "bet-1",
         research_run_id: "run-1",
-        event_id: "event-1",
+        signal_id: "signal-1",
         ticker: "ABC",
         direction: "long",
         confidence: 0.5,
@@ -246,7 +246,7 @@ describe("paper-bet settlement", () => {
       {
         id: "bet-1",
         research_run_id: "run-1",
-        event_id: "event-1",
+        signal_id: "signal-1",
         ticker: "ABC",
         direction: "long",
         confidence: 0.8,
@@ -259,7 +259,7 @@ describe("paper-bet settlement", () => {
       {
         id: "bet-2",
         research_run_id: "run-2",
-        event_id: "event-2",
+        signal_id: "signal-2",
         ticker: "XYZ",
         entry_session_date: "2026-01-02",
         confidence: 0.7,
@@ -312,7 +312,7 @@ describe("paper-bet settlement", () => {
       listOpen: async () => [{
         id: "bet-1",
         research_run_id: "run-1",
-        event_id: "event-1",
+        signal_id: "signal-1",
         ticker: "ABC",
         direction: "long",
         confidence: 0.8,

@@ -71,12 +71,12 @@ function makeRuntimeOptions(
     recordResearch: (input: {
       eventId: string;
       thesis: string;
-      ticker: string;
-      direction: "long" | "short";
+      ticker: string | null;
+      direction: "long" | "short" | null;
       confidence: number;
       rationale: string;
       sourceCitations: string[];
-      candidateMarkdown: string;
+      candidateMarkdown: string | null;
     }) => Promise<{ id: string }>;
     event: ResearchEventPayload;
   }> = {},
