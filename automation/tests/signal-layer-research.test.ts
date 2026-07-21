@@ -147,3 +147,38 @@ describe("record_research Mode 2 (no alpha)", () => {
     ).rejects.toThrow(/ticker must match/);
   });
 });
+
+
+// ---------------------------------------------------------------------------
+// Task 10: buildPrompt per-signal + two-mode instruction
+// ---------------------------------------------------------------------------
+
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+
+const HERE = import.meta.dir;
+
+const RESEARCH_AGENT = readFileSync(
+  join(HERE, "..", "agents", "research.ts"),
+  "utf8",
+);
+
+describe("research.ts buildPrompt signal layer", () => {
+  test("buildPrompt accepts signal + items + timeline parameters", () => {
+    expect(RESEARCH_AGENT).toMatch(/buildPrompt/);
+    expect(RESEARCH_AGENT).toMatch(/signal.*items.*timeline|SignalRow.*ItemRow.*ResearchRunRow/);
+  });
+
+  test("prompt instructs two modes (with/without alpha)", () => {
+    expect(RESEARCH_AGENT).toMatch(/Mode 1|有可交易/);
+    expect(RESEARCH_AGENT).toMatch(/Mode 2|無可交易|不構成/);
+  });
+
+  test("prompt instructs updating signal description", () => {
+    expect(RESEARCH_AGENT).toMatch(/description.*更新|living.*description/i);
+  });
+
+  test("prompt no longer references single event", () => {
+    expect(RESEARCH_AGENT).not.toMatch(/researching one signal_event/);
+  });
+});
