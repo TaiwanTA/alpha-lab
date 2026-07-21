@@ -205,8 +205,8 @@ describe("research-signals.ts CLI", () => {
     expect(RESEARCH_CLI).toMatch(/buildPrompt\(/);
   });
 
-  test("updates signal description after research", () => {
-    expect(RESEARCH_CLI).toMatch(/updateDescription|update_signal/);
+  test("appends to signal description after research", () => {
+    expect(RESEARCH_CLI).toMatch(/appendToDescription|update_signal/);
   });
 
   test("stdout outputs run ID, logs to stderr", () => {

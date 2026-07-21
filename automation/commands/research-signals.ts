@@ -64,23 +64,20 @@ interface ClaimedSignal {
 async function claimOneSignal(
   priority: "high" | "low",
 ): Promise<ClaimedSignal | null> {
-  // 列出該優先級的所有活躍訊號，跳過已有進行中 research_run 的訊號。
-  // research_runs 的 partial unique index 確保每則訊號同時只有一筆 active run。
+  // 列出該優先級的所有活躍訊號,逐一嘗試原子性鎖定。
+  // tryClaimForResearch 插入一筆 processing research_run,
+  // 利用 partial unique index 防止併發 worker 同時認領同一 signal。
   const signals = await SignalRecord.listByPriority(priority);
 
   for (const signal of signals) {
-    const timeline = await SignalRecord.getTimeline(signal.id);
-    const hasActive = timeline.some(
-      (r) => r.status === "accepted" || r.status === "processing",
-    );
-    if (hasActive) continue;
+    const claimed = await ResearchRun.tryClaimForResearch(signal.id);
+    if (!claimed) continue;
 
-    const items = await SignalRecord.getItems(signal.id);
-    return {
-      signal,
-      items,
-      timeline,
-    };
+    const [items, timeline] = await Promise.all([
+      SignalRecord.getItems(signal.id),
+      SignalRecord.getTimeline(signal.id),
+    ]);
+    return { signal, items, timeline };
   }
 
   return null;
@@ -97,8 +94,9 @@ async function persistResearchRun(
   signal: SignalRow,
   input: RecordResearchInput,
 ): Promise<string> {
-  return ResearchRun.insert({
-    signal_id: signal.id,
+  // finalizeClaim 更新 tryClaimForResearch 建立的 processing 列,
+  // 而非插入新列(避免與 unique index 衝突)。
+  const runId = await ResearchRun.finalizeClaim(signal.id, {
     model: "MiniMax-M3",
     prompt_version: "signal-layer-v1",
     thesis: input.thesis,
@@ -111,20 +109,20 @@ async function persistResearchRun(
     published_path: null,
     status: "accepted",
   });
+  if (!runId) throw new Error("no processing research_run found for signal (race or stale claim)");
+  return runId;
 }
 
-/** 更新訊號 description — research 完成後以代理的 thesis 摘要作為
- *  living description，反映出訊號的當前狀態。 */
+/** 研究完成後附加狀態日誌到訊號 description（不覆蓋原始內容）。
+ *  使用 append 而非 overwrite,保留分類階段產生的訊號敘述。 */
 async function updateSignalDescription(
   signal: SignalRow,
   result: PiResearchRunResult,
 ): Promise<void> {
-  // 從最後一次 toolEvents 中提取 thesis 摘要；
-  // 若無法提取，使用 signal.description 作為 fallback。
-  const desc = result.errorMessage
+  const logEntry = result.errorMessage
     ? `研究失敗：${result.errorMessage.slice(0, 200)}`
     : `最近研究完成，tool_events=${result.toolEvents.length}。`;
-  await SignalRecord.updateDescription(signal.id, desc.slice(0, 500));
+  await SignalRecord.appendToDescription(signal.id, logEntry);
 }
 
 /** Render the agent's final tool transcript as plain lines. Sent to
@@ -242,6 +240,8 @@ async function main(): Promise<void> {
     }
     process.stdout.write(`${persistedRunId}\n`);
   } catch (err) {
+    // 研究失敗 — 釋放 processing claim,讓 signal 可被下次認領
+    await ResearchRun.releaseFailedClaim(claimed.signal.id);
     console.error(
       `research-signals: ${err instanceof Error ? err.message : String(err)}`,
     );

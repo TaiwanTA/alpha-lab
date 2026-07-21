@@ -26,8 +26,8 @@ describe("signal-manage.ts CLI", () => {
     expect(SCRIPT).toMatch(/archive/);
   });
 
-  test("updates description with decision reason", () => {
-    expect(SCRIPT).toMatch(/updateDescription/);
+  test("appends to description with decision reason", () => {
+    expect(SCRIPT).toMatch(/appendToDescription/);
   });
 
   test("exit 0 when no active signals", () => {

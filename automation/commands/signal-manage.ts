@@ -67,22 +67,26 @@ interface ManageResult {
 
 async function gatherActivity(signals: SignalRow[]): Promise<SignalActivity[]> {
   const since = new Date(Date.now() - RECENT_ITEM_DAYS * 86400000);
-  const activities: SignalActivity[] = [];
 
-  for (const signal of signals) {
-    const items = await SignalRecord.getItems(signal.id);
-    const timeline = await SignalRecord.getTimeline(signal.id);
-    const recentItems = items.filter((i) => i.published_at >= since);
-    const lastRun = timeline[timeline.length - 1] ?? null;
+  // 並行查詢所有 signal 的 items + timeline,避免 N+1
+  const activities = await Promise.all(
+    signals.map(async (signal) => {
+      const [items, timeline] = await Promise.all([
+        SignalRecord.getItems(signal.id),
+        SignalRecord.getTimeline(signal.id),
+      ]);
+      const recentItems = items.filter((i) => i.published_at >= since);
+      const lastRun = timeline[timeline.length - 1] ?? null;
 
-    activities.push({
-      signal,
-      recentItemCount: recentItems.length,
-      lastResearchAt: lastRun?.created_at.toISOString() ?? null,
-      lastResearchThesis: lastRun?.thesis.slice(0, 200) ?? null,
-      hasPublishedPost: timeline.some((r) => r.published_path !== null),
-    });
-  }
+      return {
+        signal,
+        recentItemCount: recentItems.length,
+        lastResearchAt: lastRun?.created_at.toISOString() ?? null,
+        lastResearchThesis: lastRun?.thesis.slice(0, 200) ?? null,
+        hasPublishedPost: timeline.some((r) => r.published_path !== null),
+      } satisfies SignalActivity;
+    }),
+  );
 
   return activities;
 }
@@ -184,7 +188,7 @@ async function applyChanges(result: ManageResult): Promise<{
 
   for (const change of result.priority_changes) {
     await SignalRecord.changePriority(change.signal_id, change.new_priority);
-    await SignalRecord.updateDescription(
+    await SignalRecord.appendToDescription(
       change.signal_id,
       `[${new Date().toISOString()}] 優先權變更: ${change.reason}`,
     );
@@ -193,7 +197,7 @@ async function applyChanges(result: ManageResult): Promise<{
 
   for (const arch of result.archives) {
     await SignalRecord.archive(arch.signal_id);
-    await SignalRecord.updateDescription(
+    await SignalRecord.appendToDescription(
       arch.signal_id,
       `[${new Date().toISOString()}] 封存: ${arch.reason}`,
     );

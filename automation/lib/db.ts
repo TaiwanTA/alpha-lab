@@ -317,6 +317,33 @@ export const ResearchRun = {
     return id;
   },
 
+  /** 將 tryClaimForResearch 建立的 processing 列更新為 accepted,
+   *  填入研究結果。 */
+  async finalizeClaim(
+    signalId: string,
+    input: Omit<ResearchRunRow, "id" | "created_at" | "signal_id">,
+  ): Promise<string | null> {
+    const rows = await db`
+      UPDATE research_runs SET
+        model = ${input.model},
+        prompt_version = ${input.prompt_version},
+        thesis = ${input.thesis},
+        ticker = ${input.ticker},
+        direction = ${input.direction},
+        confidence = ${input.confidence},
+        rationale = ${input.rationale},
+        source_citations = ${input.source_citations},
+        candidate_markdown = ${input.candidate_markdown},
+        published_path = ${input.published_path},
+        status = ${input.status}
+      WHERE signal_id = ${signalId}
+        AND status = 'processing'
+      RETURNING id
+    `;
+    const first = rows[0];
+    return first ? (first as Record<string, unknown>).id as string : null;
+  },
+
   /** Returns true when a signal already has an active research
    *  run (status IN ('accepted', 'processing')). Used by the
    *  research CLI's claim release path to decide whether the
@@ -337,6 +364,38 @@ export const ResearchRun = {
       LIMIT 1
     `;
     return rows.length > 0;
+  },
+
+  /** 嘗試原子性地鎖定 signal 供研究使用。
+   *  插入一筆 status='processing' 的 research_run,
+   *  利用 partial unique index (signal_id WHERE status IN ('accepted','processing'))
+   *  防止併發 worker 同時認領同一 signal。
+   *  回傳 true = 鎖定成功;false = 已有活躍 run。 */
+  async tryClaimForResearch(signalId: string): Promise<boolean> {
+    const id = crypto.randomUUID();
+    const rows = await db`
+      INSERT INTO research_runs (id, signal_id, model, prompt_version,
+        thesis, ticker, direction, confidence, rationale,
+        source_citations, candidate_markdown, published_path, status)
+      VALUES (
+        ${id}, ${signalId}, 'pending', 'signal-layer-v1',
+        '', null, null, 0, '',
+        '[]'::jsonb, '', null, 'processing'
+      )
+      ON CONFLICT DO NOTHING
+      RETURNING id
+    `;
+    return rows.length > 0;
+  },
+
+  /** 研究失敗時清理 processing 列,釋放 signal 供下次認領。
+   *  直接刪除,因為此列沒有研究結果。 */
+  async releaseFailedClaim(signalId: string): Promise<void> {
+    await db`
+      DELETE FROM research_runs
+      WHERE signal_id = ${signalId}
+        AND status = 'processing'
+    `;
   },
 
   async claimNextPending(): Promise<ResearchRunRow | null> {
@@ -661,6 +720,20 @@ export const SignalRecord = {
   async updateDescription(id: string, description: string): Promise<void> {
     await db`
       UPDATE signals SET description = ${description}, updated_at = now()
+      WHERE id = ${id}
+    `;
+  },
+
+  /** 附加日誌到 description 末尾,不覆蓋原始內容。截斷至 500 字元。 */
+  async appendToDescription(id: string, addition: string): Promise<void> {
+    await db`
+      UPDATE signals
+      SET description = (
+        SELECT CASE
+          WHEN description IS NULL OR description = '' THEN ${addition}
+          ELSE left(description || '\n' || ${addition}, 500)
+        END
+      ), updated_at = now()
       WHERE id = ${id}
     `;
   },

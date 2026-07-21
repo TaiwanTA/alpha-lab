@@ -96,16 +96,16 @@ describe("atomic claim SQL", () => {
     );
   });
 
-  test("research-signals CLI skips signals that already have an active run", () => {
+  test("research-signals CLI atomically claims via tryClaimForResearch (ON CONFLICT)", () => {
     // 舊的 research-next-event.ts 已被 research-signals.ts 取代；active-run
-    // 守備不再透過 claim CTE 的 NOT EXISTS，而是 CLI 逐訊號呼叫
-    // SignalRecord.getTimeline 後以 timeline.some(...) 判斷 accepted/processing。
+    // 守備由 tryClaimForResearch 的 ON CONFLICT DO NOTHING 原子性保護,
+    // 不再逐訊號呼叫 getTimeline 判斷。
     const cliSource = readFileSync(
       join(HERE, "..", "commands", "research-signals.ts"),
       "utf8",
     );
-    expect(cliSource).toMatch(/getTimeline/);
-    expect(cliSource).toMatch(/hasActive/);
+    expect(cliSource).toMatch(/tryClaimForResearch/);
+    expect(cliSource).toMatch(/releaseFailedClaim/);
   });
 
   test("ResearchRun.claimNextPending uses UPDATE ... RETURNING with CTE + SKIP LOCKED", () => {
@@ -328,15 +328,15 @@ describe("research_runs accepted-derived processing blocks reactivation", () => 
     expect(source).not.toMatch(/hasActiveRunForEvent/);
   });
 
-  test("research-signals CLI skips signals with an active run via getTimeline", () => {
+  test("research-signals CLI atomically claims signals via tryClaimForResearch", () => {
     // research-next-event.ts 已被 research-signals.ts 取代；active-run
-    // 守備改由 CLI 逐訊號呼叫 getTimeline 後以 timeline.some(...) 判斷。
+    // 守備改由 tryClaimForResearch 的 ON CONFLICT DO NOTHING 原子性保護。
     const cliSource = readFileSync(
       join(HERE, "..", "commands", "research-signals.ts"),
       "utf8",
     );
-    expect(cliSource).toMatch(/getTimeline/);
-    expect(cliSource).toMatch(/hasActive/);
+    expect(cliSource).toMatch(/tryClaimForResearch/);
+    expect(cliSource).toMatch(/releaseFailedClaim/);
     expect(cliSource).not.toMatch(/hasAcceptedRunForEvent/);
     expect(cliSource).not.toMatch(/hasActiveRunForEvent/);
   });
