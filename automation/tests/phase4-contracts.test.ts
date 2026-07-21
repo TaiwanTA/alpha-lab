@@ -154,3 +154,22 @@ describe("selectSettlementSession", () => {
     expect(selectSettlementSession([], "2026-01-02")).toBeNull();
   });
 });
+
+// ---------------------------------------------------------------------------
+// signal layer — contracts should not reference event_id
+// ---------------------------------------------------------------------------
+
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+
+const HERE = dirname(new URL(import.meta.url).pathname);
+const CONTRACTS_SRC = readFileSync(
+  join(HERE, "..", "lib", "contracts.ts"),
+  "utf8",
+);
+
+describe("contracts.ts signal layer", () => {
+  test("does not reference event_id (renamed to signal_id)", () => {
+    expect(CONTRACTS_SRC).not.toMatch(/event_id/);
+  });
+});
