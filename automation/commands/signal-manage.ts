@@ -189,7 +189,9 @@ async function applyChanges(result: ManageResult): Promise<{
   let archived = 0;
 
   for (const change of result.priority_changes) {
-    await SignalRecord.changePriority(change.signal_id, change.new_priority);
+    // LLM 可能回傳 'medium' 等不合法值;CHECK constraint 只允許 'high'|'low'
+    const newPriority = change.new_priority === "high" ? "high" : "low";
+    await SignalRecord.changePriority(change.signal_id, newPriority);
     await SignalRecord.appendToDescription(
       change.signal_id,
       `[${new Date().toISOString()}] 優先權變更: ${change.reason}`,

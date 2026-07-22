@@ -164,10 +164,12 @@ async function applyClassification(
   // 建立新 signals，收集 title→id 映射供後續 linkItem 使用
   const newSignalIds = new Map<string, string>();
   for (const ns of result.new_signals) {
+    // LLM 可能回傳 'medium' 等不合法值;CHECK constraint 只允許 'high'|'low'
+    const priority = ns.priority === "high" ? "high" : "low";
     const id = await SignalRecord.insert({
       title: ns.title,
       description: ns.description,
-      priority: ns.priority,
+      priority,
       archived_at: null,
     });
     newSignalIds.set(ns.title, id);
