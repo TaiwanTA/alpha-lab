@@ -35,7 +35,7 @@ export type PublishDraftResult = {
 };
 
 export type RenderedContent = {
-  /** Relative to repo root: `blog/src/content/blog/${date}-${slug}.md` */
+  /** Relative to repo root: `blog/src/content/blog/${date}-${slug}.mdx` */
   repoRelPath: string;
   /** Final Markdown bytes (frontmatter forced to `status: unverified` + runtime SHA comment) */
   content: string;
@@ -173,10 +173,10 @@ function deriveFileName(date: string, title: string): string {
   if (slug.includes("..") || slug.includes("/") || slug.includes("\\")) {
     throw new PublishError(`title slug contains path-traversal characters: ${slug}`);
   }
-  // 只回檔名 (${date}-${slug}.md);repo-relative 前綴由呼叫者用
+  // 只回檔名 (${date}-${slug}.mdx);repo-relative 前綴由呼叫者用
   // BLOG_CONTENT_DIR 拼。避免本地模式 (publishDraft 在 blogDir 下)
   // 與 API 模式 (github-publish.ts 用 repo-relative) 各自硬編常數。
-  return `${date}-${slug}.md`;
+  return `${date}-${slug}.mdx`;
 }
 
 function appendRuntimeSha(body: string, runtimeSha: string): string {
