@@ -40,41 +40,84 @@ const containerId = `echarts-${Math.random().toString(36).slice(2, 10)}`;
     border-radius: 8px;
     overflow: hidden;
   }
-  :global([data-theme="dark"]) .echarts-container {
-    --border-color: #333;
+  @media (prefers-color-scheme: dark) {
+    .echarts-container {
+      --border-color: #333;
+    }
   }
 </style>
 
 <script>
-  // 監聽 DOMContentLoaded 後初始化所有 ECharts 容器。
-  // echarts 以動態 import 載入，避免在沒有圖表的頁面增加 bundle。
+  // echarts 以動態 import 載入,避免在沒有圖表的頁面增加 bundle。
+  // 每個圖表 instance 配對一個 ResizeObserver,容器尺寸變更時自動 resize。
+  // OS 暗色模式切換時,重建圖表以套用正確主題。
+
+  interface ChartEntry {
+    chart: import('echarts').ECharts;
+    observer: ResizeObserver;
+    el: HTMLElement;
+    option: Record<string, unknown>;
+  }
+
+  const entries: ChartEntry[] = [];
+
+  function currentTheme(): 'dark' | undefined {
+    return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : undefined;
+  }
+
   async function initECharts() {
     const containers = document.querySelectorAll<HTMLElement>('[data-echarts]');
     if (containers.length === 0) return;
 
+    // 已初始化過的容器跳過(Astro view transition 重入)
+    const newContainers = Array.from(containers).filter(
+      (el) => !entries.some((e) => e.el === el),
+    );
+    if (newContainers.length === 0) return;
+
     const echarts = await import('echarts');
 
-    // 偵測暗色模式
-    const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-
-    containers.forEach((el) => {
+    for (const el of newContainers) {
       const raw = el.getAttribute('data-option');
-      if (!raw) return;
+      if (!raw) continue;
       const option = JSON.parse(raw) as Record<string, unknown>;
 
-      // 自動套用暗色主題
-      const theme = prefersDark ? 'dark' : undefined;
+      const chart = echarts.init(el, currentTheme());
+      chart.setOption(option);
 
-      echarts.init(el, theme).setOption(option);
+      const observer = new ResizeObserver(() => chart.resize());
+      observer.observe(el);
+
+      entries.push({ chart, observer, el, option });
+    }
+
+    // 監聽 OS 暗色模式切換,重建所有圖表以套用新主題
+    window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
+      const theme = currentTheme();
+      for (const entry of entries) {
+        entry.chart.dispose();
+        entry.chart = echarts.init(entry.el, theme);
+        entry.chart.setOption(entry.option);
+      }
     });
   }
 
-  // 只在 client 端執行
+  // Astro view transition 生命週期:舊頁面的圖表需 dispose 清理
+  document.addEventListener('astro:before-swap', () => {
+    for (const entry of entries) {
+      entry.observer.disconnect();
+      entry.chart.dispose();
+    }
+    entries.length = 0;
+  });
+
   if (typeof window !== 'undefined') {
     if (document.readyState === 'loading') {
       document.addEventListener('DOMContentLoaded', initECharts);
     } else {
       initECharts();
     }
+    // Astro view transition 後重新初始化
+    document.addEventListener('astro:page-load', initECharts);
   }
 </script>
