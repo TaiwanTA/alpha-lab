@@ -59,7 +59,7 @@ steps:
         exit 0
       fi
       if [ "$PUBLICATION_STATUS" != "pushed" ] && [ "$PUBLICATION_STATUS" != "published" ]; then
-        dagu start /var/lib/alpha-lab/dagu/dags/blog-publish.yaml -- \
+        dagu start /opt/alpha-lab/automation/dags/blog-publish.yaml -- \
           "research_run_id=$RESEARCH_RUN_ID" \
           "claim_owner=$CLAIM_OWNER" \
           "runtime_sha="

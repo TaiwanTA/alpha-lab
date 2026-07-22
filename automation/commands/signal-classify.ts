@@ -104,12 +104,11 @@ function buildClassifyPrompt(
     "3. Is it low-signal noise that should be rejected? (e.g. one-word reactions)",
     "",
     'Output valid JSON with this exact shape:',
-    '{"classifications":[{"item_id":"...","signal_assignments":[{"signal_id":"existing-uuid-or-new","relation":"primary|supporting|context"}]}],"new_signals":[{"title":"...","description":"...","priority":"high|low"}],"rejections":[{"item_id":"...","reason":"..."}]}',
+    '{"classifications":[{"item_id":"...","signal_assignments":[{"signal_id":"existing-uuid-or-new:0","relation":"primary|supporting|context"}]}],"new_signals":[{"title":"...","description":"...","priority":"high|low"}],"rejections":[{"item_id":"...","reason":"..."}]}',
     "",
     "Rules:",
     "- every item_id in the input must appear exactly once across classifications+rejections",
-    "- signal_id 'new' means a new signal should be created (provide details in new_signals)",
-    "- if assigning to 'new', the new_signal must exist in new_signals array",
+    "- signal_id must be an existing signal UUID, or 'new:<index>' where <index> is the 0-based index into the new_signals array",
     "- reject items that are single-word reactions, pure links, or noise with no signal value",
     "- description must be <=500 characters",
     "- write descriptions in Traditional Chinese (繁體中文)",
@@ -161,9 +160,11 @@ async function applyClassification(
   result: ClassificationResult,
   items: ItemRow[],
 ): Promise<{ signals_created: number; items_linked: number; items_rejected: number }> {
-  // 建立新 signals，收集 title→id 映射供後續 linkItem 使用
-  const newSignalIds = new Map<string, string>();
-  for (const ns of result.new_signals) {
+  // 建立新 signals，收集 index→id 映射供後續 linkItem 使用
+  // new_signals 陣列以 0-based index 為 key
+  const newSignalIds = new Map<number, string>();
+  for (let i = 0; i < result.new_signals.length; i++) {
+    const ns = result.new_signals[i];
     // LLM 可能回傳 'medium' 等不合法值;CHECK constraint 只允許 'high'|'low'
     const priority = ns.priority === "high" ? "high" : "low";
     const id = await SignalRecord.insert({
@@ -172,7 +173,7 @@ async function applyClassification(
       priority,
       archived_at: null,
     });
-    newSignalIds.set(ns.title, id);
+    newSignalIds.set(i, id);
   }
 
   let itemsLinked = 0;
@@ -182,11 +183,15 @@ async function applyClassification(
   for (const classification of result.classifications) {
     for (const assignment of classification.signal_assignments) {
       let signalId = assignment.signal_id;
-      if (signalId === "new") {
-        // LLM 應該在 new_signals 裡提供詳情;此處跳過無法解析的
-        // 'new' 指派,這個 item 會在最後被標記為 unmatched。
-        continue;
+      // LLM 用 "new:<index>" 指向 new_signals 陣列的 0-based index
+      if (signalId.startsWith("new:")) {
+        const idx = Number(signalId.slice(4));
+        const resolved = newSignalIds.get(idx);
+        if (!resolved) continue;
+        signalId = resolved;
       }
+      // 相容舊格式 "new"（無 index）— 跳過,留給 unmatched
+      if (signalId === "new") continue;
       await SignalRecord.linkItem(
         signalId,
         classification.item_id,
