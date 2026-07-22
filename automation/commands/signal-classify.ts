@@ -137,10 +137,12 @@ async function runClassification(
   const prompt = buildClassifyPrompt(items, signals);
   const provider = minimaxProvider();
   const model = getBuiltinModel("minimax", "MiniMax-M3");
+  const apiKey = process.env.MINIMAX_API_KEY;
+  if (!apiKey) throw new Error("signal-classify: MINIMAX_API_KEY is not set");
   const stream = provider.streamSimple(
     model,
     { messages: [{ role: "user", content: prompt, timestamp: Date.now() }] },
-    { temperature: LLM_TEMPERATURE, maxTokens: LLM_MAX_TOKENS },
+    { temperature: LLM_TEMPERATURE, maxTokens: LLM_MAX_TOKENS, apiKey },
   );
   const message = await stream.result();
   const text = extractText(message.content);

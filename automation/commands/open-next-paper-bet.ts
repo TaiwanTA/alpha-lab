@@ -231,10 +231,9 @@ async function claimNextQualifying(owner: string): Promise<ClaimedQualifyingRun 
     )
     SELECT rr.id, rr.signal_id, rr.ticker, rr.direction,
            rr.confidence::text AS confidence, rr.source_citations,
-           se.published_at
+           rr.created_at AS published_at
     FROM research_runs rr
     JOIN claimed claim ON claim.research_run_id = rr.id
-    JOIN signals se ON se.id = rr.signal_id
     LIMIT 1
   `;
   const row = rows[0] as Record<string, unknown> | undefined;
