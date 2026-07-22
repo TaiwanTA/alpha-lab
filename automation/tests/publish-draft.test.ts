@@ -49,7 +49,7 @@ describe("publishDraft", () => {
     const result = await publishDraft({ candidatePath, blogDir, runtimeSha: "deadbeef" });
     expect(result.action).toBe("created");
     const expectedSlug = "sample-title";
-    const targetPath = join(blogDir, "src/content/blog/2026-07-13-sample-title.md");
+    const targetPath = join(blogDir, "src/content/blog/2026-07-13-sample-title.mdx");
     expect(result.targetPath).toBe(targetPath);
     expect(existsSync(targetPath)).toBe(true);
     const written = readFileSync(targetPath, "utf8");

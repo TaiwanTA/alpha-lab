@@ -3,6 +3,7 @@ import type { Post } from '../../lib/posts';
 import { render } from 'astro:content';
 import readingTime from 'reading-time';
 import Layout from '../../layouts/Layout.astro';
+import ECharts from '../../components/ECharts.astro';
 import { formatDate, getPublishedPosts, STATUS_LABELS } from '../../lib/posts';
 import { buildToc } from '../../lib/toc';
 
@@ -75,8 +76,7 @@ const showLastmod = diffDays > 7;
             <p>這篇文章的具體事實來自 LLM 內建知識,未經原始來源驗證。作為研究示範看風格就好,不應作為投資依據。</p>
           </aside>
         )}
-
-        <Content />
+        <Content components={{ ECharts }} />
 
         {post.data.investmentClaim && (
           <aside class="disclosure">

@@ -1,0 +1,80 @@
+---
+// 在 MDX 文章中嵌入 ECharts 圖表。
+// 用法（MDX）:
+//   <ECharts option={{
+//     xAxis: { type: "category", data: ["Mon","Tue","Wed"] },
+//     yAxis: { type: "value" },
+//     series: [{ data: [120, 200, 150], type: "bar" }],
+//   }} />
+//
+// option 屬性接受完整的 ECharts option 物件。
+// 圖表以 lazy-loaded echarts 套件在 client 端渲染。
+
+interface Props {
+  option: Record<string, unknown>;
+  /** 圖表容器高度（CSS 值，預設 360px） */
+  height?: string;
+  /** 圖表類別，用途為 CSS class hook */
+  class?: string;
+}
+
+const { option, height = "360px", class: className = "" } = Astro.props;
+const optionJson = JSON.stringify(option);
+const containerId = `echarts-${Math.random().toString(36).slice(2, 10)}`;
+---
+
+<div
+  id={containerId}
+  class={`echarts-container ${className}`}
+  style={`width:100%;height:${height};`}
+  data-option={optionJson}
+  data-echarts
+>
+  <noscript>此圖表需要 JavaScript 才能顯示。</noscript>
+</div>
+
+<style>
+  .echarts-container {
+    margin: 1.5rem 0;
+    border: 1px solid var(--border-color, #e0e0e0);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  :global([data-theme="dark"]) .echarts-container {
+    --border-color: #333;
+  }
+</style>
+
+<script>
+  // 監聽 DOMContentLoaded 後初始化所有 ECharts 容器。
+  // echarts 以動態 import 載入，避免在沒有圖表的頁面增加 bundle。
+  async function initECharts() {
+    const containers = document.querySelectorAll<HTMLElement>('[data-echarts]');
+    if (containers.length === 0) return;
+
+    const echarts = await import('echarts');
+
+    // 偵測暗色模式
+    const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+
+    containers.forEach((el) => {
+      const raw = el.getAttribute('data-option');
+      if (!raw) return;
+      const option = JSON.parse(raw) as Record<string, unknown>;
+
+      // 自動套用暗色主題
+      const theme = prefersDark ? 'dark' : undefined;
+
+      echarts.init(el, theme).setOption(option);
+    });
+  }
+
+  // 只在 client 端執行
+  if (typeof window !== 'undefined') {
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', initECharts);
+    } else {
+      initECharts();
+    }
+  }
+</script>
